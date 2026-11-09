@@ -5,6 +5,10 @@
 //   --gpu  headed Chrome with WebGPU on this Mac. The only mode for judging the look.
 //   --eval runs an expression in the page once the scene is ready, awaits it and prints the result,
 //          e.g. --eval "__sculptor.burst(200)" for frame times or "__sculptor.hash()" for the grid hash.
+//   --gesture  presses a key once the scene is ready: the user gesture that lets the page start its sound
+//   --until "js"  after --eval, waits (two minutes at most) for an expression to turn truthy, e.g. a slab leaving the block
+//   --sequence n [--every ms]  for motion: n pictures that far apart (120 ms if left out), written as
+//             <name>_01_<mode>.png onward before the usual last one
 // Waits for window.__sceneReady plus --frames more frames, writes <out>/<name>_<mode>.png and exits
 // non-zero if the page threw, the backend is not the one asked for, or the capture is flat.
 // Elements marked data-hud are hidden for the flatness check, so a HUD over a black canvas still fails.
@@ -30,6 +34,10 @@ const frames = Number(opt('--frames', 30))
 const settle = Number(opt('--wait', 0))
 const outDir = resolve(opt('--out', '.shots'))
 const evalCode = opt('--eval', '')
+const gesture = args.includes('--gesture')
+const until = opt('--until', '')
+const sequence = Number(opt('--sequence', 0))
+const every = Number(opt('--every', 120))
 const MIN_SPREAD = 4 // standard deviation of luma (0-255) below which a capture counts as blank
 
 const target = new URL(opt('--url', 'http://localhost:3130/'))
@@ -133,6 +141,7 @@ try {
   await fail('window.__sceneReady never became true', browser)
 }
 await page.evaluate(() => document.querySelectorAll('#nuxt-devtools-container, nuxt-devtools-anchor, [id^="nuxt-devtools"]').forEach(e => e.remove()))
+if (gesture) await page.keyboard.press('Shift')
 
 if (evalCode) {
   try {
@@ -140,6 +149,24 @@ if (evalCode) {
   } catch (e) {
     await fail(`--eval threw: ${e.message}`, browser)
   }
+}
+
+if (until) {
+  try {
+    await page.waitForFunction(until, null, { timeout: 120000, polling: 'raf' })
+  } catch {
+    await fail(`--until never came true: ${until}`, browser)
+  }
+}
+if (sequence > 0) {
+  mkdirSync(outDir, { recursive: true })
+  const t0 = Date.now()
+  for (let i = 1; i <= sequence; i++) {
+    writeFileSync(resolve(outDir, `${name}_${String(i).padStart(2, '0')}_${mode}.png`), await page.screenshot())
+    const wait = t0 + i * every - Date.now()
+    if (wait > 0) await page.waitForTimeout(wait)
+  }
+  console.log(`${sequence} pictures, ${Math.round((Date.now() - t0) / sequence)} ms apart: ${resolve(outDir, `${name}_01..${String(sequence).padStart(2, '0')}_${mode}`)}`)
 }
 
 // Real frames, not just a ready flag: wait for the counter to move.

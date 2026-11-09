@@ -51,6 +51,8 @@ export class Hands {
   tool: HandTool = 'point'
   /** The saw line being dragged, in client pixels; null when there is none. */
   onSawLine: (line: ScreenLine | null) => void = () => {}
+  /** Every batch of strikes as it is sent to the stone, for the film (chips, tools, sound). */
+  onStrikes: (strikes: Strike[]) => void = () => {}
 
   private picker = new THREE.Raycaster()
   private ndc = new THREE.Vector2()
@@ -179,6 +181,7 @@ export class Hands {
   }
 
   private send(strikes: Strike[]) {
+    this.onStrikes(strikes)
     this.kernel.strike(strikes).catch(e => console.error('[hands]', e))
   }
 }

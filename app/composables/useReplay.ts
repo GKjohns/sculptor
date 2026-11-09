@@ -6,6 +6,7 @@ import type { ReplayRun } from '#shared/agent/replay'
 import type { StrikeLog } from '#shared/agent/studio'
 import type { PassRecord } from '#shared/agent/types'
 import type { CameraRig } from '~/studio/camera'
+import type { Cinema } from '~/studio/cinema'
 import type { KernelClient } from '~/studio/kernel'
 import type { StudioRenderer } from '~/studio/renderer'
 import { ReplayPlayer, replayBlocker } from '~/studio/replay'
@@ -17,6 +18,8 @@ export interface ReplayStage {
   kernel: KernelClient
   stone: Stone
   camera?: CameraRig
+  /** The film round the stone (debris, tools, sound, director): it follows whichever timeline it is bound to. */
+  cinema?: Cinema
 }
 
 const told = (e: unknown) => e instanceof Error ? e.message : String(e)
@@ -79,6 +82,7 @@ export function useReplay() {
       if (mine !== turn) return
       const p = new ReplayPlayer(stage.kernel, stage.stone, log, record, options.speed, stage.camera)
       p.onChange = s => state.value = s
+      stage.cinema?.bind(p.timeline)
       player = p
       passes.value = record
       unhook = stage.studio.onFrame(dt => p.tick(dt))

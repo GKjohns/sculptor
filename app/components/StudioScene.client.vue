@@ -13,9 +13,12 @@
  *             finished piece before the scene reports ready
  *   ?model=, ?ref=0|1, ?turns=, ?usd=, ?speed=  a commission's settings for this page load
  *             (app.config.ts has the defaults); ?ref=1 also shows the reference sheet in the eye panel
+ *   ?cam=free  the director leaves the camera alone (it stays where you, or a look preset, put it)
+ *   ?film=0    no debris, tools, sound or director at all, to measure what they cost
  */
 import { CameraRig } from '~/studio/camera'
 import { Charcoal } from '~/studio/charcoal'
+import { Cinema } from '~/studio/cinema'
 import { burst, demo, frameMeter, timeReplay } from '~/studio/debug'
 import { Hands } from '~/studio/hands'
 import type { HandTool, ScreenLine } from '~/studio/hands'
@@ -68,6 +71,15 @@ let camera: CameraRig | null = null
 let charcoal: Charcoal | null = null
 let stage: (ReplayStage & { camera: CameraRig, charcoal: Charcoal }) | null = null
 
+// -- the film (Sprint 4): debris, tools, sound and the camera director --
+let cinema: Cinema | null = null
+const muted = ref(false)
+function toggleSound() {
+  cinema?.sound.unlock()
+  cinema?.sound.setMuted(!muted.value)
+  muted.value = cinema?.sound.muted ?? false
+}
+// -- end of the film --
 watch(picking, (open) => {
   if (!open) return
   replay.refresh()
@@ -145,12 +157,23 @@ onMounted(async () => {
   let st: Stone
   try {
     // The block is built in the worker while the renderer picks its backend. The stone is wired up
+  // -- the film: remeshes that arrive before the film exists are kept for it (it fits the stone's boxes from them) --
+  let film: Cinema | null = null
+  let early: { rev: number, chunks: Parameters<Cinema['chunks']>[1] }[] | null = []
+  // -- end of the film --
     // in the same tick the worker reports ready, so the first mesh cannot arrive unheard.
     const built = k.init().then((grid) => {
       const made = new Stone(s, grid)
       // Only the shown stone is ever meshed; the true stone is the sculptor's and stays in the worker.
-      k.onChunks = (_stone, rev, chunks) => made.receive(rev, chunks)
-      k.onOffcuts = (_stone, rev, offcuts) => made.shed(rev, offcuts)
+      k.onChunks = (_stone, rev, chunks) => {
+        made.receive(rev, chunks)
+        // -- the film --
+        if (film) film.chunks(rev, chunks)
+        else early?.push({ rev, chunks })
+        // -- end of the film --
+      }
+      // The film's debris takes what comes off (the stone's own toy fall is only the fallback).
+      k.onOffcuts = (_stone, rev, offcuts) => film ? film.offcuts(rev, offcuts) : made.shed(rev, offcuts)
       return made
     })
     // Awaited together, so neither can fail unobserved while the other is still starting.
@@ -170,12 +193,23 @@ onMounted(async () => {
   camera = rig
 
   if (handsOn) {
+  // -- the film --
+  // ?film=0 leaves the film out altogether, to measure what it costs.
+  if (route.query.film !== '0') {
+    film = cinema = new Cinema(s, st, k, rig)
+    for (const e of early ?? []) film.chunks(e.rev, e.chunks)
+    muted.value = film.sound.muted
+  }
+  early = null
+  if (route.query.cam === 'free') rig.mode = 'free'
+  // -- end of the film --
     rig.mode = 'free'
     hands = new Hands(s, st, k)
     hands.tool = tool.value
     hands.onSawLine = line => sawLine.value = line
   }
 
+    hands.onStrikes = strikes => film?.struck(strikes)
   // A handle for the shoot script (and for poking at the studio from devtools).
   let demoRun: Promise<void> | null = null
   const handle = {
@@ -186,9 +220,11 @@ onMounted(async () => {
     /** A stone's rev and mass, and for the shown stone what its early island checks have cost. */
     kernel: (which: StoneId = 'shown') => k.stats(false, which),
     /** A sawn corner and rough, flat-chiselled and rasped patches. Runs once. */
-    demo: () => demoRun ??= demo(s, k, st),
+    demo: () => demoRun ??= demo(s, k, st).then(() => film?.settled()),
     /** n rapid strikes; resolves with (and logs) frame-time stats. */
-    burst: (n = 200) => burst(s, k, st, n),
+    burst: (n = 200) => burst(s, k, st, n, 2, strikes => film?.struck(strikes)),
+    /** The film: debris, tools, sound, director. cinema().stats() says what each is doing and its budgets; slow(0.1) is bullet time for captures. */
+    cinema: () => film,
     /** The ReplayPlayer of the run on the stage, or null. */
     replay: () => replay.player(),
     /** Plays the loaded run again from the start at `speed`; frame-time stats, as burst gives them. */
@@ -215,7 +251,7 @@ onMounted(async () => {
   await st.whenShown(0)
   if (route.query.demo === '1') await handle.demo()
   charcoal = new Charcoal(s)
-  stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal }
+  stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal, cinema: film ?? undefined }
   await sculptor.attach(stage)
   if (replayId.value) {
     await replay.open(stage, replayId.value, { speed: firstSpeed, end: route.query.at === 'end' })
@@ -242,6 +278,8 @@ onBeforeUnmount(() => {
   hands = null
   camera = null
   charcoal = null
+  cinema?.dispose()
+  cinema = null
   stage = null
   stone = null
   kernel = null
@@ -307,6 +345,21 @@ onBeforeUnmount(() => {
       orientation="vertical"
     >
       <UButton
+    <!-- the film: sound on or off. Lower right, clear of the transport and of an open side panel. -->
+    <UButton
+      v-if="route.query.film !== '0'"
+      data-hud
+      :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+      color="neutral"
+      variant="subtle"
+      size="sm"
+      class="absolute bottom-3 z-20"
+      :style="{ right: `${room.right + 12}px` }"
+      :aria-label="muted ? 'Sound is off. Turn it on' : 'Sound is on. Turn it off'"
+      :aria-pressed="!muted"
+      @click="toggleSound"
+    />
+    <!-- end of the film -->
         icon="i-lucide-chevron-up"
         color="neutral"
         variant="subtle"
