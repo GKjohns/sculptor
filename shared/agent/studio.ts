@@ -3,7 +3,7 @@
 // here touches the DOM or Node; PNG encoding is handed in.
 
 import { DENSITY, stoneMassKg } from '../sculpt/grid.ts'
-import { chisel, drill, polish, rasp, roughOut, saw, silhouetteForm, sketch } from '../sculpt/hand.ts'
+import { chisel, drill, incise, polish, rasp, roughOut, saw, silhouetteForm, sketch } from '../sculpt/hand.ts'
 import type { PassResult, RulerPoint } from '../sculpt/hand.ts'
 import { SLICE_VIEW, measureAll, measureSlice, surfaceFinish } from '../sculpt/measure.ts'
 import type { Mask, SideView } from '../sculpt/measure.ts'
@@ -13,10 +13,10 @@ import { compileForm, declareForm, formDistance } from '../sculpt/shapes.ts'
 import { applyStrike } from '../sculpt/strike.ts'
 import { KERNEL_VERSION } from '../sculpt/version.ts'
 import type { AxisView, ViewId } from '../sculpt/views.ts'
-import { expandShapes } from '../sculpt/anatomy.ts'
+import { expandCanon, settleCuts } from '../sculpt/anatomy.ts'
 import type { DeclaredShape } from '../sculpt/anatomy.ts'
 import { VIEWS } from '../sculpt/views.ts'
-import type { Form, FormStrike, Grid, SketchStrike, Strike, Vec3 } from '../sculpt/types.ts'
+import type { CanonCut, Form, FormStrike, Grid, SketchStrike, Strike, Vec3 } from '../sculpt/types.ts'
 import { FOCUS_STROKE_SHARE, NO_PROTECT, REFERENCE_TARGET } from './toolSchemas.ts'
 import type { ChiselArgs, CloseupArgs, DeclareFormArgs, DetailArgs, DrillArgs, FocusArgs, LookArgs, PolishArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, SketchArgs, SliceArgs, StudioCall, UnfocusArgs, ViewPoint } from './toolSchemas.ts'
 import type { Studio, StudioResult, ToolCall } from './types.ts'
@@ -73,7 +73,20 @@ const r1 = (v: number) => Math.round(v * 10) / 10
 const pt = (p: ViewPoint): RulerPoint => [p.h, p.v]
 
 function declaredShape(s: ShapeArgs): DeclaredShape {
-  return { kind: s.kind, center: [s.center_x, s.center_y, s.center_z], size: [s.size_x, s.size_y, s.size_z], rotation: [s.rot_x, s.rot_y, s.rot_z] }
+  return { kind: s.kind, center: [s.center_x, s.center_y, s.center_z], size: [s.size_x, s.size_y, s.size_z], rotation: [s.rot_x, s.rot_y, s.rot_z], ...(s.style && s.style.length > 0 ? { style: s.style } : {}) }
+}
+
+// Two passes of one call as one result.
+function joined(a: PassResult, b: PassResult): PassResult {
+  return {
+    ...a,
+    strikes: [...a.strikes, ...b.strikes],
+    removedCm3: a.removedCm3 + b.removedCm3,
+    hits: [...a.hits, ...b.hits],
+    offcuts: [...a.offcuts, ...b.offcuts],
+    ms: a.ms + b.ms,
+    summary: b.summary ? `${a.summary} ${b.summary}` : a.summary
+  }
 }
 
 // The same mask seen from the opposite side.
@@ -143,6 +156,9 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     if (s.kind === 'form' && s.name !== REFERENCE_TARGET && !declared.includes(s.name)) declared.push(s.name)
   }
   const drawn: SketchStrike[] = strikes.filter(s => s.kind === 'sketch')
+  // The canon's hollows on each declared form, from its latest declaration.
+  const cutsOf = new Map<string, CanonCut[]>()
+  for (const s of strikes) if (s.kind === 'form' && s.name !== REFERENCE_TARGET) cutsOf.set(s.name, s.cuts ?? [])
   const ref = opts.reference ?? null
   const front = ref?.ok ? ref.masks?.front : undefined
   const left = ref?.ok ? ref.masks?.left : undefined
@@ -282,19 +298,23 @@ export function createStudio(opts: StudioOptions): KernelStudio {
   }
 
   const declare = (a: DeclareFormArgs): StudioResult => {
-    const heads = a.shapes.filter(s => s.kind === 'head').length
-    const form: Form = { shapes: expandShapes(a.shapes.map(declaredShape)), blend: a.blend_cm }
+    const canon = a.shapes.filter(s => s.kind === 'head' || s.kind === 'torso').map(s => s.kind)
+    const expanded = expandCanon(a.shapes.map(declaredShape))
+    const form: Form = { shapes: expanded.shapes, blend: a.blend_cm }
     const extent = formExtent(grid, form)
     if (extent.empty) throw new Error(`no part of "${a.name}" lies inside the block (X ${-grid.size[0] / 2} to ${grid.size[0] / 2}, Y 0 to ${grid.size[1]}, Z ${-grid.size[2] / 2} to ${grid.size[2] / 2}); check the centres and sizes`)
-    const strike: FormStrike = { kind: 'form', name: a.name, shapes: form.shapes, blend: form.blend }
+    const cuts = expanded.cuts.length > 0 ? settleCuts(form, expanded.cuts) : []
+    const strike: FormStrike = { kind: 'form', name: a.name, shapes: form.shapes, blend: form.blend, ...(cuts.length > 0 ? { cuts } : {}) }
     applyStrike(grid, strike)
+    cutsOf.set(a.name, cuts)
     strikes.push(strike)
     const again = declared.includes(a.name)
     if (!again) declared.push(a.name)
     const { min, max } = extent
-    let summary = `${again ? 'Replaced' : 'Declared'} form "${a.name}" (${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}${heads > 0 ? `, ${heads === 1 ? 'the head' : `${heads} heads`} expanded to ${form.shapes.length} solids in all` : ''}, blend ${r1(a.blend_cm)} cm). Inside the block it spans X ${r1(min[0])} to ${r1(max[0])}, Y ${r1(min[1])} to ${r1(max[1])}, Z ${r1(min[2])} to ${r1(max[2])} and holds about ${Math.round(extent.cm3 / 100) / 10} litres (${(extent.cm3 * DENSITY / 1000).toFixed(0)} kg). Nothing was cut.`
+    let summary = `${again ? 'Replaced' : 'Declared'} form "${a.name}" (${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}${canon.length > 0 ? `, the ${canon.join(' and ')} expanded to ${form.shapes.length} solids in all` : ''}, blend ${r1(a.blend_cm)} cm). Inside the block it spans X ${r1(min[0])} to ${r1(max[0])}, Y ${r1(min[1])} to ${r1(max[1])}, Z ${r1(min[2])} to ${r1(max[2])} and holds about ${Math.round(extent.cm3 / 100) / 10} litres (${(extent.cm3 * DENSITY / 1000).toFixed(0)} kg). Nothing was cut.`
     if (extent.outsidePct > 2) summary += ` ${Math.round(extent.outsidePct)}% of the form lies outside the block, where there is no stone to make it from.`
     if (min[1] > 1.5) summary += ` It does not reach the base (it starts ${r1(min[1])} cm up): rough_out will refuse it until something in the form stands on the base.`
+    if (cuts.length > 0) summary += ` The canon also marks ${cuts.length} hollows to cut into it (${[...new Set(cuts.map(c => c.label))].join(', ')}); \`detail\` cuts those in its window, and they show as cut below the form.`
     if (declared.length > 1) summary += ` Looks and numbers measure the stone against all your forms together: ${declared.map(n => `"${n}"`).join(', ')}.`
     return {
       summary,
@@ -348,8 +368,13 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     lo[def.v!] = a.center.v - half
     hi[def.v!] = a.center.v + half
     const facing: Vec3 = [-def.look[0], -def.look[1], -def.look[2]]
-    const pass = roughOut(grid, { to: a.to, margin_cm: 0.1, tool: 'flat', window: { box: { x0: lo[0], y0: lo[1], z0: lo[2], x1: hi[0], y1: hi[1], z1: hi[2] }, facing } })
-    if (!pass.error) guarded = a.to
+    const box = { x0: lo[0], y0: lo[1], z0: lo[2], x1: hi[0], y1: hi[1], z1: hi[2] }
+    let pass = roughOut(grid, { to: a.to, margin_cm: 0.1, tool: 'flat', window: { box, facing } })
+    if (!pass.error) {
+      guarded = a.to
+      const cuts = cutsOf.get(a.to) ?? []
+      if (cuts.length > 0) pass = joined(pass, incise(grid, { cuts, box, facing }))
+    }
     return settle(pass, pass.stats ? { window_proud_max_cm: r1(pass.stats.proudMaxCm), window_proud_mean_cm: Math.round(pass.stats.proudMeanCm * 100) / 100, chisel_strikes: pass.stats.chiselStrikes } : {})
   }
 

@@ -102,6 +102,7 @@ export function compileForm(form: Form): CompiledForm {
   const count = form.silhouette ? 0 : form.shapes.length
   const kinds = new Uint8Array(count)
   const data = new Float64Array(count * STRIDE)
+  const reach = new Float64Array(count * 3)
   const sc = new Float64Array(2)
   for (let i = 0; i < count; i++) {
     const shape = form.shapes[i]!
@@ -135,9 +136,34 @@ export function compileForm(form: Form): CompiledForm {
     data[o + 12] = d
     data[o + 13] = -b * c
     data[o + 14] = a * c
+    // A lower bound on the shape's distance r cm from its centre: a * r - c, for r beyond the
+    // third number. The round kinds and the box have exact distances, so the sphere round them
+    // bounds them everywhere (scaled by the squash for the round kinds). The ellipsoid's
+    // approximation k0 (k0 - 1) / k1 is at least (rmin / rmax)² (r - rmax), but only outside
+    // that sphere.
+    const hx = data[o + 3]!
+    const hy = data[o + 4]!
+    const hz = data[o + 5]!
+    const q = i * 3
+    if (kind === 0) {
+      const lo = Math.min(hx, hy, hz)
+      const hi = Math.max(hx, hy, hz)
+      reach[q] = (lo / hi) * (lo / hi)
+      reach[q + 1] = reach[q]! * hi
+      reach[q + 2] = hi
+    } else if (kind === 1) {
+      reach[q] = 1
+      reach[q + 1] = Math.sqrt(hx * hx + hy * hy + hz * hz)
+    } else {
+      const squash = hx / hz
+      const sphere = kind === 2 ? Math.max(hx, hy) : Math.sqrt(hx * hx + hy * hy)
+      const big = squash > 1 ? squash : 1
+      reach[q] = (squash < 1 ? squash : 1) / big
+      reach[q + 1] = sphere / big
+    }
   }
   const compiled: CompiledForm = {
-    count, kinds, data,
+    count, kinds, data, reach,
     blend: Math.max(0, form.blend),
     inflate: form.inflate ?? 0,
     // A plain copy: the form may arrive as a log entry carrying other fields.
@@ -154,13 +180,21 @@ export function compileForm(form: Form): CompiledForm {
 // Distance from a world point to the form, cm, negative inside.
 export function formDistance(form: CompiledForm, x: number, y: number, z: number): number {
   if (form.silhouette !== undefined) return silhouetteDistance(form.silhouette, x, y, z) - form.inflate
-  const { count, kinds, data, blend } = form
+  const { count, kinds, data, blend, reach } = form
   let best = 1e9
   for (let i = 0; i < count; i++) {
     const o = i * STRIDE
     const px = x - data[o]!
     const py = y - data[o + 1]!
     const pz = z - data[o + 2]!
+    // A shape whose distance here is surely a blend or more above the union so far cannot
+    // change it: smoothMin(best, d) is exactly best when d >= best + blend. So skipping it
+    // gives the same number, to the last bit, and every log replays as before.
+    if (reach !== undefined && i > 0) {
+      const r = Math.sqrt(px * px + py * py + pz * pz)
+      const q = i * 3
+      if (r > reach[q + 2]! && reach[q]! * r - reach[q + 1]! >= best + blend + 1e-6) continue
+    }
     const lx = data[o + 6]! * px + data[o + 7]! * py + data[o + 8]! * pz
     const ly = data[o + 9]! * px + data[o + 10]! * py + data[o + 11]! * pz
     const lz = data[o + 12]! * px + data[o + 13]! * py + data[o + 14]! * pz

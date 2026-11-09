@@ -47,6 +47,21 @@ export interface DetachStrike {
 export interface FormStrike extends Form {
   kind: 'form'
   name: string
+  // The canon's hollows on this form (anatomy.ts), carved by `detail`. The kernel ignores them:
+  // they are here so a resumed commission still knows them.
+  cuts?: CanonCut[]
+}
+
+// A hollow the carver cuts once a canon form stands: a row of bites along `points` (one bite for
+// a single point), each going `depth` cm into the stone along its entry in `dirs`. The points
+// lie on the form's surface. Sizes in cm.
+export interface CanonCut {
+  label: string
+  tool: 'drill' | 'roundel'
+  size: number
+  depth: number
+  points: Vec3[]
+  dirs: Vec3[]
 }
 
 // A charcoal line drawn on the stone from an axis view. It is theatre and an aid to the eye:
@@ -213,6 +228,10 @@ export interface CompiledForm {
   data: Float64Array
   blend: number
   inflate: number
+  // Three numbers per shape, a, c and r0, such that the shape's distance at a point r > r0 cm
+  // from its centre is at least a * r - c: lets formDistance pass over shapes that cannot
+  // change the answer (see there).
+  reach?: Float64Array
   silhouette?: CompiledSilhouette
   // What it was compiled from, so the hand can declare the same form again with a margin.
   source: Form

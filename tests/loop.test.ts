@@ -591,7 +591,7 @@ test('parseCall rejects a saw line with no such side, a reserved form name, and 
   const same = saw({ to: SAW.from })
   assert.ok(!same.ok && /same point/.test(same.error))
 
-  const shape = { kind: 'ellipsoid', center_x: 0, center_y: 50, center_z: 0, size_x: 30, size_y: 40, size_z: 30, rot_x: 0, rot_y: 0, rot_z: 0 }
+  const shape = { kind: 'ellipsoid', center_x: 0, center_y: 50, center_z: 0, size_x: 30, size_y: 40, size_z: 30, rot_x: 0, rot_y: 0, rot_z: 0, style: [] }
   const form = (name: string) => parseCall(defs, { id: 'x', name: 'declare_form', args: { name, shapes: [shape], blend_cm: 2, why: 'The body.' } })
   assert.ok(form('cat').ok)
   const reserved = form('reference')

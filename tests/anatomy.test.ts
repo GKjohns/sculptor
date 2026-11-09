@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { HEAD_SHAPE_COUNT, expandHead, expandShapes } from '../shared/sculpt/anatomy.ts'
+import { expandHead, expandShapes } from '../shared/sculpt/anatomy.ts'
 import { compileForm, formDistance } from '../shared/sculpt/shapes.ts'
 import type { Shape, Vec3 } from '../shared/sculpt/types.ts'
 
@@ -23,8 +23,8 @@ function surface(form: ReturnType<typeof compileForm>, from: Vec3, dir: Vec3): n
 }
 
 test('a head expands to the kernel kinds only, as many as the canon says, mirrored about its own centre', () => {
-  const shapes = expandHead(head([0, 77, -2], [27, 40, 34]))
-  assert.equal(shapes.length, HEAD_SHAPE_COUNT)
+  const shapes = expandHead(head([0, 77, -2], [27, 40, 34])).shapes
+  assert.ok(shapes.length > 20, `${shapes.length} shapes`)
   for (const s of shapes) assert.ok(['ellipsoid', 'box', 'capsule', 'cone'].includes(s.kind), s.kind)
   // Every shape off the centre line has a twin at -x with the same size.
   for (const s of shapes) {
@@ -39,7 +39,7 @@ test('a head expands to the kernel kinds only, as many as the canon says, mirror
 
 test('the head fills about the skull box it was given and carries a face: brow, sockets, nose and chin in the right order', () => {
   const H = 40
-  const form = compileForm({ shapes: expandHead(head([0, 77, 0], [27, H, 34])), blend: 1.3 })
+  const form = compileForm({ shapes: expandHead(head([0, 77, 0], [27, H, 34])).shapes, blend: 1.3 })
   // Crown and chin near the top and bottom of the box; the skull's back near its back.
   assert.ok(Math.abs(surface(form, [0, 120, 0], [0, -1, 0]) - (120 - 97)) < 1.5, 'crown')
   assert.ok(Math.abs(surface(form, [0, 30, 4], [0, 1, 0]) - (57 - 30)) < 2, 'chin')
@@ -62,8 +62,8 @@ test('the head fills about the skull box it was given and carries a face: brow, 
 })
 
 test('turning the head turns its face: the nose moves to the side the rotation says, and the pose composes with each part', () => {
-  const straight = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34])), blend: 1.3 })
-  const turned = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34], [0, 20, 0])), blend: 1.3 })
+  const straight = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34])).shapes, blend: 1.3 })
+  const turned = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34], [0, 20, 0])).shapes, blend: 1.3 })
   const tip = (form: typeof straight) => {
     let best: Vec3 = [0, 0, -Infinity]
     for (let x = -15; x <= 15; x += 0.5) {
@@ -81,7 +81,7 @@ test('turning the head turns its face: the nose moves to the side the rotation s
   assert.ok(b[0] > 4, `turned nose at x ${b[0]}`)
   assert.ok(b[2] < a[2], 'a turned nose stands less far forward')
   // The parts keep their own rotations under the pose: the ears (tilted back about X) also take the turn.
-  const ears = expandHead(head([0, 77, 0], [27, 40, 34], [0, 20, 0])).filter(s => s.size[0] < 4 && s.size[1] > 8)
+  const ears = expandHead(head([0, 77, 0], [27, 40, 34], [0, 20, 0])).shapes.filter(s => s.size[0] < 4 && s.size[1] > 8)
   assert.equal(ears.length, 2)
   for (const e of ears) assert.ok(Math.abs(e.rotation[1]) > 10, `ear rotation ${e.rotation.join(',')}`)
 })
@@ -89,6 +89,6 @@ test('turning the head turns its face: the nose moves to the side the rotation s
 test('expandShapes passes the kernel kinds through unchanged and expands heads in place', () => {
   const box: Shape = { kind: 'box', center: [0, 3, 0], size: [50, 6, 40], rotation: [0, 0, 0] }
   const out = expandShapes([box, { kind: 'head', center: [0, 77, 0], size: [27, 40, 34], rotation: [0, 0, 0] }])
-  assert.equal(out.length, 1 + HEAD_SHAPE_COUNT)
-  assert.deepEqual(out[0], box)
+  assert.equal(out.length, 1 + expandHead({ center: [0, 77, 0], size: [27, 40, 34], rotation: [0, 0, 0] }).shapes.length)
+  assert.deepEqual(out[out.length - 1], box)
 })

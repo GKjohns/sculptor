@@ -4,7 +4,7 @@
 
 import { z } from 'zod'
 import type { ToolSet } from 'ai'
-import { HEAD_SHAPE_COUNT } from '../sculpt/anatomy.ts'
+import { STYLE_TOKENS } from '../sculpt/anatomy.ts'
 import { AXIS_VIEWS, VIEW_IDS } from '../sculpt/views.ts'
 import { STAGES } from './types.ts'
 import type { LookTool, PassTool, ReferenceMode, ToolCall, ToolName, ToolSetId } from './types.ts'
@@ -43,10 +43,10 @@ const why = z.string().min(1).describe(WHY)
 const carveView = z.enum(AXIS_VIEWS).describe('The axis view the points are read from')
 const path = z.array(point).min(2).max(16).describe('Points along the stroke, in order')
 
-// The solids a form is declared in: the kernel's four primitives and the canon `head`
-// (shared/sculpt/anatomy.ts), which becomes kernel primitives before anything is logged.
-export const SHAPE_KINDS = ['ellipsoid', 'box', 'capsule', 'cone', 'head'] as const
-// Shapes a form may hold. A head counts as one.
+// The solids a form is declared in: the kernel's four primitives and the canon's `head` and
+// `torso` (shared/sculpt/anatomy.ts), which become kernel primitives before anything is logged.
+export const SHAPE_KINDS = ['ellipsoid', 'box', 'capsule', 'cone', 'head', 'torso'] as const
+// Shapes a form may hold. A head or a torso counts as one.
 export const MAX_SHAPES = 24
 
 const shape = z.object({
@@ -59,7 +59,8 @@ const shape = z.object({
   size_z: z.number().min(0.5).describe('Full extent along the shape\'s own Z before rotation, cm'),
   rot_x: z.number().describe('Degrees about X'),
   rot_y: z.number().describe('Degrees about Y'),
-  rot_z: z.number().describe('Degrees about Z')
+  rot_z: z.number().describe('Degrees about Z'),
+  style: z.array(z.enum(STYLE_TOKENS)).max(12).describe('For a head or torso: who the sitter is, the expression, hair and drapery. An empty list for any other kind')
 })
 
 const OVERLAYS = ['grid', 'form', 'reference'] as const
@@ -271,7 +272,7 @@ function describe(name: ToolName, o: ToolOptions): string {
       return [
         'Declare the masses the stone should end up as, as a few simple solids in block coordinates (cm). Nothing is cut. Declaring a name again replaces that form.',
         'Every shape has a centre, a full size along its own three axes, and a rotation in degrees (Euler order XYZ; 0 0 0 is upright, and most shapes need at most one turn). An ellipsoid or box fills its size. A capsule or cone stands along its own Y: size_y is its full length, size_x and size_z its thickness, and a cone has its base at the -Y end and its point at the +Y end.',
-        `kind head is a whole human head with its face already on it, the sculptor's canon (it becomes ${HEAD_SHAPE_COUNT} solids: cranium, forehead, brow ridges, cheekbones, eyes set in their sockets, a nose with bridge, tip and wings, lips, chin, jaw, ears). Its centre is the middle of the skull and its size is the skull alone: size_x temple to temple, size_y chin to crown, size_z brow to the back of the skull (about 0.68 and 0.85 of the height for ordinary proportions; the nose and ears stand outside it). rot_x tilts it (positive nods the face down), rot_y turns it (positive turns the face toward +X, the viewer's right), rot_z cocks it. The head looks along +Z with no rotation. A blend of 3 to 4 percent of its height suits it (1.3 cm for a 40 cm head); more softens the face away. Hair, a beard, a heavier brow or a larger nose are shapes of your own laid over it; its face needs no chisel work.`,
+        `kind head is a whole human head with its face already on it, the sculptor's canon (it becomes about forty solids: cranium, forehead, brow ridges, cheekbones, eyes set in their sockets, a nose with bridge, tip and wings, lips, chin, jaw, ears). Its centre is the middle of the skull and its size is the skull alone: size_x temple to temple, size_y chin to crown, size_z brow to the back of the skull (about 0.68 and 0.85 of the height for ordinary proportions; the nose and ears stand outside it). rot_x tilts it (positive nods the face down), rot_y turns it (positive turns the face toward +X, the viewer's right), rot_z cocks it. The head looks along +Z with no rotation. A blend of 3 to 4 percent of its height suits it (1.3 cm for a 40 cm head); more softens the face away. Hair, a beard, a heavier brow or a larger nose are shapes of your own laid over it; its face needs no chisel work.`,
         'Overlap shapes that belong to one mass; blend_cm rounds the joins between them.',
         'Put the whole figure, base included, in one form: rough_out protects only the form it is given. The result says where the form sits in the block and warns if it does not reach the base.',
         'Whatever stands proud of a surface (a nose, ears, a brow, a chin, a muzzle, paws) belongs in the form as a small shape of its own, with a blend of 1 cm or less so it is not smoothed away. Declared, it is left standing by rough_out and can be protected from every stroke; left to be found later by chiselling, it is usually destroyed.'

@@ -6,7 +6,7 @@ import { applyStrike } from './strike.ts'
 import { toolSpec } from './tools.ts'
 import { VIEWS, isAxisView, viewRay } from './views.ts'
 import type { AxisView } from './views.ts'
-import type { CompiledForm, CutStrike, Form, FormStrike, Grid, Offcut, RayHit, SawStrike, SketchStrike, Strike, Vec3 } from './types.ts'
+import type { CanonCut, CompiledForm, CutStrike, Form, FormStrike, Grid, Offcut, RayHit, SawStrike, SketchStrike, Strike, Vec3 } from './types.ts'
 
 export { silhouetteForm } from './silhouette.ts'
 export type { BlockSize, Mask } from './silhouette.ts'
@@ -644,6 +644,52 @@ export function drill(grid: Grid, pass: DrillPass): PassResult {
   const result = done(run, [{ ruler, point: entry }], summary)
   result.bore = { entry, depthCm: r3(reached), through }
   return result
+}
+
+// ---------- incise ----------
+
+// The canon's own hollows (anatomy.ts): pupils, lid lines, the parting of the lips, nostrils,
+// the valleys between locks and folds. Each cut is a row of bites already placed on the form's
+// surface with its direction in, so the hand only strikes them: those inside the box, facing
+// the viewer along `facing`. Depths are measured from the form, not the stone, so a cut struck
+// twice goes no deeper.
+export interface IncisePass {
+  cuts: CanonCut[]
+  box: DetailBox
+  facing: Vec3
+}
+
+const INCISE_MS = 160
+// How square to the view a bite has to go in to be struck from it.
+const INCISE_FACING = 0.3
+
+export function incise(grid: Grid, pass: IncisePass): PassResult {
+  const run = begin(grid)
+  const { box, facing } = pass
+  const lo: Vec3 = [Math.min(box.x0, box.x1), Math.min(box.y0, box.y1), Math.min(box.z0, box.z1)]
+  const hi: Vec3 = [Math.max(box.x0, box.x1), Math.max(box.y0, box.y1), Math.max(box.z0, box.z1)]
+  const seed = passSeed('incise', [...lo, ...hi])
+  const labels = new Map<string, number>()
+  let n = 0
+  for (const cut of pass.cuts) {
+    let struck = 0
+    for (let i = 0; i < cut.points.length; i++) {
+      const p = cut.points[i]!
+      const d = cut.dirs[i]!
+      if (p[0] < lo[0] || p[0] > hi[0] || p[1] < lo[1] || p[1] > hi[1] || p[2] < lo[2] || p[2] > hi[2]) continue
+      if (-(d[0] * facing[0] + d[1] * facing[1] + d[2] * facing[2]) < INCISE_FACING) continue
+      emit(run, { kind: 'cut', tool: cut.tool, at: [p[0], p[1], p[2]], dir: [d[0], d[1], d[2]], size: cut.size, depth: cut.depth, seed: hashSeed(seed, n++), ms: INCISE_MS })
+      dropLoose(run)
+      struck++
+    }
+    if (struck > 0) labels.set(cut.label, (labels.get(cut.label) ?? 0) + 1)
+  }
+  if (run.strikes.length > 0) emit(run, { kind: 'detach' })
+  const named = [...labels].map(([label, count]) => count > 1 ? `${label} ×${count}` : label)
+  const summary = named.length === 0
+    ? ''
+    : `The canon's lines in the window were cut: ${named.join(', ')} (${run.strikes.filter(s => s.kind === 'cut').length} bites, ${amount(run.removedCm3)}).`
+  return done(run, [], summary)
 }
 
 // ---------- polish ----------

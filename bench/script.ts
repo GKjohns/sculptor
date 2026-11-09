@@ -10,7 +10,7 @@ import type { SubjectId } from './subjects.ts'
 interface Call { name: string, args: Record<string, unknown> }
 interface Turn { say: string, calls: Call[] }
 
-const shape = (kind: ShapeKind, c: Vec3, s: Vec3) => ({ kind, center_x: c[0], center_y: c[1], center_z: c[2], size_x: s[0], size_y: s[1], size_z: s[2], rot_x: 0, rot_y: 0, rot_z: 0 })
+const shape = (kind: ShapeKind, c: Vec3, s: Vec3) => ({ kind, center_x: c[0], center_y: c[1], center_z: c[2], size_x: s[0], size_y: s[1], size_z: s[2], rot_x: 0, rot_y: 0, rot_z: 0, style: [] })
 
 type FlatShape = ReturnType<typeof shape>
 
