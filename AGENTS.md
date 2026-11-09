@@ -34,11 +34,14 @@ Not everything listed exists yet; the sprint in brackets is where it arrives.
 Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 
 - `npm run dev`: port 3130. `?gl=1` forces the WebGL 2 backend, `?hands=1` turns on hand-carving, `?demo=1` carves a fixed demo (sawn corner, rough, flat-chiselled and rasped patches) before the scene reports ready.
-- `npm run typecheck`, `npm run lint`, `npm test` (`node --test tests/*.test.ts`): all three before calling work done.
+- `npm run typecheck` (Nuxt's projects, then `tsconfig.bench.json` for `bench/` and `tests/`), `npm run lint`, `npm test` (`node --test tests/*.test.ts`): all three before calling work done.
 - `npm run shoot -- --gl [--name x] [--query "a=1&b=2"]`: headless, software WebGL 2. Layout and logic.
 - `npm run shoot -- --gpu ...`: headed Chrome, WebGPU. The only mode for judging how anything looks.
 - `npm run shoot -- --gpu --eval "__sculptor.burst(200)"`: runs an expression in the page and prints the result; this one gives frame times for 200 rapid strikes.
 - Shots land in `.shots/` (gitignored). Keepers are copied by hand into a plan's `verification/screenshots/`.
+- `npm run bench:sculpt -- --subject pawn|cat|bust [--model opus|fable|sol|gemini] [--tools direct|formed] [--ref on|off] [--round A|B|C]`: one headless commission into `.data/study/<run-id>/`. `--dry` runs a scripted Brain with no key into `.data/study-dry/`. Flags are listed at the top of `bench/sculpt.ts`.
+- `npm run bench:study -- --round A` (then `--round B --tools X`, `--round C --tools X --ref on|off`): a whole round, three runs at a time. Spend is capped per run (`--max-usd`, default 8) and across the study (`--study-cap`, default 100, summed from `.data/study/ledger/`).
+- `npm run bench:report`: writes `internal_docs/20261108_ai_sculptor/study/report.html` from whatever has been run.
 
 ## Rules
 

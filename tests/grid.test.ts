@@ -184,7 +184,7 @@ test('a strike that names an undeclared form throws instead of cutting unprotect
 
 test('tools that are not built yet, and the saw used as a cut, are refused', () => {
   const grid = createGrid({ width: 10, height: 10, depth: 10 })
-  assert.throws(() => applyStrike(grid, cut('claw', [0, 10, 0], [0, -1, 0], 3, 2)), /no such tool/)
+  assert.throws(() => applyStrike(grid, cut('roundel', [0, 10, 0], [0, -1, 0], 3, 2)), /no such tool/)
   assert.throws(() => applyStrike(grid, cut('saw', [0, 10, 0], [0, -1, 0], 3, 2)), /not a cut/)
 })
 

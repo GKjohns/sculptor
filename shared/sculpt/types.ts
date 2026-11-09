@@ -16,7 +16,13 @@ export interface CutStrike {
   size: number
   depth: number
   seed: number
+  // Name of a declared form this strike may not cut into, and how far outside it the strike
+  // has to stay (cm, default 0): a roughing margin.
   protect?: string
+  margin?: number
+  // Toothed tools only: the direction the teeth are spaced along (across the stroke). Grooves
+  // run at right angles to it. Left out, the kernel picks one from dir.
+  across?: Vec3
   ms: number
 }
 
@@ -126,12 +132,49 @@ export interface Shape {
   rotation: Vec3
 }
 
+// A binary image as runs of filled cells: for each row from the top, [start, end) column
+// pairs one after another. Plain numbers, so it survives JSON inside a strike log.
+export interface Outline {
+  width: number
+  height: number
+  rows: number[][]
+}
+
+// Two outlines pushed through the block: the volume common to the front outline extruded
+// along Z and the left outline extruded along X. Each image spans a whole face of a block of
+// `size` (width X, height Y, depth Z, cm) standing on the base: row 0 is the top, front
+// column 0 is X = -width/2, left column 0 is Z = -depth/2.
+export interface Silhouette {
+  front: Outline
+  left: Outline
+  size: Vec3
+}
+
 export interface Form {
   shapes: Shape[]
   // Radius of the smooth union between shapes, cm. 0 is a hard union.
   blend: number
   // Grows the form outward by this many cm, e.g. a roughing margin.
   inflate?: number
+  // When present the form is this silhouette volume and `shapes` is ignored.
+  silhouette?: Silhouette
+}
+
+// One outline as a signed distance image, cm, negative inside.
+export interface OutlineField {
+  width: number
+  height: number
+  // Cell size, cm, and the horizontal coordinate of the image's left edge.
+  sx: number
+  sy: number
+  left: number
+  top: number
+  field: Float32Array
+}
+
+export interface CompiledSilhouette {
+  front: OutlineField
+  left: OutlineField
 }
 
 export interface CompiledForm {
@@ -141,6 +184,9 @@ export interface CompiledForm {
   data: Float64Array
   blend: number
   inflate: number
+  silhouette?: CompiledSilhouette
+  // What it was compiled from, so the hand can declare the same form again with a margin.
+  source: Form
 }
 
 export interface RayHit {

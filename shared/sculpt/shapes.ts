@@ -1,3 +1,4 @@
+import { compileSilhouette, silhouetteDistance } from './silhouette.ts'
 import type { CompiledForm, Form, Grid, ShapeKind } from './types.ts'
 
 // Signed distances (cm, negative inside) for the primitives a form is declared in, and forms
@@ -98,7 +99,7 @@ function sinCosDeg(deg: number, out: Float64Array): void {
 }
 
 export function compileForm(form: Form): CompiledForm {
-  const count = form.shapes.length
+  const count = form.silhouette ? 0 : form.shapes.length
   const kinds = new Uint8Array(count)
   const data = new Float64Array(count * STRIDE)
   const sc = new Float64Array(2)
@@ -135,11 +136,24 @@ export function compileForm(form: Form): CompiledForm {
     data[o + 13] = -b * c
     data[o + 14] = a * c
   }
-  return { count, kinds, data, blend: Math.max(0, form.blend), inflate: form.inflate ?? 0 }
+  const compiled: CompiledForm = {
+    count, kinds, data,
+    blend: Math.max(0, form.blend),
+    inflate: form.inflate ?? 0,
+    // A plain copy: the form may arrive as a log entry carrying other fields.
+    source: { shapes: form.shapes, blend: form.blend }
+  }
+  if (form.inflate !== undefined) compiled.source.inflate = form.inflate
+  if (form.silhouette) {
+    compiled.silhouette = compileSilhouette(form.silhouette)
+    compiled.source.silhouette = form.silhouette
+  }
+  return compiled
 }
 
 // Distance from a world point to the form, cm, negative inside.
 export function formDistance(form: CompiledForm, x: number, y: number, z: number): number {
+  if (form.silhouette !== undefined) return silhouetteDistance(form.silhouette, x, y, z) - form.inflate
   const { count, kinds, data, blend } = form
   let best = 1e9
   for (let i = 0; i < count; i++) {

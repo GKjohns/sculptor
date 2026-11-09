@@ -1,0 +1,11 @@
+{
+  // bench/ and tests/ run under plain node and are outside Nuxt's own projects, so
+  // `nuxt typecheck` never sees them. Same strictness as shared/, plus Node's types.
+  "extends": "./.nuxt/tsconfig.shared.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": ["bench/**/*.ts", "tests/**/*.ts", "shared/**/*.ts"]
+}

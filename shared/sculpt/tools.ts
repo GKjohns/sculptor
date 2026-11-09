@@ -23,14 +23,19 @@ export interface ToolSpec {
   // Seeded roughness of the cut face: amplitude and feature size as fractions of size.
   noise: number
   grain: number
+  // Toothed tools: depth of the grooves the teeth leave and the spacing between teeth, as
+  // fractions of size. 0 teeth is a plain edge.
+  teeth: number
+  pitch: number
 }
 
-// claw, roundel, drill and polish join as rows here (with a new mode where they need one).
+// roundel, drill and polish join as rows here (with a new mode where they need one).
 export const TOOLS: Partial<Record<ToolId, ToolSpec>> = {
-  saw: { id: 'saw', mode: 'plane', finish: FINISH.sawn, tip: 1, shank: 0, noise: 0, grain: 1 },
-  point: { id: 'point', mode: 'bite', finish: FINISH.point, tip: 0.1, shank: 0.5, noise: 0.12, grain: 0.4 },
-  flat: { id: 'flat', mode: 'bite', finish: FINISH.flat, tip: 0.8, shank: 0.5, noise: 0.03, grain: 0.5 },
-  rasp: { id: 'rasp', mode: 'abrade', finish: FINISH.rasp, tip: 1, shank: 0, noise: 0, grain: 1 }
+  saw: { id: 'saw', mode: 'plane', finish: FINISH.sawn, tip: 1, shank: 0, noise: 0, grain: 1, teeth: 0, pitch: 1 },
+  point: { id: 'point', mode: 'bite', finish: FINISH.point, tip: 0.1, shank: 0.5, noise: 0.12, grain: 0.4, teeth: 0, pitch: 1 },
+  claw: { id: 'claw', mode: 'bite', finish: FINISH.claw, tip: 0.7, shank: 0.5, noise: 0.04, grain: 0.5, teeth: 0.06, pitch: 0.25 },
+  flat: { id: 'flat', mode: 'bite', finish: FINISH.flat, tip: 0.8, shank: 0.5, noise: 0.03, grain: 0.5, teeth: 0, pitch: 1 },
+  rasp: { id: 'rasp', mode: 'abrade', finish: FINISH.rasp, tip: 1, shank: 0, noise: 0, grain: 1, teeth: 0, pitch: 1 }
 }
 
 export function toolSpec(id: ToolId): ToolSpec {
@@ -63,8 +68,15 @@ export interface PreparedTool {
   // Noise lattice cells per cm.
   freq: number
   seed: number
+  // Teeth: unit vector they are spaced along (at right angles to the strike direction),
+  // groove depth in cm (0 for a plain edge) and teeth per cm.
+  ux: number
+  uy: number
+  uz: number
+  teeth: number
+  teethFreq: number
   // Beyond this distance from the tool's surface the stored value is clamped whatever the
-  // noise says, so the noise is skipped.
+  // noise and teeth say, so both are skipped. Also the padding of the strike's bounding box.
   reach: number
 }
 
@@ -76,13 +88,40 @@ export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): P
   const amp = spec.noise * size
   // Features finer than a couple of voxels would alias on the grid.
   const feature = Math.max(spec.grain * size, 2.5 * voxel)
+  const nx = dx / len
+  const ny = dy / len
+  const nz = dz / len
+  // The teeth run across the stroke. Whatever was asked for is squared up against the strike
+  // direction; with nothing usable, across is the horizontal at right angles to it, or X for
+  // a strike going straight up or down.
+  let ux = 0
+  let uy = 0
+  let uz = 0
+  const teeth = spec.teeth * size
+  if (teeth > 0) {
+    const tries: (readonly number[])[] = [[nz, 0, -nx], [1, 0, 0]]
+    if (strike.across) tries.unshift(strike.across)
+    for (const [cx, cy, cz] of tries) {
+      const along = cx! * nx + cy! * ny + cz! * nz
+      ux = cx! - along * nx
+      uy = cy! - along * ny
+      uz = cz! - along * nz
+      const ul = Math.sqrt(ux * ux + uy * uy + uz * uz)
+      if (ul > 0.05) {
+        ux /= ul
+        uy /= ul
+        uz /= ul
+        break
+      }
+    }
+  }
   return {
     ax: strike.at[0],
     ay: strike.at[1],
     az: strike.at[2],
-    dx: dx / len,
-    dy: dy / len,
-    dz: dz / len,
+    dx: nx,
+    dy: ny,
+    dz: nz,
     radius: size / 2,
     tipRadius: size / 2 * spec.tip,
     depth: Math.max(strike.depth, voxel / 8),
@@ -90,7 +129,13 @@ export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): P
     amp,
     freq: 1 / feature,
     seed: strike.seed | 0,
-    reach: BAND_VOXELS * voxel + amp
+    ux,
+    uy,
+    uz,
+    teeth,
+    // Grooves narrower than three voxels would alias on the grid.
+    teethFreq: 1 / Math.max(spec.pitch * size, 3 * voxel),
+    reach: BAND_VOXELS * voxel + amp + teeth
   }
 }
 
@@ -140,6 +185,13 @@ export function toolDistance(t: PreparedTool, x: number, y: number, z: number): 
   let d = profileDistance(r2 > 0 ? Math.sqrt(r2) : 0, w, t)
   if (t.amp > 0 && d < t.reach && d > -t.reach) {
     d -= t.amp * valueNoise3(px * t.freq, py * t.freq, pz * t.freq, t.seed)
+  }
+  if (t.teeth > 0 && d < t.reach && d > -t.reach) {
+    // A triangle wave across the stroke, placed in block coordinates (not relative to the
+    // contact point) so the grooves of one bite carry on into the next.
+    const u = (x * t.ux + y * t.uy + z * t.uz) * t.teethFreq
+    const f = u - Math.floor(u)
+    d -= t.teeth * (4 * (f < 0.5 ? 0.5 - f : f - 0.5) - 1)
   }
   return d
 }
