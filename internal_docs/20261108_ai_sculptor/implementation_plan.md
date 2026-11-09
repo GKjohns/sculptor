@@ -518,6 +518,40 @@ Ranking: Opus 5.5, Fable 5.2, Fable 5.1, Sol, Gemini. Fable 5.2 wins only on com
 
 ---
 
+### Sculpting skill pass 2: figures and poses (offline) `[Built, offline]` (November 9, 2026)
+**Goal:** Kyle: "Don't be afraid to get more artistic and intricate. Like the kinds of things Bernini would sculpt." Full figures, animals and scenes, artistic poses, never a boring default pose; and, after the parallel face pass was stopped, the faces and busts as well (the last pass's Next list). Built and validated offline at zero model spend; the paid bench runs wait on a budget. Report: `study/pose_pass.html`. Branch `figure-pass`.
+
+**What changed** (all in `shared/` and `bench/`; `KERNEL_VERSION` stays 2 and every saved study log replays to its hash):
+- `shared/sculpt/figure.ts`: the canon of the body. `declare_figure` (a new tool) takes one to three posed subjects plus the model's own shapes as one form. A figure is declared by pose: body and build, ground point, standing height, facing, legs (stand, stride, lunge, kneel, sit, recline, crouch, ride), weight_on (contrapposto: that hip up and out, shoulders tilted against it, the free knee bent), twist, lean, head turn and tilt, each arm's gesture (down, akimbo, across, forward, raised, overhead, back, out, to_head), drapery (loincloth, collar, mantle, cloak, robe), support (stump, rock) and head style tokens. Limbs reach from hip and shoulder to a target by a two-bone reach, so any pose stays jointed. A quadruped: horse, bull, lion, dog or cat in stand, walk, trot, gallop, rear, charge, lie or sit, head turned and raised or lowered, tail, lead foreleg; a rearing animal stands on its hind legs and tail. A rider sits on the first animal. Everything expands into kernel primitives before the form is logged. The result tells the model each subject's extent and where its head, hands, feet (or muzzle and back) ended up.
+- Faces and busts, starting from the stopped `bust-pass-2` snapshot (adopted in commit 21998b6; what was kept and dropped is on the report page): style tokens on the head (sex, age, build, jaw, nose, expression, gaze, hair, beard); a `torso` canon (neck, shoulders, chest narrowing to a rounded cut, arm stumps, mantle or buttoned collar, socle); canon cuts (iris rings, drilled pupils, lid lines, nostrils, mouth, curl eyes, fold valleys) carried on the form entry and struck by `detail` in its window; a hair canon. This pass then opened the eyes (a ball between two lids), slimmed the lower face, rebuilt the hair as hooked locks along the fall from the crown whorl on a hair mass, rebuilt the bust's trunk to a classical silhouette, and laid cloth in strips on the real trunk surface.
+- Kernel: a shape may carry its own `blend`, never more than the form's, so lids, lips, nostril wings and locks stay crisp on a softly blended body. Old logs carry none and replay identically.
+- Speed for forms of a hundred and more solids, both exact (the same number to the last bit, checked against every saved log): an inherited bounding-sphere cull, per-cell candidate lists (bins), and a sample memo for strike clipping.
+- `shared/agent/prompt.ts`: a COMPOSITION AND POSE section in both tool sets (choose the moment; name the dominant diagonal, silhouette, torsion, gesture and contrast of surfaces; a frontal, symmetric, static pose is a failure unless commissioned; compose within the block; supports where marble needs them), and with the formed tools the use of `declare_figure`, figure and animal measures for this block, and how to carve a figure. The bust paragraph now uses head + torso + style. `reference.ts`: the brief no longer forbids outstretched limbs or raised tails (only free strands), and asks for the moment and a Baroque pose.
+- Bench: subjects `david` ("David a moment before the throw."), `bull` ("A charging bull."), `rider` ("A rearing horse with a rider.") with their own twelve judge labels, among them the same subject at rest, so a static pose scores as a miss; the study's twelve stay as they were. The `--dry` Brain declares the new subjects with `declare_figure`. `npm run bench:poses`, `bench:canon` and `bench:timing` preview and time the canons offline.
+
+**Rough-out time against solid count** (`npm run bench:timing`, voxel 0.4, Kyle's Mac, one run each):
+
+| Form | Solids | Point at 3 cm | Claw at 0.6 cm |
+|---|---|---|---|
+| 4 plain solids | 4 | 5.7 s (2498 strikes) | 2.1 s (1485 strikes) |
+| 12 plain solids | 12 | 6.0 s (2280 strikes) | 2.7 s (1433 strikes) |
+| 24 plain solids (the study's limit) | 24 | 6.7 s (2137 strikes) | 3.0 s (1335 strikes) |
+| bust: head + torso (mantle, curls) | 199 | 16.5 s (2100 strikes) | 7.6 s (1428 strikes) |
+| David (one figure) | 79 | 11.0 s (2167 strikes) | 4.9 s (1392 strikes) |
+| contrapposto, mantle, stump | 102 | 15.2 s (2347 strikes) | 6.2 s (1326 strikes) |
+| seated figure on a rock | 120 | 11.1 s (1865 strikes) | 5.5 s (1236 strikes) |
+| rearing horse and rider | 85 | 17.3 s (2568 strikes) | 6.9 s (1402 strikes) |
+| charging bull on a rock | 38 | 7.1 s (1860 strikes) | 3.6 s (1290 strikes) |
+| Apollo and Daphne (two figures) | 177 | 24.1 s (2211 strikes) | 12.4 s (1417 strikes) |
+
+Point pass at 3 cm, then claw at 0.6 cm, the two passes every commission makes. A form of up to 24 solids (what the study's forms were) takes 6 to 7 s; a figure 11 to 16 s; a two-figure group about 25 s. Limits: `declare_figure` takes at most three subjects and 24 of the model's own shapes (`MAX_SUBJECTS`, `MAX_SHAPES`); the kernel has no limit of its own. Small heads (under 18 cm) use a coarse hair and drop sub-cell ear parts, which took a two-figure group from 258 to 177 solids.
+
+**Not done:** focus is still in-memory only (persisting it needs the loop's RunState and the worker protocol to carry it: not cheap). No paid run has used any of this: the poses, faces and prompt are judged on offline renders only. The figure canon's hands are paddles, feet are short wedges, and a figure under about 70 cm gets a plain three-solid head. Animals' heads are small and their legs thin; the lion's mane swallows the face from the front. The block is fixed at 60 x 100 x 60, so a long animal must go on the diagonal or on a rock.
+
+**What the paid runs should test** (recommendation; budget to be set): Opus 5.5 (the default) with the formed tools and the reference on: `david` x2, `bull` x2, `rider` x2, to see whether the model picks a moment and a pose unprompted and whether `declare_figure` survives contact with it; `bust` x2 on the new head, torso and canon cuts against the skill pass's best face; one `david` with Fable 5.2 for composition. About $25 at the last pass's prices, plus wall time: figure rough-outs are two to four times slower.
+
+---
+
 ## Risks
 
 | Risk | Why it might happen | What the plan does about it |

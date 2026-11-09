@@ -17,7 +17,10 @@
     "shoot": "node scripts/shoot.mjs",
     "bench:sculpt": "node --env-file-if-exists=.env bench/sculpt.ts",
     "bench:study": "node --env-file-if-exists=.env bench/study.ts",
-    "bench:report": "node bench/report.ts"
+    "bench:report": "node bench/report.ts",
+    "bench:canon": "node bench/canon.ts",
+    "bench:poses": "node bench/poses.ts",
+    "bench:timing": "node bench/timing.ts"
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",

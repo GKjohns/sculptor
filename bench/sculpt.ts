@@ -1,7 +1,7 @@
 // One headless commission: a model (or the scripted --dry Brain) carves a subject through the
 // real loop and the real kernel, and everything about the run lands in <study>/<run-id>/.
 //
-//   npm run bench:sculpt -- --subject pawn|cat|bust [--model opus|fable|sol|gemini]
+//   npm run bench:sculpt -- --subject pawn|cat|bust|david|bull|rider [--model opus|fable|fable52|sol|gemini]
 //     [--tools direct|formed] [--ref on|off] [--round A|B|C] [--max-turns 60] [--max-usd 8]
 //     [--name label] [--brain gateway|script] [--dry] [--study-cap 100] [--dir .data/study]
 //     [--json-lines] [--reasoning medium] [--turn-timeout 90] [--voxel 0.4] [--no-judge]

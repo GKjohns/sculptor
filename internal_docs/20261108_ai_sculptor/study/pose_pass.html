@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Figures and poses pass</title>
+<style>
+  :root { color-scheme: dark; --bg: #0f1115; --panel: #171a21; --line: #272c36; --text: #e6e9ef; --dim: #8b93a3; --good: #6fd08c; --bad: #f0776c; --warn: #e8b85a; --accent: #7fb4ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1500px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 0; }
+  p { margin: 8px 0; }
+  a { color: var(--accent); }
+  code { font-size: 13px; color: #d7dbe4; background: #0b0d10; padding: 1px 5px; border-radius: 4px; }
+  .dim { color: var(--dim); }
+  .good { color: var(--good); }
+  .bad { color: var(--bad); }
+  .warn { color: var(--warn); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .caveat { margin: 12px 0; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--warn); background: var(--panel); }
+  .label { display: block; margin: 0 0 4px; font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--dim); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 12px 0; align-items: start; }
+  .cards.two { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  .card img { display: block; width: 100%; height: auto; border-radius: 6px; margin: 8px 0; background: #0b0d10; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+  @media (max-width: 520px) { .cards.two { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main>
+<h1>Sculpting skill pass 2: figures, poses, faces and busts</h1>
+<p class="dim">November 9, 2026. Branch <code>figure-pass</code>, built offline: no paid model call was made. Every picture on this page is the canon on its own, expanded from a preset pose, set into the 60 x 100 x 60 cm block and either cut straight to the form or roughed out by the real hand (point at 3 cm, then claw at 0.6 cm), rendered with the look's contact-sheet renderer. Previews come from <code>npm run bench:poses</code> and <code>npm run bench:canon</code>.</p>
+
+<div class="caveat"><strong>What this page can and cannot show.</strong> These are the canons a model will be handed, posed the way the prompt now asks a model to pose them. Whether a model chooses such poses unprompted, and carves them well, needs the paid runs proposed at the bottom.</div>
+
+<h2>The brief</h2>
+<p>Kyle, after the face pass: "Don't be afraid to get more artistic and intricate. Like the kinds of things Bernini would sculpt." Full figures, animals and scenes; a horse rearing or mid-stride, not a standing box; a figure with contrapposto, torsion, gesture, drapery and a narrative moment; a bull charging with its head low. Midway the stopped face pass was folded in: busts, character in faces, lids and irises, hair, texture contrast.</p>
+
+<h2>What was built</h2>
+<ul>
+  <li><strong>A canon of the body</strong> (<code>shared/sculpt/figure.ts</code>) and a tool for it, <code>declare_figure</code>. The model gives a pose; each subject is built from jointed solids and expanded into kernel primitives before the form is logged, so <code>KERNEL_VERSION</code> stays 2. A human figure: body (man, woman, youth, child) and build; ground point, standing height and facing; legs (stand, stride, lunge, kneel, sit, recline, crouch, ride); <code>weight_on</code> (contrapposto: that hip up and out, the shoulders tilted against it, the free knee bent); twist of the shoulders against the hips; lean; head turn and tilt; nine arm gestures, each reached from the shoulder by a two-bone reach with the elbow bent toward a pole; drapery (loincloth, collar, mantle, cloak, robe); a stump or rock; and the head canon's style tokens. A quadruped: horse, bull, lion, dog, cat, in stand, walk, trot, gallop, rear, charge, lie or sit, head turned and raised or lowered, tail, lead foreleg. A rearing animal stands on its hind legs and its tail; a rider sits on the first animal. Up to three subjects plus 24 of the model's own shapes in one form. The result gives each subject's extent and its landmarks (head, hands, feet; muzzle, back, tail) so the model can lay a sling, a branch or a rock on the pose.</li>
+  <li><strong>Pose by default</strong> in the prompt (a COMPOSITION AND POSE section, both tool sets) and the reference brief: choose the moment; name the dominant diagonal, the silhouette, the torsion, the gesture and the contrast of surfaces; a frontal, symmetric, static pose is a failure unless the commission asks for it; compose within the block (the height for figures and groups, the footprint's 85 cm diagonal for a long animal, a rock to raise it); supports where marble needs them. The brief no longer forbids outstretched limbs or raised tails, only free strands.</li>
+  <li><strong>Faces and busts</strong>, starting from the stopped parallel pass (below): style tokens on the head, a torso canon, canon cuts struck by <code>detail</code>, a hair canon; then open eyes, crisp features, hooked locks, a classical trunk and cloth that wraps the body.</li>
+  <li><strong>A per-solid blend</strong> in the kernel: a lid, a lip, a nostril wing or a lock keeps a crisp join on a softly blended body. Old logs carry none and replay identically.</li>
+  <li><strong>Speed for big forms</strong>: an exact bounding-sphere cull (inherited), per-cell candidate lists and a sample memo for strike clipping, all giving the same numbers to the last bit; every saved study log still replays to its recorded hash.</li>
+  <li><strong>Bench subjects</strong> <code>david</code>, <code>bull</code>, <code>rider</code>, with their own twelve judge labels that include the same subject at rest ("human figure standing at rest", "horse standing", "cow standing"), so a timid pose is scored as a miss. The study's twelve labels for pawn, cat and bust are unchanged.</li>
+</ul>
+
+<h2>The study's figure commissions, as the canon poses them</h2>
+<p>Each card: the stone after the real hand's rough-out to the declared form (point at 3 cm, then claw at 0.6 cm), from the front, the left, the top and three quarters. This is what a model's first two cutting passes would leave if it declared these poses; the finishing is still its own.</p>
+<div class="cards two">
+  <div class="card"><span class="label">David a moment before the throw</span><img src="pose_pass/carved-david.webp" alt="Lunging figure twisted back with one arm across and one drawn behind, on a rock"><p>Lunge on the left leg, shoulders turned 38 degrees against the hips, the left arm across the body, the right drawn back, head turned toward the target and frowning, curls, a rock behind. The diagonal runs from the back foot through the hips to the drawn-back hand.</p></div>
+  <div class="card"><span class="label">A rearing horse with a rider</span><img src="pose_pass/carved-rider.webp" alt="Horse on its hind legs and tail, rider leaning forward with one arm raised"><p>The horse pitched up 48 degrees on its hind legs and tail, forelegs folded, head turned; the rider astride, leaning into the rise, one arm raised, a cloak flying behind.</p></div>
+  <div class="card"><span class="label">A charging bull</span><img src="pose_pass/carved-bull.webp" alt="Bull with head low and tail raised, on a rocky mound, set along the diagonal"><p>Head lowered and turned, forelegs reaching, hind legs driving, tail whipped up, on a rocky mound along the block's diagonal: a long animal in a tall block.</p></div>
+  <div class="card"><span class="label">Apollo and Daphne</span><img src="pose_pass/carved-daphne.webp" alt="Two striding figures, the woman ahead with arms overhead, the man behind reaching, cloak flying"><p>Two subjects in one form: Daphne striding away with both arms thrown up and her head turned back, Apollo behind reaching for her, his cloak flying and reaching the base.</p></div>
+</div>
+
+<h2>The canon's range</h2>
+<div class="cards">
+  <div class="card"><span class="label">Contrapposto, mantle, stump</span><img src="pose_pass/carved-contrapposto.webp" alt=""><p>Weight on the right leg, the hip out, the left hand on the hip, a himation over the shoulder and down the back, a tree stump as the strut.</p></div>
+  <div class="card"><span class="label">Kneeling woman, robe, hand to her brow</span><img src="pose_pass/carved-mourner.webp" alt=""><p>One knee down, the robe over the legs, leaning into the gesture.</p></div>
+  <div class="card"><span class="label">Seated on a rock</span><img src="pose_pass/carved-thinker.webp" alt=""><p>Seated, leaning forward, a hand to the head, a beard and curls.</p></div>
+  <div class="card"><span class="label">Galloping horse on a strut</span><img src="pose_pass/carved-gallop.webp" alt=""><p>The flying gallop, one hind hoof down, a column under the belly as marble horses need.</p></div>
+  <div class="card"><span class="label">Lion lying, head turned</span><img src="pose_pass/carved-lion.webp" alt=""><p>A sphinx's forelegs, the hind legs folded, the tail along the ground. The mane hides too much of the face.</p></div>
+  <div class="card"><span class="label">Dog sitting</span><img src="pose_pass/carved-dog.webp" alt=""><p>Body pitched up on straight forelegs, haunches down.</p></div>
+  <div class="card"><span class="label">Cat walking, tail up</span><img src="pose_pass/carved-cat.webp" alt=""><p>A walk with the lead foreleg reaching, head turned.</p></div>
+</div>
+
+<h2>The form itself, before any cutting</h2>
+<p>The same presets cut straight to the declared form, which is what <code>detail</code> brings the stone to in the end. These show the canon's anatomy more clearly than the rough-out does.</p>
+<div class="cards two">
+  <div class="card"><span class="label">David</span><img src="pose_pass/form-david.webp" alt=""></div>
+  <div class="card"><span class="label">Apollo and Daphne</span><img src="pose_pass/form-daphne.webp" alt=""></div>
+  <div class="card"><span class="label">Rearing horse and rider</span><img src="pose_pass/form-rider.webp" alt=""></div>
+  <div class="card"><span class="label">Charging bull</span><img src="pose_pass/form-bull.webp" alt=""></div>
+</div>
+
+<h2>Faces and busts</h2>
+<p>The parallel face pass was stopped before it committed; its snapshot was taken as the starting point (commit 21998b6). Left column: the snapshot as it stood. Right: after this pass. Both are the form cut exactly, with the canon's cuts struck from every side (<code>bench:canon --fast</code>).</p>
+<div class="cards two">
+  <div class="card"><span class="label">Snapshot: plain male head, front close-up</span><img src="pose_pass/snap-plain-face.webp" alt=""><p>Eyes are slits with noise under a visor of brow: the form's 1.2 cm blend filled every crease of the eye, and the 0.3 cm lid and iris cuts are under a cell. Hair a cap of bubbles.</p></div>
+  <div class="card"><span class="label">After: same head, same camera</span><img src="pose_pass/bust-plain-face.webp" alt=""><p>Eyes are a ball between two lids, with the iris ringed and the pupil drilled; a softer brow, a slimmer lower face, a smaller mouth and nose tip. Short hair in locks.</p></div>
+  <div class="card"><span class="label">Snapshot: Baroque bust (mantle, curls)</span><img src="pose_pass/snap-bust-round.webp" alt=""><p>Curls as drilled buttons; the mantle stood off the chest in plates and tubes; a pot-shaped chest.</p></div>
+  <div class="card"><span class="label">After: same declaration</span><img src="pose_pass/bust-bust-round.webp" alt=""><p>Curls as hooked locks falling from the crown with drilled eyes; the mantle laid in strips that wrap the chest from the shoulder to the opposite side and down the back; a classical trunk narrowing to the socle.</p></div>
+  <div class="card"><span class="label">After: woman, bun and waves, head turned</span><img src="pose_pass/bust-woman-round.webp" alt=""></div>
+  <div class="card"><span class="label">After: old man, beard, frown, collar</span><img src="pose_pass/bust-old-round.webp" alt=""></div>
+</div>
+<p class="verdict"><strong>Verdict, by eye.</strong> Better than either starting point, and still stylised. The eyes now read as eyes at bust scale; the hair reads as hair and has movement; the bust has shoulders and a chest. Faces still look like siblings at a distance, the neck from the side is long, breasts and shoulders are too round, and the beard reads more as a fringe of fingers than curls.</p>
+
+<h2>What was kept from the stopped face pass, and what was dropped</h2>
+<div class="scroll"><table>
+<thead><tr><th>Piece</th><th>Kept?</th><th>Why</th></tr></thead>
+<tbody>
+<tr><td>Style tokens on the head (<code>headKnobs</code>)</td><td class="good">Kept</td><td>Flat, enumerable, no schema unions; gives faces character. Figures pass their own tokens through.</td></tr>
+<tr><td>Torso canon (<code>torso.ts</code>)</td><td class="good">Kept, trunk rewritten</td><td>Right idea (a bust is a head and a torso, the neck made between them). Its trunk was a pot and its mantle stood off the body; both rebuilt.</td></tr>
+<tr><td>Canon cuts and <code>incise</code></td><td class="good">Kept</td><td>Exactly the "lid groove and iris in the canon" from the last pass's Next list. Brow creases dropped (scratches at 0.4 cm); cut sizes under about a cell and a half are dropped at figure scale.</td></tr>
+<tr><td>Hair canon (<code>hair.ts</code>)</td><td class="warn">Rewritten</td><td>Its curls were drilled buttons and its caps hid the locks; replaced by hooked locks along the fall from the crown whorl, on a hair mass, with a coarse variant for figure heads.</td></tr>
+<tr><td>Bounding-sphere cull in <code>formDistance</code></td><td class="good">Kept</td><td>Exact (proved bounds; skipping only shapes that cannot change the union), and every saved log replays. Bins and a sample memo added on top.</td></tr>
+<tr><td>Frame helpers (<code>frame.ts</code>)</td><td class="good">Kept</td><td>The figure canon uses them too.</td></tr>
+<tr><td><code>bench/canon.ts</code></td><td class="good">Kept</td><td>Its fast mode is how the face was tuned here; it now takes several presets at once.</td></tr>
+<tr><td>Required <code>style</code> on every shape</td><td class="good">Kept</td><td>The schemas forbid optional fields; the scripted Brain and tests now pass an empty list.</td></tr>
+</tbody></table></div>
+
+<h2>Rough-out time against solid count</h2>
+<p><code>npm run bench:timing</code>, voxel 0.4, one run each on Kyle's Mac. The two passes every commission makes: the point at 3 cm, then the claw at 0.6 cm. "Blobs" are the study's kind of form, a column of plain solids.</p>
+<div class="scroll"><table>
+<thead><tr><th>Form</th><th class="num">Solids</th><th class="num">Point at 3 cm</th><th class="num">Strikes</th><th class="num">Claw at 0.6 cm</th><th class="num">Strikes</th></tr></thead>
+<tbody>
+<tr><td>4 plain solids</td><td class="num">4</td><td class="num">5.7 s</td><td class="num">2498</td><td class="num">2.1 s</td><td class="num">1485</td></tr>
+<tr><td>12 plain solids</td><td class="num">12</td><td class="num">6.0 s</td><td class="num">2280</td><td class="num">2.7 s</td><td class="num">1433</td></tr>
+<tr><td>24 plain solids (the study's limit)</td><td class="num">24</td><td class="num">6.7 s</td><td class="num">2137</td><td class="num">3.0 s</td><td class="num">1335</td></tr>
+<tr><td>bust: head + torso (mantle, curls)</td><td class="num">199</td><td class="num">16.5 s</td><td class="num">2100</td><td class="num">7.6 s</td><td class="num">1428</td></tr>
+<tr><td>David (one figure)</td><td class="num">79</td><td class="num">11.0 s</td><td class="num">2167</td><td class="num">4.9 s</td><td class="num">1392</td></tr>
+<tr><td>contrapposto, mantle, stump</td><td class="num">102</td><td class="num">15.2 s</td><td class="num">2347</td><td class="num">6.2 s</td><td class="num">1326</td></tr>
+<tr><td>seated figure on a rock</td><td class="num">120</td><td class="num">11.1 s</td><td class="num">1865</td><td class="num">5.5 s</td><td class="num">1236</td></tr>
+<tr><td>rearing horse and rider</td><td class="num">85</td><td class="num">17.3 s</td><td class="num">2568</td><td class="num">6.9 s</td><td class="num">1402</td></tr>
+<tr><td>charging bull on a rock</td><td class="num">38</td><td class="num">7.1 s</td><td class="num">1860</td><td class="num">3.6 s</td><td class="num">1290</td></tr>
+<tr><td>Apollo and Daphne (two figures)</td><td class="num">177</td><td class="num">24.1 s</td><td class="num">2211</td><td class="num">12.4 s</td><td class="num">1417</td></tr>
+</tbody></table></div>
+<p>Big forms cost two to four times a study form: a figure 11 to 16 s for the first pass, a two-figure group about 25 s. The profile shows the union of solids is still most of it; the cull, bins and memo together saved about 20 percent on the bust and David. Limits: three subjects and 24 of the model's own shapes per <code>declare_figure</code>; small heads (under 18 cm) use coarse hair and drop sub-cell ear parts, which took Apollo and Daphne from 258 to 177 solids.</p>
+
+<h2>Validation</h2>
+<ul>
+  <li><code>npm test</code>: 210 tests pass, including the saved-log guarantee (every finished study run under <code>.data/study</code> written by kernel 2 replays to its recorded hash), new figure tests (grounding, contrapposto, lunge and facing, gestures, torsion, animal poses, the rider's seat, rough-out as one mass, <code>declare_figure</code> through the schema and the Studio) and new head, hair and bust landmark tests.</li>
+  <li><code>npm run typecheck</code> and <code>npm run lint</code>: clean.</li>
+  <li><code>npm run bench:sculpt -- --dry</code> for <code>david</code>, <code>bull</code> and <code>rider</code> (and <code>rider --ref on</code>): the scripted Brain declares each with <code>declare_figure</code>, roughs out, finishes; every run's log replays to its stone.</li>
+  <li>The app: a dev server from this worktree (port 3132) and <code>npm run shoot -- --gl --query demo=1</code>: the page and the kernel worker (which now bundles the figure canon) load and render with no errors.</li>
+</ul>
+
+<h2>Not done, and weak</h2>
+<ul>
+  <li><strong>No paid run.</strong> Nothing here says a model will pick these poses, or carve them; that is the next step.</li>
+  <li><strong>Focus is not persisted</strong>: it would need the loop's state and the worker protocol to carry it. Not cheap, left as it was.</li>
+  <li>Figure anatomy is a mannequin's: paddle hands, wedge feet, no knees or elbows to speak of, a chest of four masses. A figure under about 70 cm gets a three-solid head.</li>
+  <li>Animals: heads small and necks thin; the lion's mane hides its face; the horse's ears read as a horn from some sides; tails are tubes.</li>
+  <li>The block is fixed at 60 x 100 x 60. A long animal goes on the diagonal or on a rock; a per-commission block would serve the bull better.</li>
+  <li>Busts: faces are still siblings at a distance, the neck long from the side, breasts and shoulders too round.</li>
+</ul>
+
+<h2>Recommended paid runs</h2>
+<div class="scroll"><table>
+<thead><tr><th>Subject</th><th>Model</th><th>Runs</th><th>What it answers</th></tr></thead>
+<tbody>
+<tr><td><code>david</code></td><td>Opus 5.5</td><td class="num">2</td><td>Does the model choose a moment, a lunge and a twist on its own, and use <code>declare_figure</code> and its landmarks (a sling in the hand)?</td></tr>
+<tr><td><code>bull</code></td><td>Opus 5.5</td><td class="num">2</td><td>A long animal in a tall block: diagonal or rock? Head low? The judge's "cow standing" catches a static one.</td></tr>
+<tr><td><code>rider</code></td><td>Opus 5.5</td><td class="num">2</td><td>Two subjects in one form, a rear on hind legs and tail, carved as one mass.</td></tr>
+<tr><td><code>bust</code></td><td>Opus 5.5</td><td class="num">2</td><td>Head, torso, style tokens and canon cuts against the last pass's best face (skill-4).</td></tr>
+<tr><td><code>david</code></td><td>Fable 5.2</td><td class="num">1</td><td>The last pass's best composer, on composition.</td></tr>
+</tbody></table></div>
+<p>Nine runs, about $25 at the last pass's prices (Opus about $1.50 to $2.20 a run, Fable 5.2 about $4.50), formed tools, reference on. Expect longer wall time: figure rough-outs are two to four times slower than a study form's.</p>
+</main>
+</body>
+</html>

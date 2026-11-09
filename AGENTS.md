@@ -42,7 +42,10 @@ app/
   workers/kernel.worker.ts        the kernel in a worker: the true stone with the Studio running against it, the shown stone remeshed chunk by chunk, look PNGs and the reference sheet decoded here, snapshots of a stone kept for scrubbing
 shared/
   sculpt/                         the kernel: grid, strikes, mesher (which also bakes the per-vertex thickness the marble reads), islands, hand, observer. No three.js, no DOM
-  sculpt/anatomy.ts               the sculptor's canon: a declared `head` expanded into kernel primitives before anything is logged
+  sculpt/anatomy.ts               the sculptor's canon: a declared `head` (with style tokens and canon cuts) or `torso` expanded into kernel primitives before anything is logged
+  sculpt/hair.ts, torso.ts        the head's hair and beard; the bust's trunk, neck, drapery and socle
+  sculpt/figure.ts                the canon of the body: posed human figures, quadrupeds and groups (declare_figure), reaching limbs from hip and shoulder
+  sculpt/frame.ts                 the canon's matrix and frame helpers
   sculpt/display.ts               DisplayStone: lets loose stone fall on screen ahead of the log's island check without touching the log's stone
   sculpt/protocol.ts              the messages between page and worker; every one names a stone ('true' | 'shown')
   agent/                          the look, think, carve loop and its Brain and Studio seams
@@ -88,8 +91,9 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
   - `--downloads dir`: saves whatever the page hands the browser to save, e.g. `--eval "__sculptor.film({ seconds: 60 })" --downloads .shots/films`.
   - `--api`: lists every `/api/` request the page made (a replay should make no model calls).
 - Shots land in `.shots/` (gitignored). Keepers are copied by hand into a plan's `verification/screenshots/`.
-- `npm run bench:sculpt -- --subject pawn|cat|bust [--model opus|fable|fable52|sol|gemini] [--tools direct|formed] [--ref on|off] [--round A|B|C] [--planner <model>]`: one headless commission into `.data/study/<run-id>/`. `--dry` runs a scripted Brain with no key into `.data/study-dry/`. Flags are listed at the top of `bench/sculpt.ts`.
+- `npm run bench:sculpt -- --subject pawn|cat|bust|david|bull|rider [--model opus|fable|fable52|sol|gemini] [--tools direct|formed] [--ref on|off] [--round A|B|C] [--planner <model>]`: one headless commission into `.data/study/<run-id>/`. `--dry` runs a scripted Brain with no key into `.data/study-dry/`. Flags are listed at the top of `bench/sculpt.ts`.
 - `npm run bench:study -- --round A` (then `--round B --tools X`, `--round C --tools X --ref on|off`): a whole round, three runs at a time. Spend is capped per run (`--max-usd`, default 8) and across the study (`--study-cap`, default 100, summed from `.data/study/ledger/`).
+- `npm run bench:canon -- --preset bust|woman|plain|old|all [--fast]` and `npm run bench:poses -- --preset david|...|all [--carve]`: the head, bust, figure and animal canons on their own, rendered to `.shots/canon` and `.shots/poses`, no model. `npm run bench:timing`: a full rough-out timed against how many solids the form holds.
 - `npm run bench:report`: writes `internal_docs/20261108_ai_sculptor/study/report.html` from whatever has been run.
 
 ## Rules
@@ -124,13 +128,19 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 - Nuxt UI 4 primitives for every panel and control. Dark only. The canvas and the film-style HUD layout are the only custom layout.
 - Model calls go through the Vercel AI Gateway only (`AI_GATEWAY_API_KEY`), per `~/claude-ops/conventions/ai_sdk_usage.md`.
 
-**Carving tools (skill pass).**
-- `declare_form` accepts `kind: head`: `shared/sculpt/anatomy.ts` expands it to about two dozen kernel primitives (cranium, brow, sockets, nose, lips, chin, jaw, ears) before the form is logged, so logs hold only kernel kinds and replay on kernel 2. Tune the face there, offline, with no model spend; `tests/anatomy.test.ts` pins the landmarks.
+**Carving tools (skill passes).**
+- `declare_form` accepts `kind: head` and `kind: torso`: `shared/sculpt/anatomy.ts` (with `hair.ts` and `torso.ts`) expands them into kernel primitives (a head is fifty to a hundred: skull, eyes between lids, nose, lips, jaw, ears and hair in locks; a torso is neck, shoulders, chest to a rounded cut, drapery and socle) before the form is logged, so logs hold only kernel kinds and replay on kernel 2. Every shape carries `style` tokens (sex, age, jaw, nose, expression, gaze, hair, beard; drapery and socle for a torso), an empty list for the plain kinds. Tune the canon offline with `npm run bench:canon -- --fast`; `tests/anatomy.test.ts` pins the landmarks.
+- Canon cuts: the head and torso also mark hollows (iris ring, drilled pupil, lid lines, nostrils, mouth, curl eyes, folds) that ride on the form's log entry (`FormStrike.cuts`, which the kernel ignores) and are struck by `detail` in its window (`incise` in `hand.ts`) as ordinary strikes.
+- A shape may carry its own `blend` (never more than the form's): the canon's lids, lips, nostrils and locks stay crisp on a softly blended body. Old logs have none and replay as before.
+- `declare_figure` (`shared/sculpt/figure.ts`): one to three posed subjects plus the model's own shapes as one form. Figures: body, build, ground point, height, facing, legs (stand, stride, lunge, kneel, sit, recline, crouch, ride), weight_on (contrapposto), twist, lean, head turn/tilt, each arm's gesture, drapery, support, head style. Animals: horse, bull, lion, dog, cat; stand, walk, trot, gallop, rear, charge, lie, sit; head turn/raise, tail, lead. Limbs reach from hip and shoulder by a two-bone reach; a rider sits on the first animal. The result gives each subject's extent and landmarks. Tune with `npm run bench:poses`; `tests/figure.test.ts` pins the poses.
+- Forms of many solids: `formDistance` keeps per-cell candidate lists (bins) and strike clipping a sample memo (`formDistanceAt`), both exact (same number to the last bit). A two-figure group (~180 solids) roughs out in about 25 s at 3 cm against 7 s for a 24-solid form.
+- The prompt's COMPOSITION AND POSE section and the reference brief ask for a moment, a dominant diagonal, torsion, a gesture and supports, and call a frontal, symmetric, static pose a failure unless commissioned. Keep that block separate from the tool notes so prompt edits merge.
 - `detail` is a windowed `roughOut` (`window` option in `hand.ts`): flat chisel, margin 0.1, no saw, only surfaces facing the view. It is how a face is finished; the form is what you get.
 - Detail mode: `focus` / `unfocus` live in the Studio (`shared/agent/studio.ts`), not the loop. While focused, `look` shows the window, strokes must be from that view, inside it and under a fifth of its width, and `rough_out` and `saw` are refused. Close-ups report the surface's relief along their centre lines. Focus is in-memory only: a reload or a context rebuild leaves the sculptor unfocused.
 - The rasp protects the form last cut to by `rough_out` or `detail` (`RaspPass.protect`), so smoothing cannot take a declared feature down.
 - `shared/agent/planner.ts` splits a commission between a planner (the first three turns: plan, form, first rough-out) and an executor; `--planner` in the bench, `?planner=` or `sculptor.planner` in `app.config.ts` in the app. The planner's reasoning parts are dropped before the executor sees the history.
 - The camera takes a macro shot for `closeup` and `focus` looks (`Macro` in `camera.ts`, carried on `TimelineLook.macro`).
+- Bench subjects: pawn, cat, bust (the study's twelve judge labels) and david, bull, rider (their own twelve, with the same subject at rest among the distractors).
 
 **Process.**
 - Commit locally per sprint. Do not push or create a remote until Kyle says so.
