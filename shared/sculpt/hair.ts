@@ -128,6 +128,61 @@ function hooks(count: number, width: number, thick: number, proud: number, lengt
   return { parts, cuts }
 }
 
+// Swept locks, as Bernini carved hair: broad tresses lying in one direction from a parting
+// (on the figure's left of the crown), each in three pieces curving as it falls and ending in a
+// turned tip, blended into one mass (their own blend is soft, so the gaps between them are
+// grooves, not cracks). One groove runs along each lock; every fourth tip is undercut with
+// the drill. `hook`, degrees, is how far the tip turns.
+function swept(count: number, width: number, thick: number, proud: number, length: number, hook: number): Hair {
+  const parts: Part[] = []
+  const cuts: PartCut[] = []
+  const PART = 2.6
+  let n = 0
+  for (const [a, e] of spread(count, (a, e) => e >= hairline(a) + 6)) {
+    const s = skullAt(a, e)
+    const side = s.p[0] >= PART ? 1 : -1
+    // Away from the parting over the top, falling down and back behind.
+    const back = Math.max(0, Math.min(1, (2 - s.p[2]) / 8))
+    const raw: Vec3 = add(scale([side, -0.55, 0.12], 1 - back), scale([0.35 * side, -1, -0.25], back))
+    const along = (n2: Vec3, r: Vec3): Vec3 => normalize(sub(r, scale(n2, r[0] * n2[0] + r[1] * n2[1] + r[2] * n2[2])))
+    // Each step is laid back on the skull, so a lock follows the head's curve instead of
+    // leaving it; it stops at the hairline.
+    const lift = proud - thick / 2
+    let surf = s
+    let at = add(s.p, scale(s.n, lift))
+    let dir = along(s.n, raw)
+    const turn = n % 2 === 0 ? 1 : -1
+    const chain: Vec3[] = [at]
+    for (let i = 0; i < 3; i++) {
+      const l = length * (i === 2 ? 0.7 : 1)
+      const ahead = add(sub(at, scale(surf.n, lift)), scale(dir, l))
+      const d = normalize(sub(ahead, ORIGIN))
+      const az = Math.atan2(d[0], d[2]) / DEG
+      const el = Math.asin(Math.max(-1, Math.min(1, d[1]))) / DEG
+      if (el < hairline(az) - 2) break
+      const nextSurf = skullAt(az, el)
+      const next = add(nextSurf.p, scale(nextSurf.n, lift * (1 - 0.1 * i)))
+      const w = width * (1 - 0.18 * i)
+      parts.push({ kind: 'capsule', c: scale(add(at, next), 0.5), s: [w, length + w, thick * (1 - 0.12 * i)], r: eulerFromY(sub(next, at), nextSurf.n), k: 0.6 })
+      at = next
+      surf = nextSurf
+      chain.push(at)
+      // Each piece turns a little more, and the last turns the tip.
+      const sideways = normalize(cross(surf.n, dir))
+      const t = (i === 1 ? hook : 18) * DEG * turn
+      dir = along(surf.n, add(scale(dir, Math.cos(t)), scale(sideways, Math.sin(t))))
+    }
+    if (chain.length < 3) {
+      n++
+      continue
+    }
+    cuts.push({ label: 'lock', tool: 'roundel', size: 0.7, depth: 0.45, points: chain.slice(0, 3).map(p => add(p, scale(normalize(sub(p, ORIGIN)), thick / 2))), dir: null })
+    if (n % 4 === 0) cuts.push({ label: 'curl', tool: 'drill', size: 0.9, depth: 1.0, points: [add(chain[2]!, scale(s.n, 0.2))], dir: scale(s.n, -1) })
+    n++
+  }
+  return { parts, cuts }
+}
+
 // Locks: tresses that run from `from` to the hairline (or to `to` when given), each a chain of
 // tubes with a groove along it. Azimuths every `step` degrees.
 function locks(step: number, thick: number, proud: number, start: (a: number) => [number, number], end: (a: number) => [number, number], wave: number): Hair {
@@ -212,8 +267,8 @@ export function hairParts(k: HeadKnobs, coarse = false): Hair {
   let hair: Hair = { parts: [], cuts: [] }
   switch (k.hair) {
     case 'curls': {
-      const h = hooks(Math.round(84 * c), 3.0 * w, 1.5 * w, 2.3 * w, 2.5 * w, 90, !coarse, 0, coarse)
-      hair = { parts: [...cap(0.8), ...h.parts], cuts: h.cuts }
+      const h = coarse ? hooks(Math.round(84 * c), 3.0 * w, 1.5 * w, 2.3 * w, 2.5 * w, 90, false, 0, true) : swept(46, 4.2, 1.9, 2.0, 3.2, 70)
+      hair = { parts: [...cap(0.9), ...h.parts], cuts: h.cuts }
       break
     }
     case 'long': {

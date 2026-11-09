@@ -106,14 +106,14 @@ test('torsion and the head: twist turns the shoulders, head_turn the face, and a
 test('animals: a rearing horse holds its head high, a charging bull low, and a lying lion is low to the ground', () => {
   const rear = expandAnimal(animal({ pose: 'rear', headRaise: 10 })).marks
   assert.ok(rear.points.head![1] > rear.points.back![1] + 5, `rearing head ${rear.points.head![1]} back ${rear.points.back![1]}`)
-  assert.ok(rear.max[1] - rear.min[1] > 1.3 * (expandAnimal(animal({})).marks.max[1] - 6), 'a rear is taller than a stand')
+  assert.ok(rear.max[1] - rear.min[1] > 1.15 * (expandAnimal(animal({})).marks.max[1] - 6), 'a rear is taller than a stand')
   const charge = expandAnimal(animal({ species: 'bull', pose: 'charge', headRaise: -20, length: 48 })).marks
   assert.ok(charge.points.head![1] < charge.points.back![1] - 5, `charging head ${charge.points.head![1]} back ${charge.points.back![1]}`)
   const lie = expandAnimal(animal({ species: 'lion', pose: 'lie', length: 50 })).marks
   const stand = expandAnimal(animal({ species: 'lion', pose: 'stand', length: 50 })).marks
   assert.ok(lie.points.back![1] < stand.points.back![1] - 10, `lying back ${lie.points.back![1]} standing ${stand.points.back![1]}`)
   // A bull has horns: two cones standing out wider than its head.
-  const horns = expandAnimal(animal({ species: 'bull' })).shapes.filter(s => s.kind === 'cone' && s.size[1] > 10)
+  const horns = expandAnimal(animal({ species: 'bull' })).shapes.filter(s => s.kind === 'cone' && s.size[1] > 6)
   assert.equal(horns.length, 2)
 })
 

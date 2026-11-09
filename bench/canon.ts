@@ -38,11 +38,11 @@ const shape = (kind: Kind, c: [number, number, number], s: [number, number, numb
 export const PRESETS: Record<string, { shapes: ShapeArgs[], blend: number, head: [number, number] }> = {
   bust: {
     shapes: [
-      shape('head', [0, 83, 1], [22, 32, 27], [6, 16, 3], ['male', 'mature', 'curls', 'lips_parted', 'gaze_left', 'aquiline_nose']),
+      shape('head', [0, 80, 1.5], [24, 35, 29.5], [6, 16, 3], ['male', 'mature', 'curls', 'lips_parted', 'gaze_left', 'aquiline_nose']),
       shape('torso', [0, 36, -1], [60, 46, 30], [0, -8, -3], ['mantle', 'socle'])
     ],
     blend: 1.2,
-    head: [0, 80]
+    head: [0, 77]
   },
   woman: {
     shapes: [

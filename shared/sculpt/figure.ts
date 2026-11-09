@@ -482,9 +482,10 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
   if (riding) {
     // Astride: the pelvis on the animal's back, thighs round the barrel, shins hanging.
     const w = seat.halfWidth / H
-    P = [0, 0.06, 0]
+    P = [0, 0.075, 0]
     pelvisTurn = ID
-    const ft = (s: number): Foot => ({ at: [s * (w + 0.035), -0.34, 0.07], heel: -10, pole: [s * 0.8, 0, 1] })
+    // The legs down the flanks, knees forward and out round the barrel, heels down.
+    const ft = (s: number): Foot => ({ at: [s * (w + 0.05), -0.33, 0.05], heel: -10, pole: [s * 1.1, 0, 1] })
     feet = [ft(1), ft(-1)]
   }
   const thigh = v.hip - v.knee
@@ -555,7 +556,10 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
     parts.push(limb('ellipsoid', elbow, wrist, 0.052 * g * b.limb, 0.047 * g * b.limb, pole, 1.18))
     let handDir = norm(sub(wrist, elbow))
     if (gs.body === 'hip' && lp.prop !== s) handDir = norm(ap(chestTurn, [-s * 0.35, -0.4, 0.85]))
-    parts.push(part('ellipsoid', add(wrist, mul(handDir, 0.42 * v.hand)), [0.044, v.hand * 0.95, 0.026], alongY(handDir, pole)))
+    const handTurn = alongY(handDir, pole)
+    parts.push(part('ellipsoid', add(wrist, mul(handDir, 0.42 * v.hand)), [0.044, v.hand * 0.95, 0.026], handTurn))
+    // The thumb, a mass along the inside edge of the hand, so it is not a paddle.
+    parts.push(part('ellipsoid', add(wrist, ap(handTurn, [-s * 0.02, 0.28 * v.hand, 0.012])), [0.018, 0.55 * v.hand, 0.02], mm(handTurn, rotZ(s * 18))))
     hands.push(add(wrist, mul(handDir, 0.6 * v.hand)))
   }
 
@@ -578,6 +582,8 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
     parts.push(part('ellipsoid', add(add(knee, mul(sub(ankle, knee), 0.3)), mul(back, 0.012)), [0.06 * g * b.limb, 0.55 * shin, 0.066 * g * b.limb], alongY(along, kneePole)))
     const footTurn = riding ? mm(rotX(ft.heel)) : mm(rotY(s * 8), rotX(ft.heel))
     parts.push(part('ellipsoid', add(ankle, ap(footTurn, [0, -0.022, 0.045])), [0.048, 0.036, 0.14], footTurn))
+    // The heel behind the ankle, so the foot is not a wedge.
+    parts.push(part('ellipsoid', add(ankle, ap(footTurn, [0, -0.02, -0.018])), [0.042, 0.042, 0.05], footTurn))
   }
 
   // --- what holds it up ---
@@ -777,7 +783,9 @@ interface SpeciesDef {
   hind: Leg
   hindRake: number
   // Neck: root (y, z), length, width, depth, angle above horizontal when standing.
-  neck: { y: number, z: number, length: number, width: number, depth: number, angle: number }
+  neck: { y: number, z: number, length: number, width: number, depth: number, angle: number, arch?: number }
+  // A fold of skin hanging under the neck (a bull's): its size.
+  dewlap?: V
   // Head: length from poll to muzzle tip, skull and muzzle sizes, its angle below horizontal.
   head: { length: number, skull: V, muzzle: V, droop: number }
   ears: { size: V, spread: number, rake: number }
@@ -797,26 +805,27 @@ const SPECIES_DEFS: Record<Species, SpeciesDef> = {
     fore: { root: [0.1, 0.57, 0.34], seg: [0.27, 0.2, 0.1], width: [0.12, 0.072, 0.075], foot: [0.1, 0.08, 0.11], upper: [0.15, 0.22, 0.17] },
     hind: { root: [0.11, 0.6, -0.33], seg: [0.29, 0.22, 0.1], width: [0.12, 0.075, 0.075], foot: [0.1, 0.08, 0.11], upper: [0.16, 0.28, 0.22] },
     hindRake: -22,
-    neck: { y: 0.9, z: 0.36, length: 0.48, width: 0.17, depth: 0.3, angle: 52 },
-    head: { length: 0.44, skull: [0.17, 0.2, 0.22], muzzle: [0.13, 0.15, 0.24], droop: 58 },
+    neck: { y: 0.88, z: 0.34, length: 0.52, width: 0.18, depth: 0.34, angle: 52, arch: 34 },
+    head: { length: 0.52, skull: [0.19, 0.24, 0.25], muzzle: [0.14, 0.17, 0.32], droop: 52 },
     ears: { size: [0.05, 0.11, 0.04], spread: 0.05, rake: -15 },
     mane: 'crest',
     tail: { y: 0.94, z: -0.5, length: 0.6, width: 0.11, tuft: 0 },
     paws: false
   },
   bull: {
-    barrel: [0.66, [0.5, 0.54, 0.9]],
-    chest: [0.64, 0.34, [0.48, 0.6, 0.4]],
-    haunch: [0.68, -0.34, [0.44, 0.5, 0.38]],
+    barrel: [0.66, [0.5, 0.54, 0.95]],
+    chest: [0.66, 0.3, [0.52, 0.64, 0.46]],
+    haunch: [0.66, -0.3, [0.44, 0.5, 0.4]],
     fore: { root: [0.13, 0.41, 0.34], seg: [0.2, 0.13, 0.08], width: [0.15, 0.09, 0.095], foot: [0.11, 0.08, 0.12], upper: [0.19, 0.24, 0.2] },
     hind: { root: [0.14, 0.44, -0.33], seg: [0.22, 0.15, 0.08], width: [0.14, 0.09, 0.095], foot: [0.11, 0.08, 0.12], upper: [0.2, 0.3, 0.24] },
     hindRake: -20,
-    neck: { y: 0.76, z: 0.4, length: 0.22, width: 0.36, depth: 0.46, angle: 12 },
-    head: { length: 0.38, skull: [0.27, 0.26, 0.24], muzzle: [0.23, 0.19, 0.19], droop: 62 },
+    neck: { y: 0.74, z: 0.4, length: 0.24, width: 0.38, depth: 0.48, angle: 10 },
+    dewlap: [0.16, 0.3, 0.22],
+    head: { length: 0.42, skull: [0.3, 0.3, 0.28], muzzle: [0.26, 0.22, 0.26], droop: 38 },
     ears: { size: [0.1, 0.045, 0.04], spread: 0.15, rake: 0 },
-    horns: { length: 0.32, base: 0.085 },
-    hump: [0.38, 0.24, 0.36],
-    tail: { y: 0.88, z: -0.52, length: 0.55, width: 0.045, tuft: 0.08 },
+    horns: { length: 0.34, base: 0.09 },
+    hump: [0.42, 0.28, 0.4],
+    tail: { y: 0.84, z: -0.47, length: 0.5, width: 0.06, tuft: 0.08 },
     paws: false
   },
   lion: {
@@ -826,8 +835,8 @@ const SPECIES_DEFS: Record<Species, SpeciesDef> = {
     fore: { root: [0.1, 0.38, 0.33], seg: [0.22, 0.12, 0.05], width: [0.1, 0.075, 0.07], foot: [0.11, 0.065, 0.13], upper: [0.14, 0.2, 0.15] },
     hind: { root: [0.1, 0.42, -0.32], seg: [0.24, 0.15, 0.05], width: [0.1, 0.065, 0.065], foot: [0.1, 0.06, 0.13], upper: [0.15, 0.26, 0.2] },
     hindRake: -28,
-    neck: { y: 0.66, z: 0.36, length: 0.2, width: 0.22, depth: 0.26, angle: 30 },
-    head: { length: 0.32, skull: [0.27, 0.26, 0.25], muzzle: [0.17, 0.15, 0.16], droop: 18 },
+    neck: { y: 0.66, z: 0.36, length: 0.22, width: 0.24, depth: 0.28, angle: 34 },
+    head: { length: 0.38, skull: [0.3, 0.29, 0.28], muzzle: [0.2, 0.17, 0.2], droop: 18 },
     ears: { size: [0.06, 0.06, 0.03], spread: 0.08, rake: -10 },
     mane: 'ruff',
     tail: { y: 0.66, z: -0.48, length: 0.7, width: 0.04, tuft: 0.07 },
@@ -840,8 +849,8 @@ const SPECIES_DEFS: Record<Species, SpeciesDef> = {
     fore: { root: [0.08, 0.44, 0.32], seg: [0.24, 0.15, 0.05], width: [0.08, 0.055, 0.055], foot: [0.08, 0.05, 0.1], upper: [0.11, 0.2, 0.13] },
     hind: { root: [0.08, 0.47, -0.31], seg: [0.27, 0.17, 0.05], width: [0.08, 0.05, 0.05], foot: [0.075, 0.05, 0.1], upper: [0.12, 0.26, 0.18] },
     hindRake: -30,
-    neck: { y: 0.72, z: 0.34, length: 0.22, width: 0.16, depth: 0.2, angle: 42 },
-    head: { length: 0.38, skull: [0.21, 0.2, 0.22], muzzle: [0.12, 0.12, 0.21], droop: 12 },
+    neck: { y: 0.7, z: 0.34, length: 0.2, width: 0.18, depth: 0.22, angle: 40 },
+    head: { length: 0.42, skull: [0.25, 0.24, 0.26], muzzle: [0.15, 0.14, 0.24], droop: 14 },
     ears: { size: [0.05, 0.1, 0.03], spread: 0.06, rake: -8 },
     tail: { y: 0.72, z: -0.46, length: 0.42, width: 0.05, tuft: 0 },
     paws: true
@@ -874,7 +883,7 @@ const GAITS: Record<AnimalPose, Gait> = {
   trot: { fore: [[38, -75, -20], [-14, 0, 0]], hind: [[-8, 20, 0], [12, 50, -40]], pitch: 0, neck: 4, head: 4 },
   gallop: { fore: [[62, -12, 0], [26, -100, -30]], hind: [[16, 30, 0], [-52, 28, 12]], pitch: 0, neck: -12, head: -10 },
   rear: { fore: [[62, -125, -15], [44, -115, -10]], hind: [[6, 4, 0], [-4, 10, 0]], pitch: -48, neck: -8, head: -8 },
-  charge: { fore: [[34, -6, 0], [-22, -60, -10]], hind: [[-18, 34, 0], [-52, 30, 12]], pitch: 7, neck: -30, head: -14 },
+  charge: { fore: [[38, -8, 0], [-10, -70, -10]], hind: [[-14, 30, 0], [-50, 26, 14]], pitch: 7, neck: -26, head: 0 },
   lie: { fore: [[92, -176, 0], [90, -174, 0]], hind: [[88, -178, 0], [86, -176, 0]], pitch: 0, neck: 8, head: 0, rake: false },
   sit: { fore: [[-4, 0, 0], [-2, 0, 0]], hind: [[-70, 155, 0], [-68, 152, 0]], pitch: -36, neck: 10, head: 0, rake: false }
 }
@@ -930,36 +939,54 @@ export function expandAnimal(a: AnimalSpec): { shapes: Shape[], marks: Landmarks
   legAt(sp.hind, -lead, gait.hind[1], true)
 
   // --- neck and head ---
+  // The neck in two pieces, the upper one bent forward by the arch (a horse's crest), thick at
+  // the root and narrowing to the poll; the head a skull and a muzzle along its own line.
   const neckRoot = bodyAt([0, sp.neck.y, sp.neck.z])
   const turn = rotY(0.5 * a.headTurn)
   const neckAngle = sp.neck.angle + gait.neck + 0.6 * a.headRaise - 0.5 * gait.pitch
-  const neckDir = ap(turn, [0, Math.sin(neckAngle * DEG), Math.cos(neckAngle * DEG)])
-  const poll = add(neckRoot, mul(neckDir, sp.neck.length))
-  parts.push(part('ellipsoid', add(neckRoot, mul(neckDir, 0.45 * sp.neck.length)), [sp.neck.width, sp.neck.length * 1.35, sp.neck.depth], alongY(neckDir, [0, -1, 0.3])))
+  const arch = sp.neck.arch ?? 0
+  const neckAt = (deg: number): V => ap(turn, [0, Math.sin(deg * DEG), Math.cos(deg * DEG)])
+  const lower = neckAt(neckAngle + arch / 2)
+  const upper = neckAt(neckAngle - arch / 2)
+  const neckMid = add(neckRoot, mul(lower, 0.5 * sp.neck.length))
+  const poll = add(neckMid, mul(upper, 0.5 * sp.neck.length))
+  const neckDir = norm(sub(poll, neckRoot))
+  parts.push(part('ellipsoid', add(neckRoot, mul(lower, 0.22 * sp.neck.length)), [sp.neck.width, sp.neck.length * 0.85, sp.neck.depth], alongY(lower, [0, -1, 0.3])))
+  parts.push(part('ellipsoid', add(neckMid, mul(upper, 0.25 * sp.neck.length)), [0.85 * sp.neck.width, sp.neck.length * 0.75, 0.75 * sp.neck.depth], alongY(upper, [0, -1, 0.3])))
   if (sp.mane === 'crest') {
-    parts.push(part('ellipsoid', add(add(neckRoot, mul(neckDir, 0.55 * sp.neck.length)), mul(ap(alongY(neckDir, [0, 1, 0]), [0, 0, 1]), 0.09)), [0.06, sp.neck.length * 1.1, 0.08], alongY(neckDir, [0, 1, 0])))
+    // The crest of the mane along the top of the arch.
+    for (const [from, dir, l] of [[neckRoot, lower, 0.55], [neckMid, upper, 0.55]] as [V, V, number][]) {
+      const up = ap(alongY(dir, [0, 1, 0]), [0, 0, 1])
+      parts.push(part('ellipsoid', add(add(from, mul(dir, 0.5 * l * sp.neck.length)), mul(up, 0.38 * sp.neck.depth)), [0.07, sp.neck.length * l * 1.3, 0.09], alongY(dir, [0, 1, 0])))
+    }
   }
+  // The dewlap hangs under the root of the neck, in front of the chest.
+  if (sp.dewlap) parts.push(part('ellipsoid', add(add(neckRoot, mul(lower, 0.15 * sp.neck.length)), [0, -0.17, 0.05]), sp.dewlap, alongY(lower, [0, 0, 1])))
   const headTurn = rotY(a.headTurn)
   const headAngle = -sp.head.droop + gait.head + 0.4 * a.headRaise - gait.pitch * 0.4
   const headDir = ap(headTurn, [0, Math.sin(headAngle * DEG), Math.cos(headAngle * DEG)])
   const hf = alongZ(headDir, [0, 1, 0])
   const hl = sp.head.length
-  const skullC = add(poll, ap(hf, [0, 0, 0.22 * hl]))
-  const muzzleC = add(poll, ap(hf, [0, -0.03 * hl, hl - sp.head.muzzle[2] / 2]))
+  const skullC = add(poll, ap(hf, [0, 0, 0.2 * hl]))
+  const muzzleC = add(poll, ap(hf, [0, -0.04 * hl, hl - sp.head.muzzle[2] / 2]))
   parts.push(part('ellipsoid', skullC, sp.head.skull, hf))
   parts.push(part('ellipsoid', muzzleC, sp.head.muzzle, hf))
   if (sp.mane === 'ruff') {
-    // A lion's mane: one great mass round the neck and the back of the head, the face in front of it.
-    parts.push(part('ellipsoid', add(neckRoot, mul(neckDir, 0.8 * sp.neck.length)), [0.48, 0.56, 0.46], alongY(neckDir, [0, 0, 1])))
+    // A lion's mane: one great mass round the neck behind the head, the face standing out of it.
+    parts.push(part('ellipsoid', add(neckRoot, mul(neckDir, 0.45 * sp.neck.length)), [0.5, 0.58, 0.4], alongY(neckDir, [0, 0, 1])))
   }
   for (const s of [1, -1]) {
     const e = sp.ears
     const base = add(skullC, ap(hf, [s * e.spread, sp.head.skull[1] * 0.42, -0.25 * sp.head.skull[2]]))
     parts.push(part('cone', add(base, ap(hf, [0, e.size[1] * 0.35, 0])), e.size, mm(hf, rotX(e.rake), rotZ(-s * 12))))
     if (sp.horns) {
-      const hb = add(skullC, ap(hf, [s * sp.head.skull[0] * 0.45, sp.head.skull[1] * 0.35, -0.1 * sp.head.skull[2]]))
-      const hd = ap(hf, norm([s * 0.85, 0.45, 0.35]))
-      parts.push(part('cone', add(hb, mul(hd, sp.horns.length / 2)), [sp.horns.base, sp.horns.length, sp.horns.base], alongY(hd, [0, 1, 0])))
+      // Out from the poll, then turning forward and up: the charge's weapons.
+      const hb = add(skullC, ap(hf, [s * sp.head.skull[0] * 0.42, sp.head.skull[1] * 0.32, -0.12 * sp.head.skull[2]]))
+      const out = ap(hf, norm([s * 1, 0.15, -0.1]))
+      const hm = add(hb, mul(out, 0.45 * sp.horns.length))
+      const tip = ap(hf, norm([s * 0.25, 0.75, 0.6]))
+      parts.push(limb('capsule', hb, hm, sp.horns.base, sp.horns.base, [0, 1, 0]))
+      parts.push(part('cone', add(hm, mul(tip, 0.3 * sp.horns.length)), [0.85 * sp.horns.base, 0.6 * sp.horns.length, 0.85 * sp.horns.base], alongY(tip, [0, 1, 0])))
     }
   }
 

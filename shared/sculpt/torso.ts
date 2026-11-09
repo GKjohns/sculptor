@@ -122,7 +122,7 @@ function cloth(f: Frame, masses: Ell[], path: [number, number][], wide: number, 
   // instead of standing off it at its edges.
   const out: Shape[] = []
   const strips = Math.max(1, Math.ceil(wide / 6.5))
-  const w = 1.35 * wide / strips
+  const w = 1.8 * wide / strips
   for (let k = 0; k < strips; k++) {
     const off = (k - (strips - 1) / 2) * wide / strips
     const on = offsetPath(path, off).map(([x, y]) => {
@@ -195,7 +195,7 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
       // Sternomastoid: from behind the ear to the top of the breastbone, the neck's front edge.
       shapes.push(between('ellipsoid', W([side * 1.6, 19.4, 6.8]), H([side * 4.6, 8.4, -2.0]), 0.2 * hw * thick, 0.12 * hw * thick, forward))
       // Trapezius: from the back of the skull out to the shoulder.
-      shapes.push(between('ellipsoid', H([side * 2.2, 8.6, -6.0]), W([side * 10, 21, -5]), 0.32 * hw * thick, 0.16 * hw * thick, normalize(sub(W([side * 9, 22, -5.5]), W([0, 22, -1.5])))))
+      shapes.push(between('ellipsoid', H([side * 2.4, 7.6, -6.4]), W([side * 11, 23, -4.5]), 0.42 * hw * thick, 0.22 * hw * thick, normalize(sub(W([side * 9, 22, -5.5]), W([0, 22, -1.5])))))
     }
     if (!head.knobs.female) {
       const throat = lerp(W(notch), H([0, 1.0, 2.6]), 0.6)
@@ -231,16 +231,15 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     const side = gaze[0] > 0.02 ? -1 : 1
     const spine: [number, number][] = [[side * 18.5, 16.5], [side * 13, 10], [side * 5, 1], [-side * 4, -7], [-side * 9.5, -13], [-side * 11, -18]]
     shapes.push(...cloth(f, ells, spine, 19, 3.2, 2.4))
-    const offsets = [-4.6, 0.4, 5.2]
-    offsets.forEach((o, i) => shapes.push(...fold(f, ells, offsetPath(spine.slice(1, 6), side * o), 3.0 + 0.4 * (i % 2), 3.4 - 0.3 * i)))
-    for (const mid of [-2.1, 2.8]) cut('fold', 'roundel', 1.5, 1.4, onSurface(ells, offsetPath(spine.slice(1, 6), side * mid), 3.0))
+    // Two broad folds falling from the shoulder with one deep valley between them: fewer and
+    // deeper reads as cloth; many shallow grooves read as claw marks.
+    for (const o of [-4, 4]) shapes.push(...fold(f, ells, offsetPath(spine.slice(1, 6), side * o), 5, 4))
     // The upper edge of the cloth, undercut so it stands off the chest in shadow.
-    cut('hem', 'roundel', 1.2, 1.6, onSurface(ells, offsetPath(spine.slice(1), side * -9.2), 1.2), [0, -0.5, -0.86])
     // Over the shoulder and down the back.
     const backSpine: [number, number][] = [[side * 18.5, 17], [side * 15.5, 8], [side * 11, -3], [side * 7.5, -13]]
     shapes.push(...cloth(f, ells, backSpine, 17, 3.0, 2.2, true))
-    for (const o of [-3.8, 2.6]) shapes.push(...fold(f, ells, offsetPath(backSpine, side * o), 2.8, 3.2, true))
-    cut('fold', 'roundel', 1.4, 1.2, onSurface(ells, offsetPath(backSpine, side * -0.6), 2.8, true))
+    shapes.push(...fold(f, ells, offsetPath(backSpine, side * 1.5), 4, 3.6, true))
+    cut('fold', 'roundel', 2.2, 1.6, onSurface(ells, offsetPath(backSpine, side * -2.5), 2.4, true))
     // The knot on the shoulder.
     const knot = surfaceAt(ells, side * 18, 16.5)
     shapes.push(partShape(f, 'ellipsoid', add(knot.p, scale(knot.n, 2.6)), [7, 6, 5]))

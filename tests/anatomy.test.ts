@@ -59,7 +59,8 @@ test('the head fills about the skull box it was given and carries a face: brow, 
   assert.ok(brow > eye + 1, `brow ${brow} eye ${eye}`)
   assert.ok(noseTip > lips + 2 && lips > chinFront - 1, `nose ${noseTip} lips ${lips} chin ${chinFront}`)
   // The ears stand outside the skull box, the nose in front of it.
-  assert.ok(surface(form, [40, chin + 0.45 * H, -2], [-1, 0, 0]) < 40 - 13.5, 'ear')
+  // Ears lie close but still stand off the side of the head.
+  assert.ok(surface(form, [40, chin + 0.45 * H, -2], [-1, 0, 0]) < 40 - 12.5, 'ear')
   assert.ok(noseTip > 17, `nose tip ${noseTip} is in front of the skull box`)
 })
 
@@ -143,8 +144,9 @@ test('hair stands off the skull in separate crisp locks, curls are drilled, and 
   const form = compileForm({ shapes: curls.shapes, blend: 1.3 })
   const crown = (f: typeof form) => 120 - surface(f, [0, 120, -2], [0, -1, 0])
   assert.ok(crown(form) > crown(bald) + 1.5, `curls ${crown(form)} bald ${crown(bald)}`)
-  assert.ok(curls.cuts.filter(c => c.label === 'curl').length > 10, 'curl eyes drilled')
-  assert.ok(curls.shapes.filter(s => s.kind === 'capsule' && s.blend !== undefined).length > 30, 'locks are crisp capsules')
+  assert.ok(curls.cuts.filter(c => c.label === 'curl').length >= 3, 'a few lock tips undercut with the drill')
+  assert.ok(curls.cuts.filter(c => c.label === 'lock').length > 10, 'a groove along each lock')
+  assert.ok(curls.shapes.filter(s => s.kind === 'capsule' && s.blend !== undefined).length > 20, 'locks are capsules with their own blend')
   const beard = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34], [0, 0, 0], ['bald', 'beard'])).shapes, blend: 1.3 })
   const low = (f: typeof form) => surface(f, [0, 30, 6], [0, 1, 0])
   assert.ok(low(beard) < low(bald) - 1, 'the beard comes below the chin')

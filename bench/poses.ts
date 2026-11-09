@@ -99,18 +99,27 @@ export const POSES: Record<string, Preset> = {
     title: 'A rearing horse with a rider',
     blend: 1.3,
     scene: {
-      figures: [figure({ legs: 'ride', weightOn: 'both', twist: 10, lean: 6, headTurn: 25, leftArm: 'forward', rightArm: 'raised', height: 52, drapery: 'cloak', style: ['short_hair'] })],
+      figures: [figure({ legs: 'ride', weightOn: 'both', twist: 14, lean: 4, headTurn: 25, headTilt: -8, leftArm: 'across', rightArm: 'raised', height: 56, style: ['curls'] })],
       animals: [animal({ species: 'horse', pose: 'rear', length: 40, facing: 0, headTurn: -20, headRaise: 10, ground: [0, BASE_TOP, -4] })],
       shapes: [base()]
     }
   },
   bull: {
     title: 'A charging bull',
-    blend: 1.2,
+    blend: 1.5,
     scene: {
       figures: [],
-      animals: [animal({ species: 'bull', pose: 'charge', length: 48, facing: 45, headTurn: -12, headRaise: -18, tail: 'raised', ground: [0, 22, 0] })],
-      shapes: [base(), { kind: 'ellipsoid', center: [0, 12, 0], size: [62, 26, 62], rotation: [0, 45, 0] }, { kind: 'ellipsoid', center: [-8, 18, -8], size: [40, 16, 30], rotation: [0, 30, 8] }]
+      animals: [animal({ species: 'bull', pose: 'charge', length: 47, facing: 45, headTurn: -10, headRaise: -14, tail: 'raised', ground: [0, 9, 0] })],
+      shapes: [base(), { kind: 'ellipsoid', center: [0, 7, 0], size: [70, 8, 34], rotation: [0, 45, 0] }, { kind: 'box', center: [-9, 7.5, -9], size: [22, 6, 16], rotation: [8, 30, 6] }, { kind: 'box', center: [11, 7, 9], size: [18, 5, 14], rotation: [-6, 60, 5] }]
+    }
+  },
+  horse: {
+    title: 'A horse rearing, alone',
+    blend: 1.3,
+    scene: {
+      figures: [],
+      animals: [animal({ species: 'horse', pose: 'rear', length: 44, facing: 30, headTurn: -15, headRaise: 5 })],
+      shapes: [base()]
     }
   },
   gallop: {
