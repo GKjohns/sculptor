@@ -220,6 +220,10 @@ export type HudEvents = {
   panel: [panel: SidePanel | null]
   // Clear a finished or failed commission and show the commission card again.
   reset: []
+  // The stone picked on the commission card (a preset key): put it on the banker.
+  stone: [key: string]
+  // Watch the finished commission again on the replay page.
+  replay: []
   // Sent on mount and whenever the side panel opens, closes or changes size: keep the stone in
   // what is left of the canvas. Nothing to answer; ignore it and the HUD still works.
   inset: [inset: HudInset]
@@ -366,7 +370,7 @@ const KG_PER_CM3 = 0.00271
 
 export const DEFAULT_STONES: StoneOption[] = [
   { key: 'carrara', label: 'Carrara marble', detail: '60 × 100 × 60 cm', available: true },
-  { key: 'nero', label: 'Nero Marquina', detail: 'black marble', available: false }
+  { key: 'nero', label: 'Nero Marquina', detail: 'black marble, white veins', available: true }
 ]
 
 export const EXAMPLE_COMMISSIONS = ['A bust of a Roman senator', 'A sleeping cat', 'A hand holding an apple', 'A chess knight']

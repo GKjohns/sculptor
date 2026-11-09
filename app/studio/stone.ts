@@ -48,12 +48,12 @@ function refill(attr: THREE.BufferAttribute, count: number) {
 }
 
 export class Stone {
-  readonly material: THREE.MeshPhysicalNodeMaterial
+  material: THREE.MeshPhysicalNodeMaterial
   /** The rev of the worker's stone that the chunk geometry now matches; -1 until the first mesh lands. */
   shownRev = -1
 
   /** For pieces off the block. Their geometry needs the block coordinates of each vertex as `stone` (see offcutGeometry). */
-  readonly offcutMaterial: THREE.MeshPhysicalNodeMaterial
+  offcutMaterial: THREE.MeshPhysicalNodeMaterial
   // The latest mesh of every chunk that has surface in it, as the worker sent it.
   private parts = new Map<number, ChunkMesh>()
   // One mesh per bundle of chunks, by bundle id.
@@ -64,10 +64,11 @@ export class Stone {
   private loose: { rev: number, offcut: Offcut }[] = []
   private falling: Falling[] = []
   private waiters: { rev: number, done: () => void }[] = []
+  private arrivals: { rev: number, done: () => void }[] = []
   private stop: () => void
   private warm: THREE.Mesh
 
-  constructor(private studio: StudioRenderer, public grid: GridInfo, readonly preset: StonePreset = CARRARA) {
+  constructor(private studio: StudioRenderer, public grid: GridInfo, public preset: StonePreset = CARRARA) {
     this.material = createMarble(preset)
     this.offcutMaterial = createLooseMarble(preset, BROKEN)
     // One speck of loose stone under the floor from the start, so the offcut material's shaders
@@ -85,6 +86,26 @@ export class Stone {
     this.stop = studio.onFrame(dt => this.frame(dt))
   }
 
+  /**
+   * Makes the stone of another medium (a material, not a new grid). Every mesh on the banker and
+   * every piece still falling takes the new material. Returns false if it was that medium already.
+   * Whoever calls it should prewarm the studio afterwards: the new material's shaders are not built.
+   */
+  setPreset(preset: StonePreset) {
+    if (preset.name === this.preset.name) return false
+    const material = createMarble(preset)
+    const offcut = createLooseMarble(preset, BROKEN)
+    for (const mesh of this.meshes.values()) mesh.material = material
+    for (const piece of this.falling) piece.mesh.material = offcut
+    this.warm.material = offcut
+    this.material.dispose()
+    this.offcutMaterial.dispose()
+    this.material = material
+    this.offcutMaterial = offcut
+    this.preset = preset
+    return true
+  }
+
   /** The stone's meshes (bundles of chunks), for picking. */
   get chunks(): THREE.Mesh[] {
     return [...this.meshes.values()]
@@ -100,6 +121,22 @@ export class Stone {
     for (const chunk of chunks) this.incoming.set(chunk.chunk, chunk)
     this.arrivedRev = rev
     this.fresh = true
+    if (this.arrivals.length) {
+      this.arrivals = this.arrivals.filter((a) => {
+        if (a.rev > rev) return true
+        a.done()
+        return false
+      })
+    }
+  }
+
+  /**
+   * Resolves once the worker's mesh of `rev` or later has arrived, drawn or not: the next frame
+   * will show it. A fixed-step export waits on this before drawing.
+   */
+  arrived(rev: number) {
+    if (this.arrivedRev >= rev) return Promise.resolve()
+    return new Promise<void>(done => this.arrivals.push({ rev, done }))
   }
 
   /** Takes pieces that came off. They appear with the chunks that show the cut. */

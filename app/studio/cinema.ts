@@ -25,6 +25,7 @@ import { Dust } from './dust'
 import type { KernelClient } from './kernel'
 import { createChipMarble, STONE_COORDS } from './materials/marble'
 import type { StudioRenderer } from './renderer'
+import { Reveal } from './reveal'
 import { Sound } from './sound'
 import type { Stone } from './stone'
 import type { StrikeEvent, TimelineListener, TimelineState, UpcomingStrike } from './timeline'
@@ -45,6 +46,7 @@ export class Cinema {
   readonly tools: Tools
   readonly sound: Sound
   readonly director: Director
+  readonly reveal: Reveal
 
   private timeline: FilmTimeline | null = null
   private unlisten = () => {}
@@ -58,7 +60,7 @@ export class Cinema {
   private hitches: { atS: number, frameMs: number, filmMs: number, shot: string, moving: number, chipsLive: number }[] = []
   private clock = 0
 
-  constructor(private studio: StudioRenderer, stone: Stone, kernel: KernelClient, private rig: CameraRig) {
+  constructor(private studio: StudioRenderer, private stone: Stone, kernel: KernelClient, private rig: CameraRig) {
     const dust = new Dust(studio, {
       floorY: FLOOR_Y,
       bankerY: BANKER_TOP_Y,
@@ -92,6 +94,10 @@ export class Cinema {
       floorY: FLOOR_Y
     })
 
+    this.reveal = new Reveal(studio, this.debris, kernel)
+    this.reveal.setDark(stone.preset.dark === true)
+    this.director.onReveal = on => on ? this.reveal.begin() : this.reveal.end()
+
     this.debris.onFall = event => this.director.fall(event)
     this.debris.onImpact = (event) => {
       this.director.impact(event)
@@ -115,16 +121,20 @@ export class Cinema {
       look: () => this.tools.look(true),
       lookEnd: () => this.tools.look(false),
       reset: () => {
+        this.reveal.end()
         this.debris.reset()
         this.tools.reset()
       },
       jump: (log, applied) => {
+        this.reveal.end()
         this.debris.settle(log, applied)
         this.tools.reset()
       },
       change: (state) => {
         this.state = state
         this.director.status(state.playing, state.done)
+        // A finished piece that was skipped to, not watched: it is signed all the same.
+        if (state.done && !state.busy && !this.reveal.active) this.reveal.show()
       },
       end: () => {
         if (this.timeline === timeline) this.unbind()
@@ -139,6 +149,7 @@ export class Cinema {
   unbind() {
     this.unlisten()
     this.unlisten = () => {}
+    this.reveal.end()
     if (!this.timeline) return
     this.timeline = null
     this.state = null
@@ -174,6 +185,29 @@ export class Cinema {
     if (events.length) this.heard(events, 1)
   }
 
+  /** Who signs the finished piece, and when it was carved. */
+  credit(by: string, when?: Date) {
+    this.reveal.credit(by, when)
+  }
+
+  /** The stone on the banker has changed medium: chips and the signature follow it. */
+  restone() {
+    const chip = createChipMarble(this.stone.preset)
+    this.debris.reset()
+    this.debris.setMaterials(this.stone.offcutMaterial, chip)
+    this.chipMaterial.dispose()
+    this.chipMaterial = chip
+    this.reveal.setDark(this.stone.preset.dark === true)
+  }
+
+  /**
+   * Resolves once nothing the next frame depends on is still out with the worker: a shot the
+   * director is asking about, where the signature goes. A fixed-step export waits on it.
+   */
+  async pending() {
+    await Promise.all([this.director.pending(), this.reveal.pending()])
+  }
+
   /** Runs the whole film at `factor` of its speed, on top of the director's own slow motion: a capture aid. */
   slow(factor: number) {
     this.director.bulletTime = Math.max(0.01, factor)
@@ -200,6 +234,7 @@ export class Cinema {
     this.director.dispose()
     this.tools.dispose()
     this.sound.dispose()
+    this.reveal.dispose()
     this.chipMaterial.dispose()
     this.studio.setFocus(null)
   }
@@ -229,6 +264,7 @@ export class Cinema {
     else this.sound.saw(false)
     this.sound.setPaused(held)
     this.debris.update(film)
+    this.reveal.update(film)
     this.tools.update(film)
     this.sound.update(film)
 

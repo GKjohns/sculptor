@@ -7,17 +7,19 @@ An AI carves a block of virtual marble while a person watches. Nuxt 4 at the rep
 ```
 app/
   app.vue, pages/index.vue        shell; the page is one <StudioScene />
+  pages/replay/[id].vue           the replay page: <StudioScene :run-id> for a saved commission or study run, with the scrubber and film export
   components/StudioScene.client.vue   mounts the renderer, the HUD and the commission; owns window.__sculptor and __sceneReady
   components/StudioHud.vue, hud/  the film-style HUD, drawn from one SculptorView (studio/viewState.ts); /hud previews it on mock views
   components/ReplayPicker.vue     saved commissions (.data/sessions) and finished study runs
+  components/hud/Transport.vue    the live transport, and the replay's: play, speed, the scrubber over the log, Export film
   composables/useSculptor.ts      a live commission: runs the loop with the worker as Studio, feeds the timeline, keeps the HUD's view, saves the session every turn, resumes one after a reload
   composables/useBrain.ts         the browser's Brain: one POST to /api/brain per turn, read as it streams
-  composables/useReplay.ts        fetches a study run, owns its ReplayPlayer, mirrors the state for the HUD
+  composables/useReplay.ts        fetches a study run or a saved session, owns its ReplayPlayer, mirrors the state for the HUD; seek() for the scrubber, film() for the export
   studio/                         all three.js code, plain .ts, no Vue
     renderer.ts                   StudioRenderer: WebGPURenderer, scene, camera, frame loop; owns the atelier and the post stack; prewarm() builds every material's pipelines before the scene reports ready
     atelier.ts                    the room: banker, floor, walls, window, the quarried blocks at the back, the light rig (key through the window, fill, hemisphere, generated environment); ATELIER_SOLIDS is what debris lands on
     post.ts                       Post: the one RenderPipeline. Film tier (WebGPU): pre-pass, GTAO, contact shadows, scene, god rays, TRAA, depth of field, bloom, AgX, vignette, grain. Plain tier (WebGL 2): scene, AgX, vignette, grain
-    materials/marble.ts           the stone: veins baked once into a volume, finish and tool marks from the per-vertex finish, light through thin stone from the baked thickness; loose-piece and chip variants
+    materials/marble.ts           the stone: veins baked once into a volume, finish and tool marks from the per-vertex finish, light through thin stone from the baked thickness; loose-piece and chip variants; the presets CARRARA and NERO (stonePreset() maps a name or a run's `stone` text to one)
     look.ts                       the look book's camera presets (__sculptor.look), ?fx= parsing, the storyboard frame-5 stone
     kernel.ts                     KernelClient: the page's end of the worker (promises in, chunk geometry out)
     stone.ts                      Stone: chunk meshes drawn in bundles of 2 x 2 x 2 and refilled in place; the offcut material
@@ -27,15 +29,17 @@ app/
     dust.ts                       Dust: puffs and the motes in the window's shaft (a TSL compute particle system, WebGPU only) and the film of dust on the floor
     tools.ts                      Tools: chisel and mallet, saw, rasp, drill, pad; animated from the timeline's strikes and laid along the banker when put down
     sound.ts                      Sound: everything synthesised with Web Audio, started by the first key press or click; mute is remembered in localStorage
-    director.ts                   Director: picks the shot (wide, medium, macro, saw, fall, look, reveal, free), cuts and slow motion; the rig does the moving
-    timeline.ts                   Timeline: the virtual clock and the growing queue of strikes and staged looks that plays onto the shown stone; elastic pacing, pause, speed, seek, backpressure on the loop
+    director.ts                   Director: picks the shot (wide, medium, macro, saw, fall, look, reveal, free), cuts and slow motion; the rig does the moving; pending() for an export
+    reveal.ts                     Reveal: the floor swept, a light across the piece, the signature cut into the base, on the film's clock when a finished piece was watched to its end
+    film.ts                       exportFilm(): a replay rendered frame by frame at a fixed dt to an MP4 (mediabunny, H.264), its speed steered to a fixed length, the title plaque set in over the reveal
+    timeline.ts                   Timeline: the virtual clock and the growing queue of strikes and staged looks that plays onto the shown stone; elastic pacing, pause, speed, seek (from the nearest snapshot the worker kept), backpressure on the loop
     replay.ts                     ReplayPlayer: a timeline with its queue filled up front and its pace fixed
     camera.ts                     CameraRig: default framing, the walk round the stone for a staged look, hand-back after a drag
     charcoal.ts                   the lines a `sketch` pass draws on the block; cuts rub them out where the stone goes
     viewState.ts                  the HUD's view-model and the pure helpers that change it
     hands.ts                      hand-carving input behind ?hands=1 (palette is components/HandPalette.vue)
     debug.ts                      demo(), burst(), timeReplay() and frameMeter() behind window.__sculptor
-  workers/kernel.worker.ts        the kernel in a worker: the true stone with the Studio running against it, the shown stone remeshed chunk by chunk, look PNGs and the reference sheet decoded here
+  workers/kernel.worker.ts        the kernel in a worker: the true stone with the Studio running against it, the shown stone remeshed chunk by chunk, look PNGs and the reference sheet decoded here, snapshots of a stone kept for scrubbing
 shared/
   sculpt/                         the kernel: grid, strikes, mesher (which also bakes the per-vertex thickness the marble reads), islands, hand, observer. No three.js, no DOM
   sculpt/display.ts               DisplayStone: lets loose stone fall on screen ahead of the log's island check without touching the log's stone
@@ -50,19 +54,20 @@ docs/look/                        the look book: 15 fixed shots (5 presets on 3 
 internal_docs/                    plans, storyboard, research, verification pages
 ```
 
-Sprints 1 to 4 of the plan are built; Sprint 5 (reveal, scrubber, film export, sharing) is not.
+All five sprints of the plan are built. Nothing is deployed: the gallery and deploy (task 5.5) wait on Kyle deciding whether this goes public.
 
 ## Commands
 
 Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 
-- `npm run dev`: port 3130. `?gl=1` forces the WebGL 2 backend, `?hands=1` turns on hand-carving, `?demo=1` carves a fixed demo (sawn corner, rough, flat-chiselled and rasped patches) before the scene reports ready. `?replay=<run-id>` plays a finished study run (`?replay` alone lists them), with `?speed=1|8|30|120|max` and `?at=end` to go straight to the finished piece before the scene reports ready. `?session=<id>` puts a saved commission (`.data/sessions/`) back on the stone and carries on if it was unfinished; with `&pass=<n>` it shows the stone as it stood after pass n and resumes nothing. A commission's defaults are in `app/app.config.ts`; `?model=`, `?ref=0|1`, `?turns=`, `?usd=` and `?speed=1|4|8|20|60` override them for one page load.
+- `npm run dev`: port 3130. `/replay/<id>` is the replay page for a saved commission (`.data/sessions/`) or a study run (`.data/study/`): scrubber, film export, the title plaque; `?speed=` and `?at=end` work there as on `/?replay=`. `?stone=nero` puts the black marble on the banker (a commission records its stone, and its replays use it). `?gl=1` forces the WebGL 2 backend, `?hands=1` turns on hand-carving, `?demo=1` carves a fixed demo (sawn corner, rough, flat-chiselled and rasped patches) before the scene reports ready. `?replay=<run-id>` plays a finished study run (`?replay` alone lists them), with `?speed=1|8|30|120|max` and `?at=end` to go straight to the finished piece before the scene reports ready. `?session=<id>` puts a saved commission (`.data/sessions/`) back on the stone and carries on if it was unfinished; with `&pass=<n>` it shows the stone as it stood after pass n and resumes nothing. A commission's defaults are in `app/app.config.ts`; `?model=`, `?ref=0|1`, `?turns=`, `?usd=` and `?speed=1|4|8|20|60` override them for one page load.
 - Film flags, all for one page load:
   - `?film=0`: no debris, tools, sound or director at all (the stone alone in the room), to measure what they cost.
   - `?cam=free`: the director leaves the camera alone; it stays where you, or a look preset, put it.
   - `?fx=-dof,-godrays` (or `none`, `all`, `+name`): drops or adds post effects over the tier's own set. Names: `ao`, `contact`, `godrays`, `traa`, `dof`, `bloom`, `grain`, `vignette`.
   - `?dpr=1|1.5|2`: caps the device pixel ratio the canvas is drawn at. Left out, the film tier draws at 1.5 at most and the plain tier at 2.
   - `?prewarm=0`: skips the unculled frames that build every material's pipelines before the scene reports ready, to measure the first-slab hitch they remove.
+  - Film export runs in the page from the replay's transport (Export film: 30 s, one minute, two minutes, 1920 x 1080 at 30 fps), or `__sculptor.film({ seconds, width, height, fps })`, which resolves with frames, size and render time. It holds the frame loop and steps it at 1/fps, so the tab draws nothing else meanwhile; a 60 s film takes about 70 s on Kyle's Mac. Sound is not in the film.
   - `/hud` (the HUD on mock views, no stone): `?frame=1..8` picks the storyboard frame, `?panel=notebook|eye` opens a side panel, `?stress=1` fills it with the longest text it has to hold, `?bare=1` leaves out the preview's own controls.
 - `npm run typecheck` (Nuxt's projects, then `tsconfig.bench.json` for `bench/` and `tests/`), `npm run lint`, `npm test` (`node --test tests/*.test.ts`): all three before calling work done.
 - `npm run shoot -- --gl [--name x] [--query "a=1&b=2"]`: headless, software WebGL 2. Layout and logic.
@@ -79,6 +84,8 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
   - `--gesture`: presses a key once the scene is ready, the user gesture that lets the page start its sound.
   - `--until "js"`: after `--eval`, waits up to two minutes for an expression to turn truthy (a slab leaving the block).
   - `--sequence n [--every ms]`: n pictures that far apart, for motion (`<name>_01_<mode>.png` onward).
+  - `--downloads dir`: saves whatever the page hands the browser to save, e.g. `--eval "__sculptor.film({ seconds: 60 })" --downloads .shots/films`.
+  - `--api`: lists every `/api/` request the page made (a replay should make no model calls).
 - Shots land in `.shots/` (gitignored). Keepers are copied by hand into a plan's `verification/screenshots/`.
 - `npm run bench:sculpt -- --subject pawn|cat|bust [--model opus|fable|sol|gemini] [--tools direct|formed] [--ref on|off] [--round A|B|C]`: one headless commission into `.data/study/<run-id>/`. `--dry` runs a scripted Brain with no key into `.data/study-dry/`. Flags are listed at the top of `bench/sculpt.ts`.
 - `npm run bench:study -- --round A` (then `--round B --tools X`, `--round C --tools X --ref on|off`): a whole round, three runs at a time. Spend is capped per run (`--max-usd`, default 8) and across the study (`--study-cap`, default 100, summed from `.data/study/ledger/`).
@@ -94,6 +101,7 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 - A lit material that first comes into view mid-commission costs a 100 ms frame (its own shader, and the AO and contact-shadow passes are set up again with it). `StudioRenderer.prewarm()` draws everything unculled before the scene reports ready; anything added to the scene later should share a material that is already there, or be added before that call.
 - Do not mark a buffer `DynamicDrawUsage` that is drawn in more than one pass: three's WebGPU path uploads it again on every render call.
 - Renderer init is async: `await renderer.init()` before the first render or any backend check.
+- Nothing in `app/studio/` reads the wall clock: time comes in only as the frame's dt. Film export depends on it (it steps the studio with `StudioRenderer.hold()/step()`). Anything async that a frame depends on needs a `pending()` the export can wait on (the timeline's batch, `Stone.arrived()`, the director's raycast, the signature's placement).
 - Raw three.js only. No TresJS. Scene code lives in `app/studio/*.ts`; the `.client.vue` component only mounts it.
 - Scene units are block centimetres: origin at the centre of the block's base, +Y up, +Z toward the viewer, +X to the viewer's right.
 
@@ -104,7 +112,7 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 - The worker is bundled on its own: `#shared/...` resolves there, Nuxt auto-imports do not. Import everything by name in `app/workers/`.
 
 **Screenshots.**
-- The page sets `window.__sceneReady = true` once the whole stone has been meshed and frames with it have rendered, and exposes `window.__sculptor` (`stats()` gives backend, frame count, frame time, draw calls; `studio()` gives the `StudioRenderer`; `hash('true' | 'shown')` a stone's grid hash; `kernel(stone)` its rev, mass and early-check cost; `replay()` the loaded `ReplayPlayer`; `start('a chess pawn')` or `start({ commission, model, reference })` begins a commission and `state()` says where it stands (status, turn, cost, queue depth, virtual time, clock rate, strikes shown and applied, dead air); `sculptor()` is the commission itself (`pause`, `resume`, `setSpeed`, `abort`, `load`, `replayTo`, `saved`); `meter()` times frames until its `stop()`; `demo()`, `burst(n)`, `timeReplay(speed, seconds?)` and `timeRestore(runId)` are the verification runs; `cinema()` is the film (`stats()` says what debris, director, tools and sound are doing and their budgets, `slow(0.1)` is bullet time for captures); `look('macro')` puts the camera on a look-book preset and `frame5()` carves the storyboard's frame-5 stone). Keep both working: the shoot script waits on them.
+- The page sets `window.__sceneReady = true` once the whole stone has been meshed and frames with it have rendered, and exposes `window.__sculptor` (`stats()` gives backend, frame count, frame time, draw calls; `studio()` gives the `StudioRenderer`; `hash('true' | 'shown')` a stone's grid hash; `kernel(stone)` its rev, mass and early-check cost; `replay()` the loaded `ReplayPlayer`; `start('a chess pawn')` or `start({ commission, model, reference })` begins a commission and `state()` says where it stands (status, turn, cost, queue depth, virtual time, clock rate, strikes shown and applied, dead air); `sculptor()` is the commission itself (`pause`, `resume`, `setSpeed`, `abort`, `load`, `replayTo`, `saved`); `meter()` times frames until its `stop()`; `demo()`, `burst(n)`, `timeReplay(speed, seconds?)` and `timeRestore(runId)` are the verification runs; `cinema()` is the film (`stats()` says what debris, director, tools and sound are doing and their budgets, `slow(0.1)` is bullet time for captures); `look('macro')` puts the camera on a look-book preset and `frame5()` carves the storyboard's frame-5 stone; `film(options)` exports the loaded replay; `setStone('nero')` changes the stone's medium). Keep both working: the shoot script waits on them.
 - Editing anything under `app/` while a page is open hot-reloads the scene: the stone, the commission and any timing run in that page are gone (`timeReplay` rejects, saying so). Do not edit while a live commission or a measurement is running in the same worktree.
 - HUD roots carry a `data-hud` attribute. The shoot script hides them for its blank-canvas check so a HUD over a black canvas still fails.
 - A headless WebGPU capture can be silently black. Never judge the look from `--gl`, and never from a screenshot the guard did not pass. `--gl` runs a lean mode (no vein bake, fewer shadow taps, a small environment map), because software WebGL loses its context under the full one.

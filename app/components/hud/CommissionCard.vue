@@ -16,7 +16,7 @@ const props = defineProps<{
   // Accepted and on its way: the card waits.
   busy?: boolean
 }>()
-const emit = defineEmits<{ start: [request: StartRequest] }>()
+const emit = defineEmits<{ start: [request: StartRequest], stone: [key: string] }>()
 
 const prompt = ref('')
 const model = ref(props.model)
@@ -24,6 +24,10 @@ const stone = ref(props.stone)
 // The model list arrives with /api/health, after the card is on screen.
 watch(() => props.model, m => model.value = m)
 watch(() => props.stone, s => stone.value = s)
+// A stone picked goes on the banker at once, so you see what will be carved.
+watch(stone, (s) => {
+  if (s !== props.stone) emit('stone', s)
+})
 
 const modelItems = computed(() => props.models.map(m => ({ label: m.label, value: m.key, description: m.priceHint })))
 const stoneItems = computed(() => props.stones.map(s => ({

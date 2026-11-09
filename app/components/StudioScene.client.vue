@@ -8,7 +8,8 @@
  *   ?demo=1   carve the fixed demo before the scene reports ready
  *   ?session=<id>  put a saved commission back on the stone and, if it was not finished, carry on.
  *             With ?pass=<n>, show the stone as it stood after pass n (1-based) and resume nothing
- *   ?replay=<run-id>  play a finished study run from .data/study; bare ?replay opens the list.
+ *   ?replay=<run-id>  play a finished study run (.data/study) or saved commission (.data/sessions);
+ *             bare ?replay opens the list. The replay page, /replay/<id>, passes the id as a prop instead.
  *             With it: ?speed=1|8|30|120|max (30 if left out), and ?at=end to go straight to the
  *             finished piece before the scene reports ready
  *   ?model=, ?ref=0|1, ?turns=, ?usd=, ?speed=  a commission's settings for this page load
@@ -25,11 +26,17 @@ import { Hands } from '~/studio/hands'
 import type { HandTool, ScreenLine } from '~/studio/hands'
 import { KernelClient } from '~/studio/kernel'
 import { applyLook, carveFrame5, effectsFromQuery } from '~/studio/look'
+import type { FilmOptions } from '~/studio/film'
+import { stonePreset } from '~/studio/materials/marble'
 import { StudioRenderer } from '~/studio/renderer'
 import type { ReplaySpeed } from '~/studio/replay'
 import { Stone } from '~/studio/stone'
+import { modelLabel } from '~/studio/viewState'
 import type { HudInset, StartRequest } from '~/studio/viewState'
 import type { StoneId } from '#shared/sculpt/protocol'
+
+// The replay page names its run here; on / it comes from ?replay=.
+const props = defineProps<{ runId?: string }>()
 
 const hostEl = useTemplateRef<HTMLDivElement>('host')
 const route = useRoute()
@@ -46,16 +53,53 @@ const sessionId = computed(() => typeof route.query.session === 'string' ? route
 const inset = ref<HudInset>({ right: 0, bottom: 0 })
 // The title plaque stands under the finished piece, not over it.
 const PLAQUE_PX = 190
-const room = computed(() => ({ right: inset.value.right, bottom: Math.max(inset.value.bottom, hudOn.value && view.value.phase === 'finished' ? PLAQUE_PX : 0) }))
+const plaqueUp = computed(() => (hudOn.value && view.value.phase === 'finished') || (replaying.value && !!playback.value?.done && !playback.value.busy && !filming.value))
+const room = computed(() => ({ right: inset.value.right, bottom: Math.max(inset.value.bottom, plaqueUp.value ? PLAQUE_PX : 0) }))
 
 const replay = useReplay()
-const { runs, listProblem, run, passes, state: playback, problem: replayProblem } = replay
+const { runs, listProblem, run, passes, state: playback, problem: replayProblem, filming } = replay
 const picking = ref(false)
-const replayId = computed(() => typeof route.query.replay === 'string' ? route.query.replay : '')
+const replayId = computed(() => props.runId ?? (typeof route.query.replay === 'string' ? route.query.replay : ''))
 const wantedSpeed = Number(route.query.speed)
 const firstSpeed: ReplaySpeed = route.query.speed === 'max' ? 'max' : wantedSpeed > 0 ? wantedSpeed : 30
 const pass = computed(() => playback.value ? passes.value[playback.value.pass] : undefined)
-const label = computed(() => run.value ? `${run.value.subject} · ${run.value.model} · ${run.value.tools} · ${run.value.ref ? 'reference' : 'no reference'}` : '')
+const label = computed(() => {
+  const r = run.value
+  if (!r) return ''
+  return r.kind === 'session' ? `${r.subject} · ${modelLabel(r.model)}` : `${r.subject} · ${modelLabel(r.model)} · ${r.tools} · ${r.ref ? 'reference' : 'no reference'}`
+})
+// The title plaque under a finished replay, as the storyboard's frame 6 has it.
+const plaque = computed(() => {
+  const r = run.value
+  if (!r) return null
+  const day = r.finishedAt ? new Date(r.finishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' }) : ''
+  return {
+    title: r.title ?? 'Untitled',
+    meta: [modelLabel(r.model), stonePreset(r.stone).label, day].filter(Boolean).join(' · '),
+    statement: r.statement ?? `The sculptor did not call this one finished; the run stopped on ${r.ended.replace('_', ' ')}.`
+  }
+})
+// The replay's stats bar: strikes on the stone, stone removed, what the commission cost, the hand's time.
+const clock = (ms: number) => {
+  const s = Math.round(ms / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor(s / 60) % 60
+  const two = (n: number) => String(n).padStart(2, '0')
+  return h ? `${h}:${two(m)}:${two(s % 60)}` : `${m}:${two(s % 60)}`
+}
+const replayStats = computed(() => {
+  const p = playback.value
+  const r = run.value
+  if (!p || !r) return null
+  const removed = p.blockKg !== null && p.massKg !== null ? Math.max(0, p.blockKg - p.massKg) : null
+  return {
+    strikes: p.applied.toLocaleString('en-US'),
+    removed: removed === null ? '–' : `${Math.round(removed)} kg`,
+    cost: `$${r.costUsd.toFixed(2)}`,
+    time: clock(p.clockMs)
+  }
+})
+const filmPercent = computed(() => filming.value ? Math.round(filming.value.frame / Math.max(1, filming.value.frames) * 100) : 0)
 
 // The commission HUD has the stage unless a study run, the demo or hand-carving does.
 const replaying = computed(() => replayId.value !== '')
@@ -112,11 +156,31 @@ watch(stepping, on => passAt.value = on ? passCount.value : 0)
 function pick(id: string) {
   picking.value = false
   if (id === replayId.value) replay.player()?.restart()
+  else if (props.runId) navigateTo({ path: `/replay/${encodeURIComponent(id)}`, query: { ...route.query, at: undefined } })
   else navigateTo({ query: { ...route.query, replay: id, at: undefined, session: undefined, pass: undefined } })
+}
+
+async function makeFilm(seconds: number) {
+  try {
+    const made = await replay.film({ seconds })
+    toast.add({ title: 'The film is ready', description: `${made.name}: ${made.seconds} s at ${made.width} × ${made.height}, ${(made.bytes / 1e6).toFixed(1)} MB.`, color: 'success', icon: 'i-lucide-clapperboard' })
+  } catch (e) {
+    const cancelled = e instanceof DOMException && e.name === 'AbortError'
+    toast.add({ title: cancelled ? 'The film was cancelled' : 'The film could not be made', description: cancelled ? undefined : e instanceof Error ? e.message : String(e), color: cancelled ? 'neutral' : 'error', icon: 'i-lucide-film' })
+  }
+}
+
+// Another medium on the banker: the stone's material, and the chips and signature with it.
+async function setStone(key: string) {
+  if (!stone || !studio) return
+  if (!stone.setPreset(stonePreset(key))) return
+  cinema?.restone()
+  await studio.prewarm()
 }
 
 function pickSession(id: string) {
   picking.value = false
+  if (props.runId) return pick(id)
   navigateTo({ query: { ...route.query, session: id, replay: undefined, at: undefined, pass: undefined } })
 }
 
@@ -128,7 +192,7 @@ function toggle() {
 
 async function begin(request: StartRequest) {
   try {
-    await sculptor.start({ commission: request.commission, model: request.model })
+    await sculptor.start({ commission: request.commission, model: request.model, stone: request.stone })
   } catch (e) {
     toast.add({ title: 'The commission could not start', description: e instanceof Error ? e.message : String(e), color: 'error', icon: 'i-lucide-triangle-alert' })
   }
@@ -242,6 +306,10 @@ onMounted(async () => {
     state: () => sculptor.state(),
     /** The commission itself: pause, resume, setSpeed, abort, load, replayTo, saved. */
     sculptor: () => sculptor,
+    /** Renders the loaded replay to an MP4 and hands it to the browser to save: film({ seconds: 60 }). Resolves with what was made. */
+    film: (options: FilmOptions = {}) => replay.film(options),
+    /** Puts a stone of another medium on the banker: setStone('nero'). */
+    setStone: (key: string) => setStone(key),
     // -- the look (Sprint 4): the look book's camera presets --
     /** Puts the camera on a look-book preset (wide, medium, macro, raking, backlit), focuses, and holds it there. */
     look: (name: string) => applyLook(s, name),
@@ -260,8 +328,10 @@ onMounted(async () => {
   await st.whenShown(0)
   if (route.query.demo === '1') await handle.demo()
   charcoal = new Charcoal(s)
-  stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal, cinema: film ?? undefined }
+  stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal, cinema: film ?? undefined, setStone }
   await sculptor.attach(stage)
+  // ?stone=nero puts that stone on the banker from the start.
+  if (typeof route.query.stone === 'string' && !replayId.value && !sessionId.value) await sculptor.chooseStone(route.query.stone)
   if (replayId.value) {
     await replay.open(stage, replayId.value, { speed: firstSpeed, end: route.query.at === 'end' })
   } else if (sessionId.value) {
@@ -336,6 +406,8 @@ onBeforeUnmount(() => {
       @panel="sculptor.openPanel($event)"
       @reset="sculptor.reset()"
       @inset="inset = $event"
+      @stone="sculptor.chooseStone($event)"
+      @replay="navigateTo(`/replay/${encodeURIComponent(sculptor.sessionId.value)}`)"
     />
     <!-- The stats bar has this corner while a commission is on the stone. -->
     <UButton
@@ -396,6 +468,66 @@ onBeforeUnmount(() => {
         @click="stepTo(passAt - 1)"
       />
     </UFieldGroup>
+    <!-- A replay's header: what it is, and the stats as the storyboard's frame 6 has them. -->
+    <header
+      v-if="replaying && run && replayStats"
+      class="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-wrap items-start justify-between gap-2 p-3 pr-30"
+    >
+      <div
+        data-hud
+        class="hud-glass flex max-w-full min-w-0 items-baseline gap-1.5 px-2.5 py-1.5 text-xs"
+      >
+        <span class="font-semibold tracking-wide text-highlighted">Sculptor</span>
+        <span class="text-dimmed">·</span>
+        <span class="text-muted">replay</span>
+        <span class="text-dimmed">·</span>
+        <span
+          class="truncate text-default"
+          :title="run.subject"
+        >{{ run.subject }}</span>
+      </div>
+      <div
+        data-hud
+        class="hud-glass flex items-baseline gap-3 px-2.5 py-1.5 text-xs whitespace-nowrap text-muted tabular-nums"
+      >
+        <span><b class="font-medium text-highlighted">{{ replayStats.strikes }}</b> strikes</span>
+        <span><b class="font-medium text-highlighted">{{ replayStats.removed }}</b> removed</span>
+        <span><b class="font-medium text-highlighted">{{ replayStats.cost }}</b></span>
+        <span><b class="font-medium text-highlighted">{{ replayStats.time }}</b></span>
+      </div>
+    </header>
+    <!-- A film being made: the canvas is drawing it frame by frame at the film's own size. -->
+    <div
+      v-if="filming"
+      data-hud
+      class="absolute inset-0 z-30 grid place-items-center bg-black/55 p-6 backdrop-blur-sm"
+    >
+      <UCard
+        variant="subtle"
+        class="w-full max-w-sm bg-elevated/90"
+      >
+        <p class="text-sm font-medium text-highlighted">
+          Making the film
+        </p>
+        <p class="mt-0.5 text-xs text-muted tabular-nums">
+          Frame {{ filming.frame.toLocaleString('en-US') }} of {{ filming.frames.toLocaleString('en-US') }} · {{ filmPercent }}%
+        </p>
+        <UProgress
+          :model-value="filming.frame"
+          :max="filming.frames"
+          size="sm"
+          class="mt-3"
+        />
+        <UButton
+          label="Cancel"
+          color="neutral"
+          variant="soft"
+          size="sm"
+          class="mt-3"
+          @click="replay.stopFilm()"
+        />
+      </UCard>
+    </div>
     <ReplayPicker
       v-model:open="picking"
       :runs="runs"
@@ -418,10 +550,12 @@ onBeforeUnmount(() => {
       />
       <template v-else-if="playback && run">
         <HudFinishCard
-          v-if="playback.done && !playback.busy"
-          :title="run.title ?? 'Untitled'"
-          :statement="run.statement ?? `The sculptor did not call this one finished; the run stopped on ${run.ended}.`"
-          class="pointer-events-auto lg:absolute lg:bottom-3 lg:left-3 lg:w-80"
+          v-if="playback.done && !playback.busy && plaque"
+          centered
+          :title="plaque.title"
+          :meta="plaque.meta"
+          :statement="plaque.statement"
+          class="pointer-events-auto"
         />
         <HudSubtitle
           v-else-if="pass"
@@ -431,11 +565,15 @@ onBeforeUnmount(() => {
         <HudTransport
           :state="playback"
           :label="label"
+          :passes="passes"
+          :filming="!!filming"
           class="pointer-events-auto"
           @toggle="toggle"
           @restart="replay.player()?.restart()"
           @end="replay.player()?.end()"
           @speed="replay.player()?.setSpeed($event)"
+          @seek="replay.seek($event)"
+          @film="makeFilm"
         />
       </template>
     </div>

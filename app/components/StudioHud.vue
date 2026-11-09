@@ -164,6 +164,7 @@ const SIDES = {
         :gateway="view.gateway"
         class="pointer-events-auto lg:mb-[9dvh]"
         @start="emit('start', $event)"
+        @stone="emit('stone', $event)"
       />
       <template v-else>
         <UAlert
@@ -199,6 +200,7 @@ const SIDES = {
           :panel="view.panel"
           :can-look="!!view.eye"
           :ended="over"
+          :replayable="view.phase === 'finished'"
           class="pointer-events-auto"
           @toggle="view.transport.paused ? emit('resume') : emit('pause')"
           @speed="speed"
@@ -206,6 +208,7 @@ const SIDES = {
           @panel="emit('panel', $event)"
           @abort="emit('abort')"
           @reset="emit('reset')"
+          @replay="emit('replay')"
         />
       </template>
     </footer>

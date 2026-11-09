@@ -1,7 +1,7 @@
 # Sculptor — Implementation Plan
 
 **Created:** November 8, 2026
-**Status:** In Progress — Sprints 1 to 3 complete (gate passed November 9, 2026); Sprint 4 built and merged, waiting on Kyle's sign-off on the look; Sprint 5 next
+**Status:** All five sprints built — Sprints 1 to 3 complete (gate passed November 9, 2026); Sprint 4 built and merged, waiting on Kyle's sign-off on the look; Sprint 5 built on the `sprint5-reveal` worktree (not merged); the gallery and deploy (5.5) skipped until Kyle decides on going public
 **Context:** Kyle wants an AI that carves a virtual block of marble the way a sculptor does: it knocks stone off with different tools, walks around the piece, thinks, and goes back in. He wants to watch it happen live and have it look like a film.
 
 **Goal:** Type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export.
@@ -452,7 +452,7 @@ What the study says:
 
 ---
 
-### Sprint 5: Reveal and share `[Not Started]`
+### Sprint 5: Reveal and share `[Built]`
 **Goal:** Every commission ends well and leaves something to show people.
 **Estimated effort:** 5–7 hours
 
@@ -465,9 +465,20 @@ What the study says:
 - 5.6 Verification page for the whole plan.
 
 #### Verification
-- [ ] Storyboard frame 6 reproduced; scrubbing to any stage shows the stone as it was.
-- [ ] An exported 60-second film plays in QuickTime with no dropped frames.
-- [ ] A replay page loads and plays with the network tab showing zero model calls.
+- [x] Storyboard frame 6 reproduced; scrubbing to any stage shows the stone as it was. `/replay/20261109180313-a-chess-pawn-0ee`: header, stats strip (10,941 strikes, 720 kg removed, $0.93, 54:09), centred plaque, transport with scrubber and Export film (`verification/screenshots/sprint5_frame6_replay_gpu`, `sprint5_scrub_1500_gpu`, `sprint5_scrub_6000_gpu`). Seeking the log back and forth ends on the live run's hash `e71e528775456405`. Seeks on the pawn: back to the middle 2.3 s (9.6 s before snapshots), forward to the end 0.36 s, back to 3,000 0.73 s, forward to 9,000 0.92 s. Not verified: mouse scrubbing beyond the one click in the end-to-end run; films are 1080p, not the storyboard's 4K.
+- [x] An exported 60-second film plays in QuickTime with no dropped frames. The pawn as a one-minute time-lapse: H.264 High, 1920 x 1080, 30 fps, 60.0 s, 1,800 frames, 79.2 MB, rendered in 69 s. AVFoundation (QuickTime's framework) reads it as playable and decodes all 1,800 frames at exactly 1/30 s apart; `ffprobe` and a full `ffmpeg` decode agree. Not verified: nobody has watched it in the QuickTime Player app; no sound track.
+- [x] A replay page loads and plays with the network tab showing zero model calls. Five `/api/` requests (health, study list, the session, its strikes, its passes), none to `/api/brain` or `/api/reference`; counted with Playwright's request log (`shoot --api`), not the devtools tab. The end-to-end run repeated it on a fresh session with an export.
+
+#### Results and deviations (November 9, 2026)
+- **Built in a worktree** (`sprint5-reveal`, one commit) while Kyle watched a commission on the main checkout. 185 tests, typecheck and lint pass. `KERNEL_VERSION` is still 2.
+- **Reveal** (`app/studio/reveal.ts`, wired through `Cinema`): starts when the director reaches its reveal shot, so only for a piece watched to its end. On the film clock: floor swept over 2.4 s (chips pushed off by a moving edge, offcuts shrunk away, dust film lifted: `Debris.sweep`, `Dust.sweep`), a shadowless spotlight sweeping round the piece from 1.0 s for 4.2 s, the signature fading up from 2.2 s. The signature is the model and the year in Roman numerals ("Opus 5.5 · MMXXVI"), dark on Carrara, pale on Nero, cast onto the front of the base in sixteen columns of raycasts so it follows the surface. A finished piece that is skipped to is signed without the rest. The plaque is the HUD's (new, centred, on the replay page) and is set into the last seconds of an exported film.
+- **Replay page** `app/pages/replay/[id].vue` is `<StudioScene :run-id>`: a saved session or a study run (`useReplay` now reads both), a stats strip, the plaque, and the replay transport with a scrubber over the log (label shows the pass under the thumb; letting go seeks) and Export film. A finished live commission's transport has a Replay button. `/?replay=` still works.
+- **Snapshots added for scrubbing.** The plan said only if seeking felt slow; going back to the middle of the pawn took 9.6 s. The kernel worker keeps copies of the shown stone (`snapshot` message, 13 MB each, at most ten) every max(800, log ÷ 8) entries as a seek passes them; a seek back, or forward past one, starts from the nearest. Hash unchanged.
+- **Film export** (`app/studio/film.ts`, mediabunny 1.65.2 `CanvasSource`): the WebGPU spike worked first time, so the WebGL 2 fallback was never needed or tried. The studio's frame loop is held (`StudioRenderer.hold/step`) and stepped at 1/30 s; before each frame the export waits for the timeline's batch (`Timeline.pending`), its mesh (`Stone.arrived`), any shot the director is asking the worker about (`Director.pending`) and where the signature goes. So the director's raycast cuts land on a fixed frame without restructuring the director. The worker still splits batches by time (budget raised to 150 ms for export), so a strike can move by a frame between two exports: deterministic enough, not bit-exact. The replay speed is steered every frame so the carving ends where the 9 s reveal tail begins (the one-minute pawn: carving ended at 52.2 s, speeds 0.5x to 64x); looks are shortened to 0.6 of their length. H.264 about 10.5 Mbit/s at 1920 x 1080, 30 fps; lengths 30 s, one minute, two minutes. No audio. `__sculptor.film(options)` and `shoot --downloads` for automation.
+- **Black marble** (5.4): `NERO` tuned by eye on the finished pawn and wired to the stone picker. Near-black body, few thin white veins (new `veinFineness` sharpens the same vein field; `feather` and `bruise` per preset), polish to a dark mirror, no light through. Picking it re-skins the stone, chips and signature at once (`Stone.setPreset`, `Cinema.restone`, then a prewarm); a commission records it in its run config's `stone` ("Nero Marquina, a black marble with white veins"), which is what the sculptor is told, and replays and resumes put the same stone back. No tool constants needed changing. `?stone=nero` for one page load.
+- **End-to-end run** (5.6): "a chess pawn" on Opus 5.5, $2 cap, driven through the UI in headed Chrome: finished as "Pawn" at turn 24, 13,326 strikes, $1.23 (reference $0.09), 384 s to the finished piece on screen, true and shown hashes equal (`7aaa5561dffea4ac`); the reveal; the Replay button to `/replay/20261109191043-a-chess-pawn-a53` (no model calls); a click on the scrubber to strike 4,620; Export film, 30 s, saved by the browser and read back by AVFoundation as 900 frames, 30.0 s, 1920 x 1080, 30.6 MB. Screenshots `verification/screenshots/e2e_*`. Not verified: sound on speakers, a viewing in QuickTime Player, Kyle's sign-off on the look.
+- **Skipped by decision:** 5.5 gallery and deploy, and the deploy-only work with it (WebP looks for Vercel's 4.5 MB body limit). Nothing is public.
+- **Known rough edges:** a film opens wherever the camera happened to be, sometimes on the block's shadowed side; at time-lapse speeds the director never takes the macro or slow motion (it refuses them above 12x and 24x); a one-minute film is about 79 MB; export holds the tab (about 70 s per minute of film) and shows the canvas stretched behind the progress card; title and signature fall back to Georgia or Iowan Old Style (no web font is loaded); the light sweep barely shows in stills; nobody has carved a commission in black marble live or listened to anything on speakers; Kyle has not signed off on the look.
 
 ---
 

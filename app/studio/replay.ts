@@ -30,6 +30,12 @@ export interface ReplayState {
   /** Rebuilding the block or skipping to the end: the controls wait. */
   busy: boolean
   error: string
+  /** The virtual clock, ms, of `totalMs`: the hand's own time, looks left out. */
+  clockMs: number
+  totalMs: number
+  /** What the stone weighs now and weighed as a block, kg; null until the worker has said. */
+  massKg: number | null
+  blockKg: number | null
 }
 
 /** Why this log cannot be played here, or null if it can. A log only replays on the kernel that wrote it. */
@@ -45,6 +51,7 @@ export class ReplayPlayer {
   readonly timeline: Timeline<ReplayPass>
   // False when the pass record does not add up to the log (another run's, or one cut short).
   private fits: boolean
+  private blockKg: number | null = null
 
   constructor(kernel: KernelClient, stone: Stone, log: StrikeLog, passes: ReplayPass[], speed: ReplaySpeed = 30, camera: CameraRig | null = null) {
     const blocker = replayBlocker(log.kernel)
@@ -83,6 +90,7 @@ export class ReplayPlayer {
 
   state(): ReplayState {
     const s = this.timeline.state()
+    if (s.applied === 0 && s.massKg !== null) this.blockKg = s.massKg
     return {
       playing: s.playing,
       speed: s.speed,
@@ -92,7 +100,11 @@ export class ReplayPlayer {
       passes: this.fits ? s.passes : 0,
       done: s.applied >= s.total,
       busy: s.busy,
-      error: s.error
+      error: s.error,
+      clockMs: s.clockMs,
+      totalMs: s.totalMs,
+      massKg: s.massKg,
+      blockKg: this.blockKg
     }
   }
 

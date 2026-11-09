@@ -41,11 +41,24 @@ export interface StonePreset {
   translucency: number
   /** Specular strength of the polished surface (0 to 1). */
   sheen: number
+  /** How fine the veins are drawn: 1 is Carrara's broad smoky bands; higher, thinner and crisper lines. */
+  veinFineness?: number
+  /** How strongly the hairline feathering between the veins shows (0.45 if left out). */
+  feather?: number
+  /** How pale fresh-cut rough stone reads against the polished (0 to 1). */
+  bruise?: number
+  /** A dark stone: what is cut into it (the signature) reads pale. */
+  dark?: boolean
+  /** How it is named on the plaque, and how the sculptor is told what it is carving. */
+  label: string
+  prompt: string
 }
 
 /** Statuario-leaning Carrara: a warm white body, soft blue-grey veins, smoky clouding. */
 export const CARRARA: StonePreset = {
   name: 'carrara',
+  label: 'Carrara marble',
+  prompt: 'Carrara marble',
   body: 0xf2ede4,
   cloud: 0xbdbcbb,
   vein: 0x70747c,
@@ -61,25 +74,42 @@ export const CARRARA: StonePreset = {
   sheen: 1
 }
 
-/** Nero Marquina: the second medium's slot (Sprint 5). Constants only; not yet tuned by eye. */
+/**
+ * Nero Marquina: a near-black body with few, thin, crisp white veins that run a long way, and no
+ * light through it. Rough-cut it bruises grey (the tool crushes the surface); polished it is a dark
+ * mirror. Same physics and tools as Carrara: only the look differs. Tuned by eye on the finished
+ * pawn (Sprint 5).
+ */
 export const NERO: StonePreset = {
   name: 'nero',
-  body: 0x15151a,
-  cloud: 0x1f2026,
-  vein: 0xe8e4dc,
-  veinScale: 0.07,
+  label: 'Nero Marquina',
+  prompt: 'Nero Marquina, a black marble with white veins',
+  dark: true,
+  body: 0x121215,
+  cloud: 0x1c1d22,
+  vein: 0xe9e5dd,
+  veinScale: 0.05,
   veinStrength: 1,
-  cloudStrength: 0.2,
+  veinFineness: 4.2,
+  feather: 0.08,
+  bruise: 0.14,
+  cloudStrength: 0.35,
   bedding: [0.7, 0.5, -0.5],
   roughRaw: 0.9,
-  roughSatin: 0.42,
-  roughPolished: 0.07,
+  roughSatin: 0.45,
+  roughPolished: 0.14,
   glow: 0x000000,
   translucency: 0,
   sheen: 1
 }
 
 export const STONE_PRESETS: Record<string, StonePreset> = { carrara: CARRARA, nero: NERO }
+
+/** The preset a stone's name or description means: a run config's `stone` ("Nero Marquina black marble"), a key, or nothing (Carrara). */
+export function stonePreset(named?: string | null): StonePreset {
+  const key = (named ?? '').toLowerCase()
+  return STONE_PRESETS[key] ?? (key.includes('nero') || key.includes('black') ? NERO : CARRARA)
+}
 
 export interface MarbleOptions {
   /**
@@ -182,15 +212,17 @@ function veinField(p: Vec3, preset: StonePreset) {
   const bent = p.add(warp)
   const squeezed = bent.add(bed.mul(bent.dot(bed)).mul(1.1))
   const s = preset.veinScale
+  // Fineness sharpens every band: a higher power of the same field is a thinner line along the same sheet.
+  const f = preset.veinFineness ?? 1
   const a = mx_noise_float(squeezed.mul(s)).abs().oneMinus()
   const b = mx_noise_float(squeezed.mul(s * 2.3).add(vec3(31.7, 4.1, 12.9))).abs().oneMinus()
   const onA = smoothstep(-0.35, 0.25, mx_noise_float(p.mul(0.021).add(vec3(7.3, 1.9, 4.4))))
   const onB = smoothstep(-0.25, 0.35, mx_noise_float(p.mul(0.034).add(vec3(2.6, 8.8, 0.7))))
-  const major = a.pow(3).mul(0.5).add(a.pow(18).mul(0.2)).mul(onA)
-  const minor = b.pow(5).mul(0.34).add(b.pow(24).mul(0.14)).mul(onB)
+  const major = a.pow(3 * f).mul(0.5).add(a.pow(18 * f).mul(0.2)).mul(onA)
+  const minor = b.pow(5 * f).mul(0.34).add(b.pow(24 * f).mul(0.14)).mul(onB)
   // And faint hairline feathering everywhere, finer than either, so that no carved face is blank.
   const c = mx_noise_float(squeezed.mul(s * 3.1).add(vec3(5.9, 17.3, 2.2))).abs().oneMinus()
-  const feather = c.pow(8).mul(0.45).mul(mx_noise_float(p.mul(0.05).add(vec3(1.4, 6.6, 9.1))).mul(0.5).add(0.6).saturate())
+  const feather = c.pow(8 * f).mul(preset.feather ?? 0.45).mul(mx_noise_float(p.mul(0.05).add(vec3(1.4, 6.6, 9.1))).mul(0.5).add(0.6).saturate())
   const veining = major.add(minor).add(feather).mul(preset.veinStrength).saturate()
   // Clouding: broad smoky greys that follow the same bedding.
   const smoke = mx_fractal_noise_float(squeezed.mul(s * 0.5).add(vec3(3.1, 8.2, 5.5)), 4).mul(0.5).add(0.5)
@@ -292,7 +324,7 @@ export function createMarble(preset: StonePreset = CARRARA, options: MarbleOptio
   const stone = mix(body, color(preset.vein), veining).mul(grain.add(1))
   // Fresh-cut rough stone scatters more and reads paler and chalkier than the same stone polished.
   const raw = finish.oneMinus()
-  material.colorNode = mix(stone, mix(stone, color(0xffffff), 0.12), raw.mul(raw))
+  material.colorNode = mix(stone, mix(stone, color(0xffffff), preset.bruise ?? 0.12), raw.mul(raw))
 
   // Finish. Roughness falls slowly from the point chisel to the rasp, then quickly to the polish.
   const matte = mix(float(preset.roughRaw), float(preset.roughSatin), smoothstep(0, 0.7, finish))

@@ -167,6 +167,10 @@ const BUDGET_MS = 10
 // Most entries offered in one batch, and the batch size when skipping without drawing.
 const MAX_BATCH = 256
 const SKIP_BATCH = 250
+// Scrubbing back: a copy of the shown stone is kept in the worker every so many log entries as a
+// seek passes them, at most this many to a log, and going back starts from the nearest one.
+const SNAP_MIN = 800
+const SNAPS_PER_LOG = 8
 
 // Elastic pacing (see the top of the file).
 const DRAIN_S = 96
@@ -214,6 +218,10 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   rev = 0
   /** Tick seconds per second handed to tick(): below 1 is slow motion. The director's to set. */
   timeScale = 1
+  /** Worker time one batch may take, ms. A film export raises it: nobody is waiting on the frame. */
+  budgetMs = BUDGET_MS
+  /** Stretches (above 1) or shortens every staged look. A time-lapse film shortens them. */
+  lookScale = 1
   readonly idle: TimelineIdle = { totalS: 0, longestS: 0, longestStallS: 0, maxBehindS: 0 }
 
   private strikes: Strike[] = []
@@ -254,6 +262,9 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   private listeners = new Set<TimelineListener>()
   // Bumped by restart() and dispose(): replies to anything sent before are for a stone that is gone.
   private epoch = 0
+  // Log entries at which the worker holds a copy of the shown stone, and this timeline's name for them.
+  private snaps = new Set<number>()
+  private tag = Math.random().toString(36).slice(2, 10)
 
   constructor(kernel: KernelClient, stone: Stone, options: TimelineOptions) {
     this.kernel = kernel
@@ -336,6 +347,11 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   }
 
   // ---------- the queue ----------
+
+  /** Resolves once the batch the worker has (if any) is back: a fixed-step export waits on it before the next frame. */
+  async pending() {
+    while (this.flight) await this.flight
+  }
 
   /** Adds log entries to the end of the queue; with `pass`, they are that pass (its `strikes` is their count). */
   push(strikes: readonly Strike[], pass?: P) {
@@ -459,6 +475,20 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
 
   /** A fresh block and the clock back at zero, with the queue kept. Resolves once the worker has rebuilt it; playing or paused carries over. */
   async restart() {
+    const epoch = this.clear()
+    // A rebuild may be a full init, which lets go of every copy the worker kept.
+    this.snaps.clear()
+    const grid = await this.rebuild()
+    if (epoch !== this.epoch) return
+    // Still inside the task that delivered 'ready', so this runs before the new block's first mesh.
+    this.stone.reset(grid)
+    this.busy = false
+    void this.weigh()
+    this.emit()
+  }
+
+  // Back to the start of the queue, with the stone to be replaced: returns the new epoch.
+  private clear() {
     const epoch = ++this.epoch
     this.flight = null
     this.busy = true
@@ -470,13 +500,33 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.sinceSettle = this.unsettled = 0
     for (const l of this.listeners) l.reset?.()
     this.emit()
-    const grid = await this.rebuild()
-    if (epoch !== this.epoch) return
-    // Still inside the task that delivered 'ready', so this runs before the new block's first mesh.
-    this.stone.reset(grid)
+    return epoch
+  }
+
+  // The log entry of the nearest copy of the stone kept at or before `to`; 0 if none.
+  private nearest(to: number) {
+    let best = 0
+    for (const at of this.snaps) if (at <= to && at > best) best = at
+    return best
+  }
+
+  // Puts the shown stone back to the copy kept at log entry `at`. False if the worker has let it
+  // go, in which case nothing has changed.
+  private async fromSnapshot(at: number) {
+    let reply: Awaited<ReturnType<KernelClient['snapshot']>>
+    try {
+      reply = await this.kernel.snapshot(`${this.tag}:${at}`, 'load')
+    } catch {
+      this.snaps.delete(at)
+      return false
+    }
+    this.clear()
+    // A remesh of every chunk is owed: the stone waits for it as it does after a rebuild.
+    this.stone.reset(this.stone.grid)
+    this.sent = this.applied = at
+    this.rev = reply.rev
     this.busy = false
-    void this.weigh()
-    this.emit()
+    return true
   }
 
   /**
@@ -488,9 +538,12 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   async seek(to = this.total) {
     if (this.busy || this.error) return
     to = clamp(Math.round(to), 0, this.total)
-    if (to < this.applied) {
+    // From the nearest copy of the stone kept on the way, back or forward, if it saves work.
+    const near = this.nearest(to)
+    if (to < this.applied || near > this.applied) {
       this.playing = false
-      await this.restart()
+      const restored = near > 0 && await this.fromSnapshot(near)
+      if (!restored && to < this.applied) await this.restart()
       if (this.busy || this.error) return
     }
     const epoch = this.epoch
@@ -505,11 +558,19 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.emit()
     try {
       await this.flight
+      const every = Math.max(SNAP_MIN, Math.ceil(this.total / SNAPS_PER_LOG))
       while (epoch === this.epoch && this.applied < to) {
         const from = this.applied
-        const reply = await this.kernel.strike(this.strikes.slice(from, Math.min(to, from + SKIP_BATCH)), 'shown', { silent: true })
+        const mark = (Math.floor(from / every) + 1) * every
+        const reply = await this.kernel.strike(this.strikes.slice(from, Math.min(to, from + SKIP_BATCH, mark)), 'shown', { silent: true })
         if (epoch !== this.epoch) return
         this.sent = this.applied = from + reply.applied
+        // Passing a mark: keep a copy there for scrubbing back.
+        if (this.applied === mark && !this.snaps.has(mark)) {
+          await this.kernel.snapshot(`${this.tag}:${mark}`, 'save')
+          if (epoch !== this.epoch) return
+          this.snaps.add(mark)
+        }
         this.emit()
       }
       if (epoch !== this.epoch) return
@@ -657,7 +718,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     // Quicker at a higher speed setting (by its square root: a walk at 60× would be a blur), and a
     // little quicker again when the hand is running at the top of its band.
     const haste = clamp(Math.sqrt(speed / 4), 0.8, 3) * (this.elastic ? clamp(this.aim() / (speed * 4), 1, 1.5) : 1)
-    return Math.max(LOOK_MIN_S, (LOOK_WALK_S * Math.min(look.views.length, LOOK_VIEWS) + LOOK_HOLD_S) * (look.linger ?? 1) / haste)
+    return Math.max(LOOK_MIN_S * Math.min(1, this.lookScale), (LOOK_WALK_S * Math.min(look.views.length, LOOK_VIEWS) + LOOK_HOLD_S) * (look.linger ?? 1) * this.lookScale / haste)
   }
 
   // Screen seconds the queue would take at the pace being aimed for.
@@ -739,7 +800,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     }
     this.drawn = Math.max(this.drawn, to)
     try {
-      const reply = await this.kernel.strike(batch, 'shown', { budgetMs: BUDGET_MS, ...(settle ? { settle: true } : {}) })
+      const reply = await this.kernel.strike(batch, 'shown', { budgetMs: this.budgetMs, ...(settle ? { settle: true } : {}) })
       if (epoch !== this.epoch) return
       // Whatever the budget left out is offered again on the next tick.
       this.sent = this.applied = from + reply.applied
