@@ -137,6 +137,8 @@ export function compileForm(form: Form): CompiledForm {
     data[o + 12] = d
     data[o + 13] = -b * c
     data[o + 14] = a * c
+    // The form's blend unless the shape brings its own (never more than the form's).
+    data[o + 15] = shape.blend === undefined ? Math.max(0, form.blend) : Math.max(0, Math.min(shape.blend, Math.max(0, form.blend)))
     // A lower bound on the shape's distance r cm from its centre: a * r - c, for r beyond the
     // third number. The round kinds and the box have exact distances, so the sphere round them
     // bounds them everywhere (scaled by the squash for the round kinds). The ellipsoid's
@@ -227,7 +229,7 @@ function binsFor(data: Float64Array, count: number): Bins {
 
 // The solids that matter anywhere in one cell, in order.
 function binList(form: CompiledForm, bins: Bins, ix: number, iy: number, iz: number): Int32Array {
-  const { count, data, reach, ceil, blend } = form
+  const { count, data, reach, ceil } = form
   const half = BIN_CM / 2
   const cx = bins.x0 + (ix + 0.5) * BIN_CM
   const cy = bins.y0 + (iy + 0.5) * BIN_CM
@@ -245,7 +247,7 @@ function binList(form: CompiledForm, bins: Bins, ix: number, iy: number, iz: num
     const q = i * 3
     // The least this solid's distance can be anywhere in the cell.
     const floor = near > reach![q + 2]! ? reach![q]! * near - reach![q + 1]! : -Infinity
-    if (keep.length > 0 && floor >= top + blend + 1e-6) continue
+    if (keep.length > 0 && floor >= top + data[o + 15]! + 1e-6) continue
     keep.push(i)
     // The most it can be anywhere in the cell.
     const w = i * 2
@@ -296,7 +298,7 @@ export function formDistanceAt(form: CompiledForm, grid: SampleGrid, index: numb
 
 // The smooth union of the form's solids at a point, before any inflation.
 function union(form: CompiledForm, x: number, y: number, z: number): number {
-  const { count, kinds, data, blend, reach, bins } = form
+  const { count, kinds, data, reach, bins } = form
   let list: Int32Array | undefined
   if (bins !== undefined) {
     const ix = Math.floor((x - bins.x0) / BIN_CM)
@@ -321,7 +323,7 @@ function union(form: CompiledForm, x: number, y: number, z: number): number {
     if (reach !== undefined && !first) {
       const r = Math.sqrt(px * px + py * py + pz * pz)
       const q = i * 3
-      if (r > reach[q + 2]! && reach[q]! * r - reach[q + 1]! >= best + blend + 1e-6) continue
+      if (r > reach[q + 2]! && reach[q]! * r - reach[q + 1]! >= best + data[o + 15]! + 1e-6) continue
     }
     const lx = data[o + 6]! * px + data[o + 7]! * py + data[o + 8]! * pz
     const ly = data[o + 9]! * px + data[o + 10]! * py + data[o + 11]! * pz
@@ -344,7 +346,7 @@ function union(form: CompiledForm, x: number, y: number, z: number): number {
         : sdCone(lx, ly, lz * squash, hx, 2 * hy)
       if (squash > 1) d /= squash
     }
-    best = first ? d : smoothMin(best, d, blend)
+    best = first ? d : smoothMin(best, d, data[o + 15]!)
     first = false
   }
   return best

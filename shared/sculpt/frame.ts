@@ -134,7 +134,8 @@ export function rounded(s: Shape): Shape {
     kind: s.kind,
     center: [r3(s.center[0]), r3(s.center[1]), r3(s.center[2])],
     size: [r3(Math.max(0.2, s.size[0])), r3(Math.max(0.2, s.size[1])), r3(Math.max(0.2, s.size[2]))],
-    rotation: [r3(s.rotation[0]), r3(s.rotation[1]), r3(s.rotation[2])]
+    rotation: [r3(s.rotation[0]), r3(s.rotation[1]), r3(s.rotation[2])],
+    ...(s.blend !== undefined ? { blend: r3(s.blend) } : {})
   }
 }
 

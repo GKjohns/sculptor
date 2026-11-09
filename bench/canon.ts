@@ -153,7 +153,7 @@ async function main(): Promise<void> {
   const unknown = args.unknown()
   if (unknown.length) throw new Error(`unknown flags: ${unknown.join(', ')}`)
   mkdirSync(out, { recursive: true })
-  const names = which === 'all' ? Object.keys(PRESETS) : [which]
+  const names = which === 'all' ? Object.keys(PRESETS) : which.split(',')
   for (const id of names) {
     const preset = PRESETS[id]
     if (!preset) throw new Error(`no preset "${id}"; presets: ${Object.keys(PRESETS).join(', ')}`)

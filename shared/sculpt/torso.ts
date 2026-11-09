@@ -9,7 +9,8 @@ import type { DeclaredShape, Expanded, HeadKnobs, RoughCut } from './anatomy.ts'
 import { CHIN } from './anatomy.ts'
 import { add, between, dirToWorld, frameOf, lerp, meanStretch, normalize, partShape, r3, rounded, scale, sub, toWorld } from './frame.ts'
 import type { Frame } from './frame.ts'
-import type { Shape, ShapeKind, Vec3 } from './types.ts'
+import { compileForm, formDistance } from './shapes.ts'
+import type { CompiledForm, Shape, ShapeKind, Vec3 } from './types.ts'
 
 // The canon torso, cm: shoulder to shoulder, truncation to the top of the shoulders, chest to back.
 export const TORSO: Vec3 = [60, 46, 30]
@@ -39,39 +40,60 @@ export function torsoStyle(style: readonly string[] = [], head: HeadKnobs | null
 function trunk(s: TorsoStyle): { kind: ShapeKind, e: Ell, r?: Vec3, mirror?: boolean }[] {
   const b = s.build
   const f = s.female ? 1 : 0
+  // The classical bust's figure: broad at the shoulders, the chest flat in front, narrowing
+  // to a rounded cut over the socle, the arms cut off under the deltoids.
   const list: { kind: ShapeKind, e: Ell, r?: Vec3, mirror?: boolean }[] = [
-    { kind: 'ellipsoid', e: { c: [0, 2, -0.5], r: [22.5 + b - 1.5 * f, 21, 13.5 + 0.5 * b] } },
-    { kind: 'ellipsoid', e: { c: [0, -10, 0.5], r: [21.5 + b - 1.5 * f, 13.5, 12.5 + 0.5 * b] } },
-    { kind: 'ellipsoid', e: { c: [0, 15.5, -1.5], r: [29 - 2 * f, 7, 11] } },
-    { kind: 'ellipsoid', e: { c: [24 - 2 * f, 5, -0.5], r: [6, 11, 7] }, r: [0, 0, 5], mirror: true },
-    { kind: 'ellipsoid', e: { c: [9, 20.5, -3.5], r: [10, 3.2, 6.5] }, r: [0, 0, -14], mirror: true }
+    { kind: 'ellipsoid', e: { c: [0, 5, -1], r: [19.5 + b - 1.5 * f, 16.5, 12 + 0.5 * b] } },
+    { kind: 'ellipsoid', e: { c: [0, -9.5, 0], r: [14.5 + b - f, 12.5, 10.5 + 0.5 * b] } },
+    { kind: 'ellipsoid', e: { c: [0, 16, -2.5], r: [26.5 - 2 * f, 5.5, 10.5] } },
+    { kind: 'ellipsoid', e: { c: [23 - 2 * f, 7.5, -1.5], r: [6.2, 12, 7.2] }, r: [0, 0, 8], mirror: true },
+    { kind: 'ellipsoid', e: { c: [8.5, 19.5, -4], r: [9, 3, 6] }, r: [0, 0, -16], mirror: true }
   ]
-  if (f) list.push({ kind: 'ellipsoid', e: { c: [8, 3, 10], r: [6, 5.5, 4.5] }, mirror: true })
-  else list.push({ kind: 'ellipsoid', e: { c: [9.5, 9, 9.5], r: [8.5, 5.5, 3 + 0.5 * b] }, r: [0, 0, -10], mirror: true })
+  if (f) list.push({ kind: 'ellipsoid', e: { c: [7.5, 3.5, 8.6], r: [6.5, 5.5, 3.8] }, mirror: true })
+  else list.push({ kind: 'ellipsoid', e: { c: [8.5, 9, 9], r: [9.5, 5.5, 2.6 + 0.5 * b] }, r: [0, 0, -10], mirror: true })
   return list
 }
 
-// The front surface of the trunk at (x, y), canon cm: the furthest forward of its masses there.
-function frontZ(masses: Ell[], x: number, y: number, back = false): number {
-  let best = back ? Infinity : -Infinity
-  for (const { c, r } of masses) {
-    // Past a mass's outline, its surface is taken to fall away behind it, so the answer is
-    // always a number and the furthest forward mass still wins.
-    const u = 1 - ((x - c[0]) / r[0]) ** 2 - ((y - c[1]) / r[1]) ** 2
-    const h = u > 0 ? r[2] * Math.sqrt(u) : -r[2] * Math.sqrt(-u)
-    const z = back ? c[2] - h : c[2] + h
-    if (back ? z < best : z > best) best = z
+// The trunk's own surface, for laying cloth on it: its masses as one blended form in the canon
+// frame, compiled once per trunk.
+const trunks = new WeakMap<Ell[], CompiledForm>()
+function trunkForm(masses: Ell[]): CompiledForm {
+  let form = trunks.get(masses)
+  if (!form) {
+    form = compileForm({ shapes: masses.map(m => ({ kind: 'ellipsoid', center: m.c, size: scale(m.r, 2), rotation: [0, 0, 0] })), blend: 2 })
+    trunks.set(masses, form)
   }
-  return best
+  return form
 }
 
+function gradient(form: CompiledForm, p: Vec3): Vec3 {
+  const e = 0.05
+  return normalize([
+    formDistance(form, p[0] + e, p[1], p[2]) - formDistance(form, p[0] - e, p[1], p[2]),
+    formDistance(form, p[0], p[1] + e, p[2]) - formDistance(form, p[0], p[1] - e, p[2]),
+    formDistance(form, p[0], p[1], p[2] + e) - formDistance(form, p[0], p[1], p[2] - e)
+  ])
+}
+
+// The front (or back) surface of the trunk at (x, y), canon cm, and its outward normal. Past
+// the trunk's outline the point is brought in toward the middle until it lies on the trunk,
+// so cloth laid along a path always lies on the body.
 function surfaceAt(masses: Ell[], x: number, y: number, back = false): { p: Vec3, n: Vec3 } {
-  const z = frontZ(masses, x, y, back)
-  const e = 0.5
-  const zx = (frontZ(masses, x + e, y, back) - frontZ(masses, x - e, y, back)) / (2 * e)
-  const zy = (frontZ(masses, x, y + e, back) - frontZ(masses, x, y - e, back)) / (2 * e)
-  const n = back ? normalize([zx, zy, -1]) : normalize([-zx, -zy, 1])
-  return { p: [x, y, z], n: Number.isFinite(n[0]) ? n : [0, 0, back ? -1 : 1] }
+  const form = trunkForm(masses)
+  const dz = back ? 1 : -1
+  for (let shrink = 0; shrink < 30; shrink++) {
+    const xx = x * (1 - shrink / 30)
+    let z = -dz * 40
+    for (let i = 0; i < 160 && Math.abs(z) <= 40; i++) {
+      const d = formDistance(form, xx, y, z)
+      if (d < 0.02) {
+        const p: Vec3 = [xx, y, z]
+        return { p, n: gradient(form, p) }
+      }
+      z += dz * Math.max(0.05, Math.min(d, 2))
+    }
+  }
+  return { p: [0, y, back ? -10 : 10], n: [0, 0, back ? -1 : 1] }
 }
 
 // A fold: a ridge of cloth along a path of (x, y) on the chest, its crest `proud` off the chest
@@ -96,16 +118,23 @@ function fold(f: Frame, masses: Ell[], path: [number, number][], thick: number, 
 // The body of a length of cloth lying on the chest along a path: overlapping flat masses
 // `wide` across and `thick` through, standing `proud` off the chest.
 function cloth(f: Frame, masses: Ell[], path: [number, number][], wide: number, thick: number, proud: number, back = false): Shape[] {
+  // Narrow strips side by side, each following the body, so a broad cloth wraps the chest
+  // instead of standing off it at its edges.
   const out: Shape[] = []
-  for (let i = 0; i < path.length; i++) {
-    const [x, y] = path[i]!
-    const a = path[Math.max(0, i - 1)]!
-    const b = path[Math.min(path.length - 1, i + 1)]!
-    const s = surfaceAt(masses, x, y, back)
-    const along: Vec3 = normalize([b[0] - a[0], b[1] - a[1], 0])
-    const step = Math.hypot(b[0] - a[0], b[1] - a[1]) / (i > 0 && i < path.length - 1 ? 2 : 1)
-    const c = add(s.p, scale(s.n, proud - thick / 2))
-    out.push(rounded({ ...between('ellipsoid', toWorld(f, sub(c, scale(along, step * 0.8))), toWorld(f, add(c, scale(along, step * 0.8))), wide * meanStretch(f), thick * meanStretch(f), dirToWorld(f, s.n)) }))
+  const strips = Math.max(1, Math.ceil(wide / 6.5))
+  const w = 1.35 * wide / strips
+  for (let k = 0; k < strips; k++) {
+    const off = (k - (strips - 1) / 2) * wide / strips
+    const on = offsetPath(path, off).map(([x, y]) => {
+      const s = surfaceAt(masses, x, y, back)
+      return { p: add(s.p, scale(s.n, proud - thick / 2)), n: s.n }
+    })
+    for (let i = 0; i + 1 < on.length; i++) {
+      const a = on[i]!
+      const b = on[i + 1]!
+      const ext = scale(sub(b.p, a.p), 0.18)
+      out.push(between('ellipsoid', toWorld(f, sub(a.p, ext)), toWorld(f, add(b.p, ext)), w * meanStretch(f), thick * meanStretch(f), dirToWorld(f, normalize(add(a.n, b.n)))))
+    }
   }
   return out
 }
@@ -164,9 +193,9 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     shapes.push(between('capsule', base, top, 0.64 * hw * thick, 0.7 * hw * thick, forward))
     for (const side of [1, -1]) {
       // Sternomastoid: from behind the ear to the top of the breastbone, the neck's front edge.
-      shapes.push(between('capsule', W([side * 1.4, 19.8, 7.6]), H([side * 5.2, 8.8, -2.2]), 0.22 * hw * thick, 0.16 * hw * thick, forward))
+      shapes.push(between('ellipsoid', W([side * 1.6, 19.4, 6.8]), H([side * 4.6, 8.4, -2.0]), 0.2 * hw * thick, 0.12 * hw * thick, forward))
       // Trapezius: from the back of the skull out to the shoulder.
-      shapes.push(between('ellipsoid', H([side * 2.4, 9.6, -6.8]), W([side * 9, 22.5, -5.5]), 0.3 * hw * thick, 0.22 * hw * thick, normalize(sub(W([side * 9, 22, -5.5]), W([0, 22, -1.5])))))
+      shapes.push(between('ellipsoid', H([side * 2.2, 8.6, -6.0]), W([side * 10, 21, -5]), 0.32 * hw * thick, 0.16 * hw * thick, normalize(sub(W([side * 9, 22, -5.5]), W([0, 22, -1.5])))))
     }
     if (!head.knobs.female) {
       const throat = lerp(W(notch), H([0, 1.0, 2.6]), 0.6)
@@ -200,22 +229,22 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     // deep valleys between them. The shoulder is the one the head turns away from.
     const gaze: Vec3 = head ? dirToWorld(head.frame, [0, 0, 1]) : [0, 0, 1]
     const side = gaze[0] > 0.02 ? -1 : 1
-    const spine: [number, number][] = [[side * 20, 16], [side * 13, 9], [side * 5, 0], [-side * 4, -8], [-side * 12, -14.5], [-side * 19, -19]]
-    shapes.push(...cloth(f, ells, spine, 19, 5, 3.4))
+    const spine: [number, number][] = [[side * 18.5, 16.5], [side * 13, 10], [side * 5, 1], [-side * 4, -7], [-side * 9.5, -13], [-side * 11, -18]]
+    shapes.push(...cloth(f, ells, spine, 19, 3.2, 2.4))
     const offsets = [-4.6, 0.4, 5.2]
-    offsets.forEach((o, i) => shapes.push(...fold(f, ells, offsetPath(spine.slice(1, 6), side * o), 4.2 + 0.6 * (i % 2), 5.6 - 0.5 * i)))
-    for (const mid of [-2.1, 2.8]) cut('fold', 'roundel', 1.5, 2.0, onSurface(ells, offsetPath(spine.slice(1, 6), side * mid), 4.4))
+    offsets.forEach((o, i) => shapes.push(...fold(f, ells, offsetPath(spine.slice(1, 6), side * o), 3.0 + 0.4 * (i % 2), 3.4 - 0.3 * i)))
+    for (const mid of [-2.1, 2.8]) cut('fold', 'roundel', 1.5, 1.4, onSurface(ells, offsetPath(spine.slice(1, 6), side * mid), 3.0))
     // The upper edge of the cloth, undercut so it stands off the chest in shadow.
     cut('hem', 'roundel', 1.2, 1.6, onSurface(ells, offsetPath(spine.slice(1), side * -9.2), 1.2), [0, -0.5, -0.86])
     // Over the shoulder and down the back.
-    const backSpine: [number, number][] = [[side * 21, 17], [side * 17, 8], [side * 12, -3], [side * 8, -14]]
-    shapes.push(...cloth(f, ells, backSpine, 17, 4.6, 3.2, true))
-    for (const o of [-3.8, 2.6]) shapes.push(...fold(f, ells, offsetPath(backSpine, side * o), 4, 5, true))
-    cut('fold', 'roundel', 1.4, 1.8, onSurface(ells, offsetPath(backSpine, side * -0.6), 4, true))
+    const backSpine: [number, number][] = [[side * 18.5, 17], [side * 15.5, 8], [side * 11, -3], [side * 7.5, -13]]
+    shapes.push(...cloth(f, ells, backSpine, 17, 3.0, 2.2, true))
+    for (const o of [-3.8, 2.6]) shapes.push(...fold(f, ells, offsetPath(backSpine, side * o), 2.8, 3.2, true))
+    cut('fold', 'roundel', 1.4, 1.2, onSurface(ells, offsetPath(backSpine, side * -0.6), 2.8, true))
     // The knot on the shoulder.
     const knot = surfaceAt(ells, side * 18, 16.5)
-    shapes.push(partShape(f, 'ellipsoid', add(knot.p, scale(knot.n, 3.4)), [8, 7, 6]))
-    cut('knot', 'roundel', 1.0, 0.9, [add(add(knot.p, scale(knot.n, 6.2)), [-side * 1.8, 1.6, 0]), add(add(knot.p, scale(knot.n, 6.0)), [side * 1.2, -2.0, 0])])
+    shapes.push(partShape(f, 'ellipsoid', add(knot.p, scale(knot.n, 2.6)), [7, 6, 5]))
+    cut('knot', 'roundel', 1.0, 0.9, [add(add(knot.p, scale(knot.n, 5.0)), [-side * 1.8, 1.6, 0]), add(add(knot.p, scale(knot.n, 4.8)), [side * 1.2, -2.0, 0])])
   } else if (s.drape === 'collar') {
     // A buttoned coat with a collar round the neck and a falling band over it.
     for (let y = 14; y >= -16; y -= 5.5) {

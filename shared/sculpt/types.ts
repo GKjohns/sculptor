@@ -174,6 +174,9 @@ export interface Shape {
   center: Vec3
   size: Vec3
   rotation: Vec3
+  // How softly this shape joins the union so far, cm, in place of the form's blend: a canon's
+  // lid, lip or lock stays crisp on a softly blended body. Left out, the form's blend.
+  blend?: number
 }
 
 // A binary image as runs of filled cells: for each row from the top, [start, end) column
@@ -236,7 +239,8 @@ export interface Bins {
 export interface CompiledForm {
   count: number
   kinds: Uint8Array
-  // 16 numbers per shape: centre, half extents, the world-to-local rotation by rows, one spare.
+  // 16 numbers per shape: centre, half extents, the world-to-local rotation by rows, and the
+  // blend it joins the union with.
   data: Float64Array
   blend: number
   inflate: number

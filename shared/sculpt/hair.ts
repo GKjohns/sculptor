@@ -4,7 +4,7 @@
 // centres drilled and strands grooved. Nothing here is a cap: a cap reads as a helmet.
 
 import type { HeadKnobs, Part, PartCut } from './anatomy.ts'
-import { add, cross, eulerFromY, eulerFromZ, normalize, scale, sub } from './frame.ts'
+import { add, cross, eulerFromY, normalize, scale, sub } from './frame.ts'
 import type { Vec3 } from './types.ts'
 
 // The skull the hair lies on: cranium and frontal bone, as in anatomy.ts's face parts.
@@ -76,19 +76,54 @@ function spread(count: number, keep: (a: number, e: number) => boolean): [number
 
 interface Hair { parts: Part[], cuts: PartCut[] }
 
-// Curls: round locks standing off the skull, each with its centre drilled. `size` is a curl's
-// width, `proud` how far its crown stands off the skull, `count` the lattice's size over the
-// whole sphere (the hair keeps those inside the hairline).
-function curls(size: number, proud: number, count: number, drill: boolean, below = 0): Hair {
+// Each lock stays crisp against its neighbours and the mass under it, so the valleys between
+// locks read whatever blend the form has (canon cm).
+const LOCK_K = 0.22
+
+// The way hair falls at a point of the skull: away from the whorl on the crown and down, laid
+// flat on the skull (a unit vector in its tangent plane).
+const WHORL = skullAt(180, 52).p
+function flow(p: Vec3, n: Vec3): Vec3 {
+  const away = sub(p, WHORL)
+  const raw = add(normalize(away), [0, -0.55, 0.15])
+  const t = sub(raw, scale(n, raw[0] * n[0] + raw[1] * n[1] + raw[2] * n[2]))
+  return normalize(t)
+}
+
+// The mass the locks lie on: the skull grown by `proud` over the top and back, kept off the
+// forehead and the ears by being smaller than the hairline there would need.
+function cap(proud: number): Part[] {
+  return [
+    { kind: 'ellipsoid', c: [0, 16.2, -1.5], s: [15.5 + 2 * proud, 15.2 + proud, 18.6 + 2 * proud] },
+    { kind: 'ellipsoid', c: [0, 18.2, 2.4], s: [13.6 + 2 * proud, 9.0 + proud, 10.4 + proud] }
+  ]
+}
+
+// Locks: tresses lying on the skull from each point of a lattice down the way the hair falls,
+// each in two pieces whose tip turns aside by `hook` degrees (a curl, when the turn is large),
+// alternately left and right. `width` across, `thick` through, the crest `proud` off the skull,
+// `length` for the first piece (the tip is six tenths of it). With `drill`, the eye of each curl
+// is drilled, as Roman and Baroque carvers drilled theirs. `below` lets the locks come further
+// down than the hairline (long hair).
+function hooks(count: number, width: number, thick: number, proud: number, length: number, hook: number, drill: boolean, below = 0): Hair {
   const parts: Part[] = []
   const cuts: PartCut[] = []
-  const depth = 0.62 * size
-  for (const [a, e] of spread(count, (a, e) => e >= hairline(a) - below)) {
-    const { p, n } = skullAt(a, e)
-    // The curl's flat side lies on the skull; it leans down the head, as hair falls.
-    const c = add(p, scale(n, proud - depth / 2))
-    parts.push({ kind: 'ellipsoid', c, s: [size, size * 0.92, depth], r: eulerFromZ(n, [0, 1, 0]) })
-    if (drill) cuts.push({ label: 'curl', tool: 'drill', size: 0.16 * size, depth: 0.32 * size, points: [add(p, scale(n, proud))], dir: scale(n, -1) })
+  let n = 0
+  for (const [a, e] of spread(count, (a, e) => e >= hairline(a) - below + 4)) {
+    const s = skullAt(a, e)
+    const f = flow(s.p, s.n)
+    const side = normalize(cross(s.n, f))
+    const turn = (n++ % 2 === 0 ? 1 : -1) * (a > 0 ? 1 : -1)
+    const c0 = add(s.p, scale(s.n, proud - thick / 2))
+    const c1 = add(c0, scale(f, length))
+    const tipDir = normalize(add(scale(f, Math.cos(hook * DEG)), scale(side, turn * Math.sin(hook * DEG))))
+    const c2 = add(add(c1, scale(tipDir, 0.6 * length)), scale(s.n, -0.25 * thick))
+    parts.push({ kind: 'capsule', c: scale(add(c0, c1), 0.5), s: [width, length + width, thick], r: eulerFromY(sub(c1, c0), s.n), k: LOCK_K })
+    parts.push({ kind: 'capsule', c: scale(add(c1, c2), 0.5), s: [0.8 * width, 0.6 * length + 0.8 * width, 0.85 * thick], r: eulerFromY(sub(c2, c1), s.n), k: LOCK_K })
+    if (drill) {
+      const eye = add(add(c1, scale(side, -turn * 0.45 * width)), scale(s.n, 0.3 * thick))
+      cuts.push({ label: 'curl', tool: 'drill', size: 0.32 * width, depth: 0.6 * thick, points: [eye], dir: scale(s.n, -1) })
+    }
   }
   return { parts, cuts }
 }
@@ -118,14 +153,14 @@ function locks(step: number, thick: number, proud: number, start: (a: number) =>
       const len = Math.sqrt(along[0] * along[0] + along[1] * along[1] + along[2] * along[2])
       // A tress is wider than it is thick, and thins toward its end.
       const taper = 1 - 0.18 * i / n
-      parts.push({ kind: 'capsule', c: mid, s: [thick * 1.25 * taper, len + thick, thick * taper], r: eulerFromY(along, normals[i]!) })
+      parts.push({ kind: 'capsule', c: mid, s: [thick * 1.25 * taper, len + thick, thick * taper], r: eulerFromY(along, normals[i]!), k: LOCK_K })
     }
     // A strand groove along the tress, a little to one side of its crest.
     const groove = chain.map((p, i) => {
       const side = normalize(cross(normals[i]!, sub(chain[Math.min(i + 1, n)]!, chain[Math.max(i - 1, 0)]!)))
       return add(add(p, scale(normals[i]!, thick / 2)), scale(side, 0.18 * thick))
     })
-    cuts.push({ label: 'strand', tool: 'roundel', size: 0.22 * thick, depth: 0.16 * thick, points: groove, dir: null })
+    cuts.push({ label: 'strand', tool: 'roundel', size: Math.max(0.3, 0.22 * thick), depth: 0.16 * thick, points: groove, dir: null })
   }
   return { parts, cuts }
 }
@@ -134,24 +169,35 @@ function beard(k: HeadKnobs): Hair {
   const parts: Part[] = []
   const cuts: PartCut[] = []
   if (k.beard) {
+    // Short locks over the jaw and chin, falling down and curling at their tips, on a mass that
+    // follows the jaw.
     const centre: Vec3 = [0, 6.0, -1.0]
+    parts.push({ kind: 'ellipsoid', c: [0, 2.6, 2.6], s: [12.4, 6.4, 10.4] })
     const spots: Vec3[] = [
       [6.9, 9.4, -0.6], [6.7, 6.8, 0.6], [6.0, 4.2, 2.4], [4.7, 2.0, 4.2], [2.5, 0.6, 5.6], [0, 0.1, 6.2],
-      [5.4, 1.6, 1.4], [3.6, -0.4, 3.4], [1.3, -1.2, 4.6], [5.0, 6.4, 3.6], [3.9, 4.0, 5.1]
+      [5.4, 1.6, 1.4], [3.6, -0.4, 3.4], [1.3, -1.2, 4.6]
     ]
+    let i = 0
     for (const s of spots) {
       for (const side of s[0] === 0 ? [1] : [1, -1]) {
         const p: Vec3 = [side * s[0], s[1], s[2]]
         const n = normalize(sub(p, centre))
-        parts.push({ kind: 'ellipsoid', c: add(p, scale(n, 0.3)), s: [3.0, 2.8, 2.0], r: eulerFromZ(n, [0, 1, 0]) })
-        cuts.push({ label: 'beard curl', tool: 'drill', size: 0.5, depth: 0.8, points: [add(p, scale(n, 1.3))], dir: scale(n, -1) })
+        const down = normalize(sub([0, -1, 0.15], scale(n, -n[1] + 0.15 * n[2])))
+        const sideways = normalize(cross(n, down))
+        const turn = (i++ % 2 === 0 ? 1 : -1) * side
+        const c0 = add(p, scale(n, 0.6))
+        const c1 = add(c0, scale(down, 2.2))
+        const c2 = add(c1, scale(normalize(add(scale(down, 0.3), scale(sideways, turn))), 1.3))
+        parts.push({ kind: 'capsule', c: scale(add(c0, c1), 0.5), s: [2.4, 4.6, 1.4], r: eulerFromY(sub(c1, c0), n), k: LOCK_K })
+        parts.push({ kind: 'capsule', c: scale(add(c1, c2), 0.5), s: [1.8, 3.1, 1.2], r: eulerFromY(sub(c2, c1), n), k: LOCK_K })
+        cuts.push({ label: 'beard curl', tool: 'drill', size: 0.5, depth: 0.7, points: [add(add(c1, scale(sideways, -turn * 0.9)), scale(n, 0.5))], dir: scale(n, -1) })
       }
     }
   }
   if (k.moustache) {
     for (const side of [1, -1]) {
-      parts.push({ kind: 'capsule', c: [side * 1.45, 6.75, 8.15], s: [1.0, 2.9, 0.8], r: [0, side * -20, side * 68] })
-      parts.push({ kind: 'capsule', c: [side * 2.85, 5.85, 7.0], s: [0.85, 1.9, 0.75], r: [0, side * -40, side * 25] })
+      parts.push({ kind: 'capsule', c: [side * 1.45, 6.75, 8.15], s: [1.0, 2.9, 0.8], r: [0, side * -20, side * 68], k: LOCK_K })
+      parts.push({ kind: 'capsule', c: [side * 2.85, 5.85, 7.0], s: [0.85, 1.9, 0.75], r: [0, side * -40, side * 25], k: LOCK_K })
     }
   }
   return { parts, cuts }
@@ -161,23 +207,31 @@ function beard(k: HeadKnobs): Hair {
 export function hairParts(k: HeadKnobs): Hair {
   let hair: Hair = { parts: [], cuts: [] }
   switch (k.hair) {
-    case 'curls':
-      hair = curls(3.6, 1.9, 82, true)
+    case 'curls': {
+      const h = hooks(84, 3.0, 1.5, 2.3, 2.5, 90, true)
+      hair = { parts: [...cap(0.8), ...h.parts], cuts: h.cuts }
       break
-    case 'long':
-      hair = curls(3.6, 1.9, 82, true, 14)
+    }
+    case 'long': {
+      const h = hooks(70, 3.0, 1.5, 2.2, 3.4, 40, false, 16)
+      hair = { parts: [...cap(0.9), ...h.parts], cuts: h.cuts }
       break
-    case 'short':
-      hair = curls(3.0, 1.0, 118, false)
+    }
+    case 'short': {
+      const h = hooks(110, 2.3, 1.0, 1.7, 1.9, 25, false)
+      hair = { parts: [...cap(0.3), ...h.parts], cuts: h.cuts }
       break
-    case 'waves':
+    }
+    case 'waves': {
       // Combed forward and down from the crown, as Roman and Baroque portraits wear it.
-      hair = locks(20, 2.4, 1.9, a => [a, 70], a => [a, hairline(a) + 3], 7)
+      const w = locks(24, 2.6, 1.9, a => [a, 70], a => [a, hairline(a) + 3], 7)
+      hair = { parts: [...cap(0.8), ...w.parts], cuts: w.cuts }
       break
+    }
     case 'bun': {
       // Drawn back from the hairline over the head into a knot at the back.
-      const back = locks(22, 2.2, 1.6, a => [a, hairline(a) + 2], a => [a * 0.35 + (a < 0 ? -180 : 180) * 0.65, 18], 4)
-      hair = { parts: [...back.parts, { kind: 'ellipsoid', c: [0, 15.5, -11.6], s: [6.6, 5.8, 4.8] }], cuts: back.cuts }
+      const back = locks(20, 2.3, 2.0, a => [a, hairline(a) + 2], a => [a * 0.35 + (a < 0 ? -180 : 180) * 0.65, 18], 4)
+      hair = { parts: [...cap(0.4), ...back.parts, { kind: 'ellipsoid', c: [0, 15.5, -11.6], s: [6.6, 5.8, 4.8], k: LOCK_K }], cuts: back.cuts }
       for (const [r, y] of [[2.6, 16.6], [2.4, 14.4]] as [number, number][]) {
         hair.cuts.push({ label: 'bun', tool: 'roundel', size: 0.6, depth: 0.5, points: [[-r, y, -13.2], [-r / 2, y + 0.4, -13.8], [r / 2, y - 0.4, -13.8], [r, y, -13.2]], dir: null })
       }

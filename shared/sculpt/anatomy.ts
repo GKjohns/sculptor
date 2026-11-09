@@ -109,15 +109,18 @@ export function headKnobs(style: readonly string[] = []): HeadKnobs {
 }
 
 // A part in the canon frame: y measured from the chin; mirrored parts listed once at +x.
-export interface Part { kind: ShapeKind, c: Vec3, s: Vec3, r?: Vec3, mirror?: boolean }
+// k: the part's own blend into the union, canon cm, where it must stay crisp on a softly
+// blended head (a lid, a lip, a nostril wing, a lock); left out, the form's blend.
+export interface Part { kind: ShapeKind, c: Vec3, s: Vec3, r?: Vec3, mirror?: boolean, k?: number }
 const P = (kind: ShapeKind, c: Vec3, s: Vec3, r: Vec3 = [0, 0, 0], mirror = false): Part => ({ kind, c, s, r, mirror })
 const M = (kind: ShapeKind, c: Vec3, s: Vec3, r: Vec3 = [0, 0, 0]): Part => P(kind, c, s, r, true)
+const K = (k: number, part: Part): Part => ({ ...part, k })
 
 // A cut in the canon frame: points with y from the chin, a direction or null for the normal.
 export interface PartCut { label: string, tool: 'drill' | 'roundel', size: number, depth: number, points: Vec3[], dir: Vec3 | null, mirror?: boolean }
 
 // Eye geometry shared by the parts and the cuts.
-const EYE = { x: 3.15, y: 11.35, z: 6.25, r: 1.25, inner: 1.6, outer: 1.55, upper: 11.77, lower: 10.8 }
+const EYE = { x: 3.15, y: 11.35, z: 6.05, r: 1.25, inner: 1.6, outer: 1.55, upper: 11.95, lower: 10.75 }
 
 function faceParts(k: HeadKnobs): Part[] {
   const f = k.female ? 1 : 0
@@ -133,36 +136,36 @@ function faceParts(k: HeadKnobs): Part[] {
     P('ellipsoid', [0, 15.0, -0.8], [15.5, 16.5, 19.0]),
     P('ellipsoid', [0, 16.5 + 0.2 * f, 4.8 - 0.2 * old], [14.2 - 0.6 * old, 10.5, 8.6]),
     // Brows: the ridge over each eye, lifted, knitted or plain.
-    M('ellipsoid', [3.2 - (k.frown ? 0.3 : 0), 13.1 + brow + 0.2 * f, 6.9 - 0.35 * f], [6.2, 2.4 - 0.4 * f, 3.2], [0, 0, k.raised ? -14 : k.frown ? -2 : -8]),
+    K(0.6, M('ellipsoid', [3.15 - (k.frown ? 0.3 : 0), 13.45 + brow + 0.2 * f, 6.75 - 0.3 * f], [5.6, 2.0 - 0.3 * f, 2.6], [0, 0, k.raised ? -14 : k.frown ? -2 : -8])),
     // The face: one mass from brow to mouth that is the floor of the sockets.
-    P('ellipsoid', [0, 9.6, 2.2], [14.2 - 0.5 * f, 11.0, 11.0]),
+    P('ellipsoid', [0, 10.2, 2.4], [13.6 - 0.5 * f, 9.6, 10.6]),
     // Cheekbones, high and hard; the soft cheek under them beside the mouth, which meets the
     // muzzle in the fold from nose to mouth.
     M('ellipsoid', [4.6, 10.3 + 0.25 * f + 0.2 * smile, 4.6 + 0.2 * old], [5.0, 3.6, 4.4]),
-    M('ellipsoid', [3.7 + 0.2 * k.build, 7.9 + 0.5 * smile - 0.5 * old, 5.0 + 0.3 * smile + 0.2 * young], [3.4 + 0.6 * k.build + 0.3 * young - 0.4 * old, 3.6, 3.4 + 0.4 * k.build - 0.5 * old]),
+    M('ellipsoid', [3.6 + 0.2 * k.build, 7.9 + 0.5 * smile - 0.5 * old, 4.8 + 0.3 * smile + 0.2 * young], [2.8 + 0.6 * k.build + 0.3 * young - 0.4 * old, 3.0, 2.8 + 0.4 * k.build - 0.5 * old]),
     // The eyes: a ball, an upper lid over its top and a lower lid under it.
-    M('ellipsoid', [EYE.x, EYE.y, EYE.z], [2 * EYE.r, 2 * EYE.r, 2 * EYE.r]),
-    M('ellipsoid', [EYE.x, 12.2 + 0.1 * brow, 6.35], [3.5, 1.5, 2.7], [0, 0, -4]),
-    M('ellipsoid', [EYE.x, 10.65, 6.2], [3.2, 1.0, 2.5], [0, 0, 3]),
+    K(0.12, M('ellipsoid', [EYE.x, EYE.y, EYE.z], [2 * EYE.r, 2 * EYE.r, 2 * EYE.r])),
+    K(0.18, M('ellipsoid', [EYE.x, 12.55 + 0.1 * brow, 6.25], [3.4, 1.2, 2.6], [0, 0, -4])),
+    K(0.18, M('ellipsoid', [EYE.x, 10.35, 6.1], [3.1, 0.8, 2.3], [0, 0, 3])),
     // The muzzle, the arch of the teeth under the lips.
     P('ellipsoid', [0, 6.3 - 0.5 * parted, 5.2], [8.0 - 0.4 * f, 5.0 + parted, 5.6]),
     // The nose: a cone from the root down and forward to the tip, the tip, the wings.
-    P('cone', [0, 10.0 + (nose === 'snub' ? 0.2 : 0), 8.9], [2.6 - 0.2 * f, nose === 'snub' ? 5.2 : 5.8, 2.6], [nose === 'snub' ? -38 : -34, 0, 0]),
-    P('ellipsoid', [0, 8.2 + (nose === 'snub' ? 0.35 : nose === 'aquiline' ? -0.25 : 0), 9.3 + (nose === 'snub' ? -0.4 : nose === 'aquiline' ? 0.1 : 0)], nose === 'broad' ? [3.7, 2.8, 3.1] : [3.2 - 0.3 * f, 2.6, 3.0]),
-    M('ellipsoid', [nose === 'broad' ? 1.55 : 1.3 - 0.1 * f, 7.8, 8.6], nose === 'broad' ? [2.3, 2.0, 2.4] : [1.9, 1.8, 2.3]),
+    K(0.6, P('cone', [0, 10.0 + (nose === 'snub' ? 0.2 : 0), 8.9], [2.6 - 0.2 * f, nose === 'snub' ? 5.2 : 5.8, 2.6], [nose === 'snub' ? -38 : -34, 0, 0])),
+    K(0.4, P('ellipsoid', [0, 8.2 + (nose === 'snub' ? 0.35 : nose === 'aquiline' ? -0.25 : 0), 9.3 + (nose === 'snub' ? -0.4 : nose === 'aquiline' ? 0.1 : 0)], nose === 'broad' ? [3.4, 2.6, 2.9] : [2.6 - 0.3 * f, 2.2, 2.6])),
+    K(0.25, M('ellipsoid', [nose === 'broad' ? 1.45 : 1.15 - 0.1 * f, 7.85, 8.45], nose === 'broad' ? [2.1, 1.8, 2.2] : [1.6, 1.5, 2.0])),
     // The mouth: an upper lip in two halves that dip where they meet, a lower lip, the chin.
-    M('ellipsoid', [1.25, 6.6 + 0.15 * smile, 6.9], [3.3, 2.2 + 0.25 * f, 3.6 + 0.2 * f], [0, 0, smile ? -14 : -9]),
-    P('ellipsoid', [0, 4.9 - parted, 6.6 - 0.2 * parted], [4.8, 1.8 + 0.3 * f, 3.4 + 0.25 * f]),
-    P('ellipsoid', [0, 2.6 - 0.6 * parted, 5.4 - 0.3 * parted], [6.4 - 0.5 * f + 0.6 * k.jaw, 4.6 - 0.4 * f, 5.0]),
+    K(0.3, M('ellipsoid', [1.1, 6.6 + 0.15 * smile, 6.9], [2.8, 2.0 + 0.25 * f, 3.3 + 0.2 * f], [0, 0, smile ? -14 : -9])),
+    K(0.3, P('ellipsoid', [0, 4.95 - parted, 6.5 - 0.2 * parted], [4.2, 1.7 + 0.3 * f, 3.2 + 0.25 * f])),
+    P('ellipsoid', [0, 2.6 - 0.6 * parted, 5.3 - 0.3 * parted], [6.2 - 0.5 * f + 0.6 * k.jaw, 4.0 - 0.4 * f, 4.4]),
     // The jaw: widest under the ears, narrowing to the chin, with its angles.
-    P('ellipsoid', [0, 4.6 - 0.5 * parted, 1.6], [10.6 * jawW, 8.0, 11.0]),
-    M('ellipsoid', [5.4 * jawW, 4.4 - 0.3 * old, -1.4], [2.6 + 0.4 * k.jaw, 4.4, 4.6]),
+    P('ellipsoid', [0, 4.7 - 0.5 * parted, 1.5], [9.8 * jawW, 7.6, 10.6]),
+    M('ellipsoid', [5.1 * jawW, 4.8 - 0.3 * old, -1.6], [2.2 + 0.4 * k.jaw, 3.6, 3.8]),
     // Ears: a flat shell with a rim round its top and back, a lobe and the knob before the hole.
-    M('ellipsoid', [7.35, 10.4, -1.9], [0.9, 5.6 + 0.4 * old, 3.3], [-12, 0, 0]),
-    M('capsule', [7.75, 12.2, -1.9], [0.75, 2.6, 0.75], [-12, 0, 0]),
-    M('capsule', [7.85, 12.1, -3.15], [0.75, 4.2, 0.75], [-12, 0, 0]),
-    M('ellipsoid', [7.6, 7.85 - 0.3 * old, -2.3], [0.9, 1.6 + 0.3 * old, 1.4]),
-    M('ellipsoid', [7.65, 9.9, -0.45], [0.6, 0.9, 0.6])
+    K(0.3, M('ellipsoid', [7.35, 10.4, -1.9], [0.9, 5.6 + 0.4 * old, 3.3], [-12, 0, 0])),
+    K(0.15, M('capsule', [7.75, 12.2, -1.9], [0.75, 2.6, 0.75], [-12, 0, 0])),
+    K(0.15, M('capsule', [7.85, 12.1, -3.15], [0.75, 4.2, 0.75], [-12, 0, 0])),
+    K(0.2, M('ellipsoid', [7.6, 7.85 - 0.3 * old, -2.3], [0.9, 1.6 + 0.3 * old, 1.4])),
+    K(0.15, M('ellipsoid', [7.65, 9.9, -0.45], [0.6, 0.9, 0.6]))
   ]
   if (nose === 'aquiline') parts.push(P('ellipsoid', [0, 10.4, 9.25], [1.5, 1.6, 1.4]))
   // Age: bags under the eyes, a slack under the jaw.
@@ -241,9 +244,8 @@ function faceCuts(k: HeadKnobs): PartCut[] {
   cuts.push({ label: 'mouth', tool: 'roundel', size: k.parted ? 0.55 : 0.32, depth: k.parted ? 0.9 : 0.32, points: mouth, dir: [0, 0, -1] })
   cuts.push({ label: 'philtrum', tool: 'roundel', size: 0.45, depth: 0.12, points: [[0, 7.25, 8.6], [0, 6.5, 8.3]], dir: null })
   cuts.push({ label: 'under the lip', tool: 'roundel', size: 0.45, depth: 0.18, points: [[-1.5, 4.25 - parted, 7.0], [0, 3.95 - parted, 7.3], [1.5, 4.25 - parted, 7.0]], dir: null })
-  if (k.raised) {
-    for (const y of [15.2, 16.1]) cuts.push({ label: 'brow crease', tool: 'roundel', size: 0.35, depth: 0.12, points: [[-3.4, y - 0.3, 8.2], [-1.2, y, 8.8], [1.2, y, 8.8], [3.4, y - 0.3, 8.2]], dir: null })
-  }
+  // A raised brow is the lifted ridge alone: creases across the forehead read as scratches
+  // at the stone's 0.4 cm.
   return cuts
 }
 
@@ -262,7 +264,9 @@ export function placeParts(f: Frame, parts: Part[], chin = 0): Shape[] {
     const sides = p.mirror ? [1, -1] : [1]
     for (const side of sides) {
       const r = p.r ?? [0, 0, 0]
-      out.push(partShape(f, p.kind, [side * p.c[0], p.c[1] + chin, p.c[2]], p.s, [r[0], side * r[1], side * r[2]]))
+      const shape = partShape(f, p.kind, [side * p.c[0], p.c[1] + chin, p.c[2]], p.s, [r[0], side * r[1], side * r[2]])
+      if (p.k !== undefined) shape.blend = r3(p.k * meanStretch(f))
+      out.push(shape)
     }
   }
   return out
