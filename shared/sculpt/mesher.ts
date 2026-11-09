@@ -1,4 +1,4 @@
-import { Q_MAX, chunkCoords, chunkCount } from './grid.ts'
+import { BAND_VOXELS, MESH_REACH, Q_MAX, chunkCoords, chunkCount } from './grid.ts'
 import type { ChunkMesh, Grid, MeshData } from './types.ts'
 
 // Naive surface nets. Every cell (the cube between eight neighbouring samples) that the
@@ -190,6 +190,7 @@ export function emptyMesh(): MeshData {
     positions: new Float32Array(0),
     normals: new Float32Array(0),
     finish: new Uint8Array(0),
+    thickness: new Uint8Array(0),
     indices: new Uint32Array(0)
   }
 }
@@ -243,7 +244,108 @@ export function surfaceNets(
     positions: vPos.slice(0, nVert * 3),
     normals: vNrm.slice(0, nVert * 3),
     finish: vFin.slice(0, nVert),
+    thickness: new Uint8Array(nVert).fill(255),
     indices: tris.slice(0, nIdx)
+  }
+}
+
+// Thickness: how much stone stands behind each vertex, for the renderer's light through thin
+// sections (an ear, a drapery edge, the arris of the block). It is no part of the geometry: the
+// kernel never reads it and it changes no hash.
+//
+// From each vertex four rays go into the stone, one straight down the normal and three leaning
+// 45 degrees off it, each until it comes out the far side or has gone THICKNESS_CM. The vertex
+// gets their mean: a sheet is thin along all four, a ridge or an arris along one or two.
+// Rays step by the stored distance, which never overstates how far the surface is.
+export const THICKNESS_CM = 2.4
+
+// A grid whose chunks are to be meshed with thickness. The rays leave the chunk, so a changed
+// sample has to flag every chunk with a vertex in ray's reach of it, not only the chunks whose
+// geometry reads it. Call it before the first edit.
+export function trackThickness(grid: Grid): void {
+  grid.reach = MESH_REACH + Math.ceil(THICKNESS_CM / grid.voxel)
+}
+
+const LEAN = Math.SQRT1_2
+// The three leaning rays stand 120 degrees apart round the normal.
+const RING_COS = [1, -0.5, -0.5]
+const RING_SIN = [0, 0.8660254037844386, -0.8660254037844386]
+const VOXELS_PER_Q = BAND_VOXELS / Q_MAX
+// Voxels down the normal that the rays start from.
+const START = 1.6
+
+// Distance in voxels from (px, py, pz), in sample coordinates, along a unit direction to the
+// first air, or `reach` if there is none that near. The start has to be well inside the stone:
+// samples are read at the nearest one, and next to the surface the nearest one can be air.
+function throughStone(grid: Grid, px: number, py: number, pz: number, dx: number, dy: number, dz: number, reach: number): number {
+  const { nx, ny, nz, dist } = grid
+  let t = 0
+  let before = 0
+  let qBefore = -1
+  while (t < reach) {
+    const x = Math.round(px + dx * t)
+    const y = Math.round(py + dy * t)
+    const z = Math.round(pz + dz * t)
+    if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) return t
+    const q = dist[x + nx * (y + ny * z)]!
+    // Out the far side: the crossing lies between this sample and the one before.
+    if (q >= 0) return before + (t - before) * (qBefore / (qBefore - q - 0.5))
+    before = t
+    qBefore = q
+    const step = -q * VOXELS_PER_Q * 0.85
+    t += step > 0.6 ? step : 0.6
+  }
+  return reach
+}
+
+function bakeThickness(grid: Grid, mesh: MeshData): void {
+  const { positions, normals, thickness } = mesh
+  const inv = 1 / grid.voxel
+  const reach = THICKNESS_CM * inv
+  for (let v = 0; v < thickness.length; v++) {
+    const px = (positions[3 * v]! - grid.x0) * inv
+    const py = (positions[3 * v + 1]! - grid.y0) * inv
+    const pz = (positions[3 * v + 2]! - grid.z0) * inv
+    // Into the stone.
+    const ix = -normals[3 * v]!
+    const iy = -normals[3 * v + 1]!
+    const iz = -normals[3 * v + 2]!
+    // Two directions square to it and to each other, starting from the axis it leans on least.
+    let ux: number
+    let uy: number
+    let uz: number
+    if (Math.abs(ix) < 0.57) {
+      ux = 0
+      uy = -iz
+      uz = iy
+    } else {
+      ux = iz
+      uy = 0
+      uz = -ix
+    }
+    const ul = 1 / Math.sqrt(ux * ux + uy * uy + uz * uz)
+    ux *= ul
+    uy *= ul
+    uz *= ul
+    const wx = iy * uz - iz * uy
+    const wy = iz * ux - ix * uz
+    const wz = ix * uy - iy * ux
+    // Every ray starts from the same point a little way down the normal.
+    const ox = px + ix * START
+    const oy = py + iy * START
+    const oz = pz + iz * START
+    const left = reach - START
+    let sum = throughStone(grid, ox, oy, oz, ix, iy, iz, left)
+    for (let r = 0; r < 3; r++) {
+      const c = RING_COS[r]! * LEAN
+      const s = RING_SIN[r]! * LEAN
+      sum += throughStone(
+        grid, ox, oy, oz,
+        ix * LEAN + ux * c + wx * s, iy * LEAN + uy * c + wy * s, iz * LEAN + uz * c + wz * s,
+        left
+      )
+    }
+    thickness[v] = Math.round(255 * (START + sum / 4) / reach)
   }
 }
 
@@ -251,7 +353,8 @@ let padDist = new Int8Array(0)
 let padFinish = new Uint8Array(0)
 
 // Meshes one chunk. The returned arrays are freshly allocated and exactly sized, ready to
-// transfer out of a worker. A chunk with no surface in it returns empty arrays.
+// transfer out of a worker. A chunk with no surface in it returns empty arrays. Thickness is
+// baked only on a grid that trackThickness() was called on.
 export function meshChunk(grid: Grid, chunk: number): ChunkMesh {
   const { nx, ny, nz, dist, finish } = grid
   const c = grid.chunk
@@ -301,6 +404,7 @@ export function meshChunk(grid: Grid, chunk: number): ChunkMesh {
     2, 2, 2, c + 2, c + 2, c + 2,
     bx, by, bz, grid.x0, grid.y0, grid.z0, grid.voxel
   )
+  if (grid.reach > MESH_REACH) bakeThickness(grid, mesh)
   return { chunk, ...mesh }
 }
 

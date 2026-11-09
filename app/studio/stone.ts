@@ -1,21 +1,30 @@
 /**
- * The stone on screen: one mesh per chunk under the studio's stage, refilled in place from the kernel
- * worker's chunk messages, plus the pieces that fall away when a saw or an island check takes them off.
+ * The stone on screen, refilled in place from the kernel worker's chunk messages, plus the pieces
+ * that fall away when a saw or an island check takes them off.
  *
- * Sprint 1 look only: plain off-white stone whose roughness follows the per-vertex finish the tools
- * left. Veining, subsurface light, debris physics and sound are Sprint 4.
+ * The kernel meshes 32-voxel chunks, which is the right size to remesh. It is the wrong size to
+ * draw: every object costs the renderer the same few tens of microseconds on the CPU in each of
+ * the frame's three geometry passes (shadow map, pre-pass, beauty), and a block has some 150
+ * chunks with surface in them. So the chunks are drawn in bundles of GROUP x GROUP x GROUP: one
+ * mesh per bundle, rebuilt from its chunks' arrays whenever one of them changes.
+ *
+ * The look is materials/marble.ts: veins read at block coordinates, roughness and tool marks from the
+ * per-vertex finish the tools left, light through thin stone from the per-vertex thickness the mesher
+ * bakes. A piece that falls away keeps the block coordinates of its vertices in a `stone` attribute,
+ * so its veins stay where they were.
  */
 import * as THREE from 'three/webgpu'
-import { attribute, float, mix } from 'three/tsl'
-import { chunkBounds } from '#shared/sculpt/grid'
+import { chunkBounds, chunkCoords } from '#shared/sculpt/grid'
 import type { ChunkMesh, GridInfo, Offcut } from '#shared/sculpt/types'
+import { CARRARA, STONE_COORDS, createLooseMarble, createMarble } from './materials/marble'
+import type { StonePreset } from './materials/marble'
 import type { StudioRenderer } from './renderer'
 
-const MARBLE = 0xe9e4da
-// Roughness at finish 0 (straight off the point chisel) and at finish 255 (polished).
-const ROUGH = 0.96
-const POLISHED = 0.14
 const GRAVITY = 981 // cm/s²
+// Chunks per bundle along each axis.
+const GROUP = 2
+// The finish a face has where the stone broke or the saw went through.
+const BROKEN = 0.3
 
 interface Falling {
   mesh: THREE.Mesh
@@ -24,10 +33,12 @@ interface Falling {
   age: number
 }
 
+// Refilled in place, but not marked DynamicDrawUsage: three's WebGPU path uploads an attribute
+// with that usage again on every render call, changed or not, which sent the whole stone to the
+// GPU three times a frame (82% of the main thread's frame). Left static, it goes up when its
+// version moves, and only the range refill() names.
 function dynamic<T extends THREE.TypedArray>(array: T, itemSize: number) {
-  const attr = new THREE.BufferAttribute(array, itemSize)
-  attr.setUsage(THREE.DynamicDrawUsage)
-  return attr
+  return new THREE.BufferAttribute(array, itemSize)
 }
 
 function refill(attr: THREE.BufferAttribute, count: number) {
@@ -41,7 +52,11 @@ export class Stone {
   /** The rev of the worker's stone that the chunk geometry now matches; -1 until the first mesh lands. */
   shownRev = -1
 
-  private offcutMaterial = new THREE.MeshPhysicalNodeMaterial({ color: MARBLE, roughness: 0.6 })
+  /** For pieces off the block. Their geometry needs the block coordinates of each vertex as `stone` (see offcutGeometry). */
+  readonly offcutMaterial: THREE.MeshPhysicalNodeMaterial
+  // The latest mesh of every chunk that has surface in it, as the worker sent it.
+  private parts = new Map<number, ChunkMesh>()
+  // One mesh per bundle of chunks, by bundle id.
   private meshes = new Map<number, THREE.Mesh>()
   private incoming = new Map<number, ChunkMesh>()
   private arrivedRev = -1
@@ -50,14 +65,27 @@ export class Stone {
   private falling: Falling[] = []
   private waiters: { rev: number, done: () => void }[] = []
   private stop: () => void
+  private warm: THREE.Mesh
 
-  constructor(private studio: StudioRenderer, public grid: GridInfo) {
-    this.material = new THREE.MeshPhysicalNodeMaterial({ color: MARBLE })
-    this.material.roughnessNode = mix(float(ROUGH), float(POLISHED), attribute('finish', 'float'))
+  constructor(private studio: StudioRenderer, public grid: GridInfo, readonly preset: StonePreset = CARRARA) {
+    this.material = createMarble(preset)
+    this.offcutMaterial = createLooseMarble(preset, BROKEN)
+    // One speck of loose stone under the floor from the start, so the offcut material's shaders
+    // are compiled with everything else and the first slab to fall does not cost a frame.
+    const speck = new THREE.BufferGeometry()
+    speck.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 0.1, 0, 0, 0, 0, 0.1]), 3))
+    speck.setAttribute('normal', new THREE.BufferAttribute(new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]), 3))
+    speck.setAttribute(STONE_COORDS, new THREE.BufferAttribute(new Float32Array(9), 3))
+    this.warm = new THREE.Mesh(speck, this.offcutMaterial)
+    this.warm.name = 'offcut-warm'
+    this.warm.position.set(0, -400, 0)
+    this.warm.castShadow = true
+    this.warm.frustumCulled = false
+    studio.stage.add(this.warm)
     this.stop = studio.onFrame(dt => this.frame(dt))
   }
 
-  /** The chunk meshes, for picking. */
+  /** The stone's meshes (bundles of chunks), for picking. */
   get chunks(): THREE.Mesh[] {
     return [...this.meshes.values()]
   }
@@ -94,6 +122,7 @@ export class Stone {
     if (grid.nx !== g.nx || grid.ny !== g.ny || grid.nz !== g.nz || grid.chunk !== g.chunk || grid.voxel !== g.voxel) {
       for (const mesh of this.meshes.values()) this.drop(mesh)
       this.meshes.clear()
+      this.parts.clear()
     }
     this.grid = grid
     for (const piece of this.falling) this.drop(piece.mesh)
@@ -108,7 +137,9 @@ export class Stone {
     this.stop()
     for (const mesh of this.meshes.values()) this.drop(mesh)
     for (const piece of this.falling) this.drop(piece.mesh)
+    this.drop(this.warm)
     this.meshes.clear()
+    this.parts.clear()
     this.falling = []
     this.material.dispose()
     this.offcutMaterial.dispose()
@@ -119,7 +150,13 @@ export class Stone {
     // seamless set, so a frame never shows one side of a seam ahead of the other.
     if (this.fresh) {
       this.fresh = false
-      for (const chunk of this.incoming.values()) this.fill(chunk)
+      const stale = new Set<number>()
+      for (const chunk of this.incoming.values()) {
+        if (chunk.indices.length === 0) this.parts.delete(chunk.chunk)
+        else this.parts.set(chunk.chunk, chunk)
+        stale.add(this.bundleOf(chunk.chunk))
+      }
+      for (const bundle of stale) this.fill(bundle)
       this.incoming.clear()
       this.shownRev = this.arrivedRev
       if (this.waiters.length) {
@@ -140,76 +177,121 @@ export class Stone {
     if (this.falling.length) this.fall(dt)
   }
 
-  private fill(data: ChunkMesh) {
-    const verts = data.finish.length
-    const corners = data.indices.length
-    let mesh = this.meshes.get(data.chunk)
+  // Bundle coordinates are chunk coordinates divided by GROUP; the id packs them the way chunk ids do.
+  private bundleOf(chunk: number) {
+    const [cx, cy, cz] = chunkCoords(this.grid, chunk)
+    const bx = Math.ceil(this.grid.ncx / GROUP)
+    const by = Math.ceil(this.grid.ncy / GROUP)
+    return Math.floor(cx / GROUP) + bx * (Math.floor(cy / GROUP) + by * Math.floor(cz / GROUP))
+  }
+
+  // The ids of the chunks in a bundle, whether or not they have surface in them.
+  private chunksOf(bundle: number) {
+    const { ncx, ncy, ncz } = this.grid
+    const bx = Math.ceil(ncx / GROUP)
+    const by = Math.ceil(ncy / GROUP)
+    const gx = bundle % bx
+    const gy = Math.floor(bundle / bx) % by
+    const gz = Math.floor(bundle / (bx * by))
+    const ids: number[] = []
+    for (let z = gz * GROUP; z < Math.min(ncz, (gz + 1) * GROUP); z++) {
+      for (let y = gy * GROUP; y < Math.min(ncy, (gy + 1) * GROUP); y++) {
+        for (let x = gx * GROUP; x < Math.min(ncx, (gx + 1) * GROUP); x++) ids.push(x + ncx * (y + ncy * z))
+      }
+    }
+    return ids
+  }
+
+  // Rebuilds one bundle's mesh from the chunks it holds.
+  private fill(bundle: number) {
+    const ids = this.chunksOf(bundle)
+    let verts = 0
+    let corners = 0
+    for (const id of ids) {
+      const part = this.parts.get(id)
+      if (!part) continue
+      verts += part.finish.length
+      corners += part.indices.length
+    }
+    let mesh = this.meshes.get(bundle)
     if (corners === 0) {
       if (mesh) {
         this.drop(mesh)
-        this.meshes.delete(data.chunk)
+        this.meshes.delete(bundle)
       }
       return
     }
     if (!mesh) {
-      mesh = new THREE.Mesh(this.roomFor(data.chunk, verts, corners), this.material)
-      mesh.name = `chunk-${data.chunk}`
+      mesh = new THREE.Mesh(this.roomFor(ids, verts, corners), this.material)
+      mesh.name = `chunk-${bundle}`
       mesh.castShadow = true
       mesh.receiveShadow = true
       mesh.matrixAutoUpdate = false
-      this.meshes.set(data.chunk, mesh)
+      this.meshes.set(bundle, mesh)
       this.studio.stage.add(mesh)
     } else if (verts > mesh.geometry.getAttribute('finish').count || corners > mesh.geometry.index!.count) {
-      // Outgrew its buffers. GPU buffers cannot grow, so this chunk gets a roomier geometry.
+      // Outgrew its buffers. GPU buffers cannot grow, so this bundle gets a roomier geometry.
       mesh.geometry.dispose()
-      mesh.geometry = this.roomFor(data.chunk, verts, corners)
+      mesh.geometry = this.roomFor(ids, verts, corners)
     }
     const g = mesh.geometry
     const position = g.getAttribute('position') as THREE.BufferAttribute
     const normal = g.getAttribute('normal') as THREE.BufferAttribute
     const finish = g.getAttribute('finish') as THREE.BufferAttribute
-    position.array.set(data.positions)
-    normal.array.set(data.normals)
-    // three r187 has no one-byte vertex format on the WebGPU path, so finish is widened to a float here.
+    const thickness = g.getAttribute('thickness') as THREE.BufferAttribute
     const smooth = finish.array
-    for (let i = 0; i < verts; i++) smooth[i] = data.finish[i]! / 255
-    g.index!.array.set(data.indices)
+    const thick = thickness.array
+    const index = g.index!.array
+    let v = 0
+    let c = 0
+    for (const id of ids) {
+      const part = this.parts.get(id)
+      if (!part) continue
+      const count = part.finish.length
+      position.array.set(part.positions, v * 3)
+      normal.array.set(part.normals, v * 3)
+      // three r187 has no one-byte vertex format on the WebGPU path, so finish and thickness are widened to floats here.
+      for (let i = 0; i < count; i++) {
+        smooth[v + i] = part.finish[i]! / 255
+        thick[v + i] = part.thickness[i]! / 255
+      }
+      const corner = part.indices
+      for (let i = 0; i < corner.length; i++) index[c + i] = corner[i]! + v
+      v += count
+      c += corner.length
+    }
     refill(position, verts * 3)
     refill(normal, verts * 3)
     refill(finish, verts)
+    refill(thickness, verts)
     refill(g.index!, corners)
     g.setDrawRange(0, corners)
   }
 
-  // An empty geometry with headroom, so most remeshes of this chunk are a plain refill.
-  private roomFor(chunk: number, verts: number, corners: number) {
-    const vertexRoom = Math.ceil(verts * 1.5) + 256
+  // An empty geometry with headroom, so most remeshes of this bundle are a plain refill.
+  private roomFor(chunks: number[], verts: number, corners: number) {
+    const vertexRoom = Math.ceil(verts * 1.4) + 1024
     const g = new THREE.BufferGeometry()
     g.setAttribute('position', dynamic(new Float32Array(vertexRoom * 3), 3))
     g.setAttribute('normal', dynamic(new Float32Array(vertexRoom * 3), 3))
     g.setAttribute('finish', dynamic(new Float32Array(vertexRoom), 1))
-    g.setIndex(dynamic(new Uint32Array(Math.ceil(corners * 1.5) + 1536), 1))
-    // Fixed bounds from the grid: nothing a chunk can hold reaches outside them.
-    const { min, max } = chunkBounds(this.grid, chunk)
-    g.boundingBox = new THREE.Box3(new THREE.Vector3(...min), new THREE.Vector3(...max))
-    g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere())
+    g.setAttribute('thickness', dynamic(new Float32Array(vertexRoom), 1))
+    g.setIndex(dynamic(new Uint32Array(Math.ceil(corners * 1.4) + 6144), 1))
+    // Fixed bounds from the grid: nothing the bundle's chunks can hold reaches outside them.
+    const box = new THREE.Box3()
+    for (const id of chunks) {
+      const { min, max } = chunkBounds(this.grid, id)
+      box.expandByPoint(new THREE.Vector3(...min)).expandByPoint(new THREE.Vector3(...max))
+    }
+    g.boundingBox = box
+    g.boundingSphere = box.getBoundingSphere(new THREE.Sphere())
     return g
   }
 
   // No physics yet: a piece tips outward, drops out of frame and is removed.
   private release(offcut: Offcut) {
     const [cx, cy, cz] = offcut.centroid
-    const positions = offcut.positions
-    for (let i = 0; i < positions.length; i += 3) {
-      positions[i] = positions[i]! - cx
-      positions[i + 1] = positions[i + 1]! - cy
-      positions[i + 2] = positions[i + 2]! - cz
-    }
-    const g = new THREE.BufferGeometry()
-    g.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-    g.setAttribute('normal', new THREE.BufferAttribute(offcut.normals, 3))
-    g.setIndex(new THREE.BufferAttribute(offcut.indices, 1))
-    const mesh = new THREE.Mesh(g, this.offcutMaterial)
+    const mesh = new THREE.Mesh(offcutGeometry(offcut), this.offcutMaterial)
     mesh.name = 'offcut'
     mesh.castShadow = true
     mesh.position.set(cx, cy, cz)
@@ -243,4 +325,26 @@ export class Stone {
     this.studio.stage.remove(mesh)
     mesh.geometry.dispose()
   }
+}
+
+/**
+ * Geometry for a piece that came off, centred on its centroid (so the mesh goes at
+ * `offcut.centroid`), with each vertex's place in the block kept as the `stone` attribute the
+ * offcut material reads its veins at. Takes over the offcut's arrays.
+ */
+export function offcutGeometry(offcut: Offcut) {
+  const [cx, cy, cz] = offcut.centroid
+  const positions = offcut.positions
+  const home = positions.slice()
+  for (let i = 0; i < positions.length; i += 3) {
+    positions[i] = positions[i]! - cx
+    positions[i + 1] = positions[i + 1]! - cy
+    positions[i + 2] = positions[i + 2]! - cz
+  }
+  const g = new THREE.BufferGeometry()
+  g.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  g.setAttribute('normal', new THREE.BufferAttribute(offcut.normals, 3))
+  g.setAttribute(STONE_COORDS, new THREE.BufferAttribute(home, 3))
+  g.setIndex(new THREE.BufferAttribute(offcut.indices, 1))
+  return g
 }

@@ -21,7 +21,7 @@ import type { KernelStudio } from '#shared/agent/studio'
 import { createDisplayStone } from '#shared/sculpt/display'
 import type { DisplayStone } from '#shared/sculpt/display'
 import { cloneGrid, createGrid, gridInfo, hashGrid, stoneMassKg, stoneVolumeCm3, takeDirty } from '#shared/sculpt/grid'
-import { meshChunk } from '#shared/sculpt/mesher'
+import { meshChunk, trackThickness } from '#shared/sculpt/mesher'
 import type { Image } from '#shared/sculpt/observer'
 import type { FromKernel, ReferenceMessage, RunMessage, StoneId, ToKernel } from '#shared/sculpt/protocol'
 import { raycast } from '#shared/sculpt/raycast'
@@ -63,6 +63,8 @@ function hold(stone: StoneId, id?: number): Held | null {
 }
 
 function keep(stone: StoneId, grid: Grid, rev = 0) {
+  // Only the stone that is drawn pays for thickness (and the wider remesh that keeps it current).
+  if (stone === 'shown') trackThickness(grid)
   stones.set(stone, { stone: createDisplayStone(grid), rev, meshed: stone === 'shown', stale: true, offcuts: [] })
 }
 
@@ -82,7 +84,7 @@ function flush() {
     const drawn = held.stone.drawn()
     const chunks = takeDirty(drawn).map(id => meshChunk(drawn, id))
     const buffers: Transferable[] = []
-    for (const c of chunks) buffers.push(c.positions.buffer, c.normals.buffer, c.finish.buffer, c.indices.buffer)
+    for (const c of chunks) buffers.push(c.positions.buffer, c.normals.buffer, c.finish.buffer, c.thickness.buffer, c.indices.buffer)
     // Sent even when nothing changed, so the page can follow rev.
     send({ type: 'chunks', stone, rev: held.rev, chunks }, buffers)
     if (held.offcuts.length) {

@@ -23,6 +23,7 @@ import { burst, demo, frameMeter, timeReplay } from '~/studio/debug'
 import { Hands } from '~/studio/hands'
 import type { HandTool, ScreenLine } from '~/studio/hands'
 import { KernelClient } from '~/studio/kernel'
+import { applyLook, carveFrame5, effectsFromQuery } from '~/studio/look'
 import { StudioRenderer } from '~/studio/renderer'
 import type { ReplaySpeed } from '~/studio/replay'
 import { Stone } from '~/studio/stone'
@@ -70,7 +71,6 @@ let hands: Hands | null = null
 let camera: CameraRig | null = null
 let charcoal: Charcoal | null = null
 let stage: (ReplayStage & { camera: CameraRig, charcoal: Charcoal }) | null = null
-
 // -- the film (Sprint 4): debris, tools, sound and the camera director --
 let cinema: Cinema | null = null
 const muted = ref(false)
@@ -80,6 +80,7 @@ function toggleSound() {
   muted.value = cinema?.sound.muted ?? false
 }
 // -- end of the film --
+
 watch(picking, (open) => {
   if (!open) return
   replay.refresh()
@@ -150,17 +151,18 @@ onMounted(async () => {
   // Nuxt's client-only wrapper renders a placeholder on the first pass, so the host div lands a tick later.
   await nextTick()
   if (!hostEl.value) return
-  const s = new StudioRenderer(hostEl.value, { forceWebGL: route.query.gl === '1' })
+  // ?fx=-dof,-godrays (or none, all) drops or adds post effects; ?dpr=1 caps the pixel ratio. Both are for measuring.
+  const s = new StudioRenderer(hostEl.value, { forceWebGL: route.query.gl === '1', effects: effectsFromQuery(route.query.fx), maxPixelRatio: Number(route.query.dpr) || undefined })
   const k = new KernelClient()
   studio = s
   kernel = k
   let st: Stone
-  try {
-    // The block is built in the worker while the renderer picks its backend. The stone is wired up
   // -- the film: remeshes that arrive before the film exists are kept for it (it fits the stone's boxes from them) --
   let film: Cinema | null = null
   let early: { rev: number, chunks: Parameters<Cinema['chunks']>[1] }[] | null = []
   // -- end of the film --
+  try {
+    // The block is built in the worker while the renderer picks its backend. The stone is wired up
     // in the same tick the worker reports ready, so the first mesh cannot arrive unheard.
     const built = k.init().then((grid) => {
       const made = new Stone(s, grid)
@@ -191,8 +193,6 @@ onMounted(async () => {
   stone = st
   const rig = new CameraRig(s)
   camera = rig
-
-  if (handsOn) {
   // -- the film --
   // ?film=0 leaves the film out altogether, to measure what it costs.
   if (route.query.film !== '0') {
@@ -203,13 +203,15 @@ onMounted(async () => {
   early = null
   if (route.query.cam === 'free') rig.mode = 'free'
   // -- end of the film --
+
+  if (handsOn) {
     rig.mode = 'free'
     hands = new Hands(s, st, k)
     hands.tool = tool.value
     hands.onSawLine = line => sawLine.value = line
+    hands.onStrikes = strikes => film?.struck(strikes)
   }
 
-    hands.onStrikes = strikes => film?.struck(strikes)
   // A handle for the shoot script (and for poking at the studio from devtools).
   let demoRun: Promise<void> | null = null
   const handle = {
@@ -239,6 +241,12 @@ onMounted(async () => {
     state: () => sculptor.state(),
     /** The commission itself: pause, resume, setSpeed, abort, load, replayTo, saved. */
     sculptor: () => sculptor,
+    // -- the look (Sprint 4): the look book's camera presets --
+    /** Puts the camera on a look-book preset (wide, medium, macro, raking, backlit), focuses, and holds it there. */
+    look: (name: string) => applyLook(s, name),
+    /** Carves the storyboard's frame-5 stone (three finishes and a thin fin); shoot it with look('frame5'). */
+    frame5: () => carveFrame5(s, k, st),
+    // -- end of the look --
     /** Times every frame until the returned stop() is called. */
     meter: () => frameMeter(s),
     /** How long a saved study run's log takes to put back on both stones. */
@@ -270,6 +278,8 @@ onBeforeUnmount(() => {
   w.__sceneReady = false
   delete w.__sculptor
   hands?.dispose()
+  cinema?.dispose()
+  cinema = null
   camera?.dispose()
   charcoal?.dispose()
   stone?.dispose()
@@ -278,8 +288,6 @@ onBeforeUnmount(() => {
   hands = null
   camera = null
   charcoal = null
-  cinema?.dispose()
-  cinema = null
   stage = null
   stone = null
   kernel = null
@@ -337,14 +345,6 @@ onBeforeUnmount(() => {
       class="absolute top-3 right-3 z-20"
       @click="picking = true"
     />
-    <UFieldGroup
-      v-if="stepping && passCount > 0"
-      data-hud
-      size="xs"
-      class="absolute top-1/2 left-3 z-20 -translate-y-1/2"
-      orientation="vertical"
-    >
-      <UButton
     <!-- the film: sound on or off. Lower right, clear of the transport and of an open side panel. -->
     <UButton
       v-if="route.query.film !== '0'"
@@ -360,6 +360,14 @@ onBeforeUnmount(() => {
       @click="toggleSound"
     />
     <!-- end of the film -->
+    <UFieldGroup
+      v-if="stepping && passCount > 0"
+      data-hud
+      size="xs"
+      class="absolute top-1/2 left-3 z-20 -translate-y-1/2"
+      orientation="vertical"
+    >
+      <UButton
         icon="i-lucide-chevron-up"
         color="neutral"
         variant="subtle"
