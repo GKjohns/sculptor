@@ -16,6 +16,8 @@ export interface FrameStats {
   maxMs: number
   /** Frames that took longer than 60 fps allows, with a millisecond of grace for timer jitter. */
   over16: number
+  /** Frames a person would see as a hitch: longer than two 60 fps frames. */
+  over33: number
 }
 
 function frameStats(times: number[]): FrameStats {
@@ -26,7 +28,8 @@ function frameStats(times: number[]): FrameStats {
     meanMs: round(times.reduce((sum, ms) => sum + ms, 0) / Math.max(1, times.length)),
     p95Ms: round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0),
     maxMs: round(sorted[sorted.length - 1] ?? 0),
-    over16: times.filter(ms => ms > 17.7).length
+    over16: times.filter(ms => ms > 17.7).length,
+    over33: times.filter(ms => ms > 34).length
   }
 }
 
@@ -119,9 +122,9 @@ export async function demo(studio: StudioRenderer, kernel: KernelClient, stone: 
 
 /**
  * Fires `n` strikes at the five open faces, `perFrame` each frame, and times every frame from the
- * first strike until the mesh on screen has caught up with the last.
+ * first strike until the mesh on screen has caught up with the last. `onStrikes` is told each batch.
  */
-export async function burst(studio: StudioRenderer, kernel: KernelClient, stone: Stone, n = 200, perFrame = 2): Promise<FrameStats> {
+export async function burst(studio: StudioRenderer, kernel: KernelClient, stone: Stone, n = 200, perFrame = 2, onStrikes: (strikes: Strike[]) => void = () => {}): Promise<FrameStats> {
   const [w, h, d] = stone.grid.size
   const rng = createRng(200)
   const tools: ToolId[] = ['point', 'flat', 'point', 'rasp']
@@ -149,6 +152,8 @@ export async function burst(studio: StudioRenderer, kernel: KernelClient, stone:
       }
       const batch: Strike[] = []
       for (let i = 0; i < perFrame && sent < n; i++) batch.push(one(sent++))
+      // The film hears them as hand carving does: chips, tools and sound are part of what is timed.
+      onStrikes(batch)
       lastReply = kernel.strike(batch)
     })
   })
@@ -172,9 +177,16 @@ export async function burst(studio: StudioRenderer, kernel: KernelClient, stone:
  * screen, or for the first `seconds` of it. `strikes` is how many log entries went in meanwhile.
  */
 export async function timeReplay(studio: StudioRenderer, player: ReplayPlayer, stone: Stone, speed: ReplaySpeed, seconds = Infinity): Promise<FrameStats & { strikes: number, seconds: number }> {
+  // A hot reload (any edit under app/studio while this runs) swaps the scene for a new one, and the
+  // frames awaited on the old one never come: that is an error to report, not a wait without end.
+  const torn = studio.gone.then(() => {
+    throw new Error('the studio was torn down while the replay was being timed (a hot reload?); load the page again')
+  })
+  torn.catch(() => {})
+  const live = <T>(wait: Promise<T>) => Promise.race([wait, torn])
   player.pause()
-  await player.restart()
-  await stone.whenShown(0)
+  await live(player.restart())
+  await live(stone.whenShown(0))
   player.setSpeed(speed)
   const times: number[] = []
   let first = 0
@@ -185,12 +197,16 @@ export async function timeReplay(studio: StudioRenderer, player: ReplayPlayer, s
     last = now
   })
   player.play()
-  while (!player.state().done && last - first < seconds * 1000) await studio.rendered(1)
-  const strikes = player.state().applied
-  if (player.state().done) await stone.whenShown(player.rev)
-  else player.pause()
-  await studio.rendered(2)
-  stopTiming()
+  let strikes: number
+  try {
+    while (!player.state().done && last - first < seconds * 1000) await live(studio.rendered(1))
+    strikes = player.state().applied
+    if (player.state().done) await live(stone.whenShown(player.rev))
+    else player.pause()
+    await live(studio.rendered(2))
+  } finally {
+    stopTiming()
+  }
   const stats = { ...frameStats(times), strikes, seconds: Math.round(last - first) / 1000 }
   console.log(`[sculptor] replay at ${speed} on ${studio.backend}:`, JSON.stringify(stats))
   return stats

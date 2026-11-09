@@ -3,7 +3,8 @@
  * The plaque shown once the piece is done: the title the sculptor gave it, who carved it from what
  * and when, and the sculptor's statement. The parent places it: stacked over the transport in a
  * narrow pane, beside the stone in a wide one. `centered` is the storyboard's plaque; the replay
- * viewer keeps the left-aligned card.
+ * viewer keeps the left-aligned card. In a narrow pane the statement is shown whole up to about
+ * ten lines (a third of the pane's height at most) and scrolls, with a bar to say so, past that.
  */
 defineProps<{ title: string, statement?: string | null, meta?: string, centered?: boolean }>()
 </script>
@@ -25,7 +26,7 @@ defineProps<{ title: string, statement?: string | null, meta?: string, centered?
     </p>
     <p
       v-if="statement"
-      class="mt-1.5 max-h-28 overflow-y-auto text-xs/relaxed text-pretty text-toned sm:text-sm/relaxed lg:max-h-none"
+      class="mt-1.5 max-h-[min(13rem,30dvh)] overflow-y-auto overscroll-contain text-xs/relaxed text-pretty text-toned [scrollbar-color:var(--ui-border-accented)_transparent] [scrollbar-width:thin] sm:text-sm/relaxed lg:max-h-none"
     >
       {{ statement }}
     </p>

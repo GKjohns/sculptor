@@ -116,6 +116,9 @@ export interface Grid {
   finish: Uint8Array
   // One flag per chunk whose mesh is stale. Read and cleared by takeDirty().
   dirty: Uint8Array
+  // How many samples beyond its own range a chunk's mesh reads, which is how far round a changed
+  // sample chunks are flagged. 2 for geometry and normals; more once thickness is baked (mesher.ts).
+  reach: number
   // Stone volume in units of voxel³ / 254, kept current by every edit.
   solidUnits: number
   forms: Map<string, CompiledForm>
@@ -123,7 +126,7 @@ export interface Grid {
 
 // The grid's layout without its contents: enough to place chunks and samples, and small enough
 // to send to another thread.
-export type GridInfo = Omit<Grid, 'dist' | 'finish' | 'dirty' | 'solidUnits' | 'forms'>
+export type GridInfo = Omit<Grid, 'dist' | 'finish' | 'dirty' | 'reach' | 'solidUnits' | 'forms'>
 
 export interface MeshData {
   // xyz per vertex, cm, block-local.
@@ -132,6 +135,13 @@ export interface MeshData {
   normals: Float32Array
   // One finish value per vertex, 0 (rough) to 255 (polished).
   finish: Uint8Array
+  // How much stone stands behind each vertex, 0 (a knife edge) to 255 (THICKNESS_CM or more). Only
+  // the renderer reads it, for light through thin sections. All 255 unless the bake was asked for.
+  thickness: Uint8Array
+  // Unit normals again, from the distance gradient over a wider span, so that tool grooves a
+  // voxel or two deep do not show in them. Only the renderer reads them, to shade worked stone.
+  // A copy of `normals` unless the bake was asked for.
+  smooth: Float32Array
   // Triangle list, counter-clockwise seen from outside.
   indices: Uint32Array
 }

@@ -13,13 +13,18 @@
  *             finished piece before the scene reports ready
  *   ?model=, ?ref=0|1, ?turns=, ?usd=, ?speed=  a commission's settings for this page load
  *             (app.config.ts has the defaults); ?ref=1 also shows the reference sheet in the eye panel
+ *   ?cam=free  the director leaves the camera alone (it stays where you, or a look preset, put it)
+ *   ?film=0    no debris, tools, sound or director at all, to measure what they cost
+ *   ?prewarm=0  skips the unculled frames that build every material's pipelines before the scene reports ready
  */
 import { CameraRig } from '~/studio/camera'
 import { Charcoal } from '~/studio/charcoal'
+import { Cinema } from '~/studio/cinema'
 import { burst, demo, frameMeter, timeReplay } from '~/studio/debug'
 import { Hands } from '~/studio/hands'
 import type { HandTool, ScreenLine } from '~/studio/hands'
 import { KernelClient } from '~/studio/kernel'
+import { applyLook, carveFrame5, effectsFromQuery } from '~/studio/look'
 import { StudioRenderer } from '~/studio/renderer'
 import type { ReplaySpeed } from '~/studio/replay'
 import { Stone } from '~/studio/stone'
@@ -67,6 +72,15 @@ let hands: Hands | null = null
 let camera: CameraRig | null = null
 let charcoal: Charcoal | null = null
 let stage: (ReplayStage & { camera: CameraRig, charcoal: Charcoal }) | null = null
+// -- the film (Sprint 4): debris, tools, sound and the camera director --
+let cinema: Cinema | null = null
+const muted = ref(false)
+function toggleSound() {
+  cinema?.sound.unlock()
+  cinema?.sound.setMuted(!muted.value)
+  muted.value = cinema?.sound.muted ?? false
+}
+// -- end of the film --
 
 watch(picking, (open) => {
   if (!open) return
@@ -138,19 +152,31 @@ onMounted(async () => {
   // Nuxt's client-only wrapper renders a placeholder on the first pass, so the host div lands a tick later.
   await nextTick()
   if (!hostEl.value) return
-  const s = new StudioRenderer(hostEl.value, { forceWebGL: route.query.gl === '1' })
+  // ?fx=-dof,-godrays (or none, all) drops or adds post effects; ?dpr=1 caps the pixel ratio. Both are for measuring.
+  const s = new StudioRenderer(hostEl.value, { forceWebGL: route.query.gl === '1', effects: effectsFromQuery(route.query.fx), maxPixelRatio: Number(route.query.dpr) || undefined })
   const k = new KernelClient()
   studio = s
   kernel = k
   let st: Stone
+  // -- the film: remeshes that arrive before the film exists are kept for it (it fits the stone's boxes from them) --
+  let film: Cinema | null = null
+  let early: { rev: number, chunks: Parameters<Cinema['chunks']>[1] }[] | null = []
+  // -- end of the film --
   try {
     // The block is built in the worker while the renderer picks its backend. The stone is wired up
     // in the same tick the worker reports ready, so the first mesh cannot arrive unheard.
     const built = k.init().then((grid) => {
       const made = new Stone(s, grid)
       // Only the shown stone is ever meshed; the true stone is the sculptor's and stays in the worker.
-      k.onChunks = (_stone, rev, chunks) => made.receive(rev, chunks)
-      k.onOffcuts = (_stone, rev, offcuts) => made.shed(rev, offcuts)
+      k.onChunks = (_stone, rev, chunks) => {
+        made.receive(rev, chunks)
+        // -- the film --
+        if (film) film.chunks(rev, chunks)
+        else early?.push({ rev, chunks })
+        // -- end of the film --
+      }
+      // The film's debris takes what comes off (the stone's own toy fall is only the fallback).
+      k.onOffcuts = (_stone, rev, offcuts) => film ? film.offcuts(rev, offcuts) : made.shed(rev, offcuts)
       return made
     })
     // Awaited together, so neither can fail unobserved while the other is still starting.
@@ -168,12 +194,23 @@ onMounted(async () => {
   stone = st
   const rig = new CameraRig(s)
   camera = rig
+  // -- the film --
+  // ?film=0 leaves the film out altogether, to measure what it costs.
+  if (route.query.film !== '0') {
+    film = cinema = new Cinema(s, st, k, rig)
+    for (const e of early ?? []) film.chunks(e.rev, e.chunks)
+    muted.value = film.sound.muted
+  }
+  early = null
+  if (route.query.cam === 'free') rig.mode = 'free'
+  // -- end of the film --
 
   if (handsOn) {
     rig.mode = 'free'
     hands = new Hands(s, st, k)
     hands.tool = tool.value
     hands.onSawLine = line => sawLine.value = line
+    hands.onStrikes = strikes => film?.struck(strikes)
   }
 
   // A handle for the shoot script (and for poking at the studio from devtools).
@@ -186,9 +223,11 @@ onMounted(async () => {
     /** A stone's rev and mass, and for the shown stone what its early island checks have cost. */
     kernel: (which: StoneId = 'shown') => k.stats(false, which),
     /** A sawn corner and rough, flat-chiselled and rasped patches. Runs once. */
-    demo: () => demoRun ??= demo(s, k, st),
+    demo: () => demoRun ??= demo(s, k, st).then(() => film?.settled()),
     /** n rapid strikes; resolves with (and logs) frame-time stats. */
-    burst: (n = 200) => burst(s, k, st, n),
+    burst: (n = 200) => burst(s, k, st, n, 2, strikes => film?.struck(strikes)),
+    /** The film: debris, tools, sound, director. cinema().stats() says what each is doing and its budgets; slow(0.1) is bullet time for captures. */
+    cinema: () => film,
     /** The ReplayPlayer of the run on the stage, or null. */
     replay: () => replay.player(),
     /** Plays the loaded run again from the start at `speed`; frame-time stats, as burst gives them. */
@@ -203,6 +242,12 @@ onMounted(async () => {
     state: () => sculptor.state(),
     /** The commission itself: pause, resume, setSpeed, abort, load, replayTo, saved. */
     sculptor: () => sculptor,
+    // -- the look (Sprint 4): the look book's camera presets --
+    /** Puts the camera on a look-book preset (wide, medium, macro, raking, backlit), focuses, and holds it there. */
+    look: (name: string) => applyLook(s, name),
+    /** Carves the storyboard's frame-5 stone (three finishes and a thin fin); shoot it with look('frame5'). */
+    frame5: () => carveFrame5(s, k, st),
+    // -- end of the look --
     /** Times every frame until the returned stop() is called. */
     meter: () => frameMeter(s),
     /** How long a saved study run's log takes to put back on both stones. */
@@ -215,7 +260,7 @@ onMounted(async () => {
   await st.whenShown(0)
   if (route.query.demo === '1') await handle.demo()
   charcoal = new Charcoal(s)
-  stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal }
+  stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal, cinema: film ?? undefined }
   await sculptor.attach(stage)
   if (replayId.value) {
     await replay.open(stage, replayId.value, { speed: firstSpeed, end: route.query.at === 'end' })
@@ -225,6 +270,9 @@ onMounted(async () => {
   } else if ('replay' in route.query) {
     picking.value = true
   }
+  // Every material's pipelines, whatever the camera has seen so far: the first slab fall swings it
+  // round the room. ?prewarm=0 leaves it out, to measure what it saves.
+  if (route.query.prewarm !== '0') await s.prewarm()
   await s.rendered(3)
   if (studio === s) w.__sceneReady = true
 })
@@ -234,6 +282,8 @@ onBeforeUnmount(() => {
   w.__sceneReady = false
   delete w.__sculptor
   hands?.dispose()
+  cinema?.dispose()
+  cinema = null
   camera?.dispose()
   charcoal?.dispose()
   stone?.dispose()
@@ -299,6 +349,21 @@ onBeforeUnmount(() => {
       class="absolute top-3 right-3 z-20"
       @click="picking = true"
     />
+    <!-- the film: sound on or off. Lower right, clear of the transport and of an open side panel. -->
+    <UButton
+      v-if="route.query.film !== '0'"
+      data-hud
+      :icon="muted ? 'i-lucide-volume-x' : 'i-lucide-volume-2'"
+      color="neutral"
+      variant="subtle"
+      size="sm"
+      class="absolute bottom-3 z-20"
+      :style="{ right: `${room.right + 12}px` }"
+      :aria-label="muted ? 'Sound is off. Turn it on' : 'Sound is on. Turn it off'"
+      :aria-pressed="!muted"
+      @click="toggleSound"
+    />
+    <!-- end of the film -->
     <UFieldGroup
       v-if="stepping && passCount > 0"
       data-hud

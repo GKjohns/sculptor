@@ -12,7 +12,7 @@
  * subtitle steps aside too, since the open panel says the same thing. Only the panels take the
  * pointer; the canvas gets the rest.
  */
-import { finishFallback } from '~/studio/viewState'
+import { finishFallback, modelLabel } from '~/studio/viewState'
 import type { HudEvents, HudInset, LookView, SculptorView } from '~/studio/viewState'
 import type { ReplaySpeed } from '~/studio/replay'
 
@@ -28,7 +28,7 @@ onBeforeUnmount(() => query.removeEventListener('change', sync))
 
 const running = computed(() => props.view.phase !== 'idle')
 const over = computed(() => props.view.phase === 'finished' || props.view.phase === 'error')
-const model = computed(() => props.view.models.find(m => m.key === props.view.model)?.label ?? props.view.model)
+const model = computed(() => props.view.models.find(m => m.key === props.view.model)?.label ?? modelLabel(props.view.model))
 const stone = computed(() => props.view.stones.find(s => s.key === props.view.stone)?.label ?? props.view.stone)
 
 // Said in the subtitle's place while nobody is speaking.

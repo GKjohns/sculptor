@@ -11,6 +11,10 @@ export const DENSITY = 2.71
 // Finish-channel values: 0 is rough, 255 is polished.
 export const FINISH = { point: 20, drill: 45, claw: 60, sawn: 90, flat: 110, roundel: 125, rasp: 170, polished: 255 } as const
 
+// Samples beyond its own range that a chunk's mesh reads on every side: one for the cells that
+// straddle a seam, one more for normals.
+export const MESH_REACH = 2
+
 // Air samples kept on every side of the block. Two is the least that lets the mesher and the
 // island check read a neighbour of a neighbour of any stone voxel without bounds checks.
 export const MIN_PAD = 2
@@ -66,6 +70,7 @@ export function createGrid(options: Partial<GridOptions> = {}): Grid {
     dist: new Int8Array(nx * ny * nz),
     finish: new Uint8Array(nx * ny * nz).fill(FINISH.sawn),
     dirty: new Uint8Array(nx * ny * nz / (chunk * chunk * chunk)).fill(1),
+    reach: MESH_REACH,
     solidUnits: 0,
     forms: new Map()
   }
@@ -170,8 +175,7 @@ export function chunkBounds(grid: GridInfo, id: number): { min: Vec3, max: Vec3 
 }
 
 // Flags every chunk whose mesh reads a sample in the inclusive box, and adds new ids to out.
-// A chunk's mesh reads two samples beyond its own range on every side: one for the cells
-// that straddle a seam, one more for normals.
+// A chunk's mesh reads grid.reach samples beyond its own range on every side.
 export function markDirtyBox(
   grid: Grid,
   minX: number, minY: number, minZ: number,
@@ -179,12 +183,13 @@ export function markDirtyBox(
   out: number[]
 ): void {
   const c = grid.chunk
-  const ax = Math.max(0, Math.floor((minX - 2) / c))
-  const ay = Math.max(0, Math.floor((minY - 2) / c))
-  const az = Math.max(0, Math.floor((minZ - 2) / c))
-  const bx = Math.min(grid.ncx - 1, Math.floor((maxX + 2) / c))
-  const by = Math.min(grid.ncy - 1, Math.floor((maxY + 2) / c))
-  const bz = Math.min(grid.ncz - 1, Math.floor((maxZ + 2) / c))
+  const r = grid.reach
+  const ax = Math.max(0, Math.floor((minX - r) / c))
+  const ay = Math.max(0, Math.floor((minY - r) / c))
+  const az = Math.max(0, Math.floor((minZ - r) / c))
+  const bx = Math.min(grid.ncx - 1, Math.floor((maxX + r) / c))
+  const by = Math.min(grid.ncy - 1, Math.floor((maxY + r) / c))
+  const bz = Math.min(grid.ncz - 1, Math.floor((maxZ + r) / c))
   for (let cz = az; cz <= bz; cz++) {
     for (let cy = ay; cy <= by; cy++) {
       for (let cx = ax; cx <= bx; cx++) {

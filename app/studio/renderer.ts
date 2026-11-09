@@ -2,17 +2,25 @@
  * The three.js side of the studio: one WebGPURenderer, one scene, one RenderPipeline.
  * It owns no stone data. Whatever stands on the banker is added to `stage`; per-frame work registers
  * with `onFrame`. The scene is in block centimetres (origin at the centre of the block's base, +Y up).
+ * The room and its lights are `atelier` (atelier.ts); the post stack is `post` (post.ts).
  *
  * Import rule for everything under app/studio/: three from 'three/webgpu', TSL from 'three/tsl'.
  * ShaderMaterial, onBeforeCompile and EffectComposer do not work on this path.
  */
 import * as THREE from 'three/webgpu'
-import { pass } from 'three/tsl'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+import { Atelier } from './atelier'
+import { bakeStone, disposeStone, marbleDials } from './materials/marble'
+import { Post } from './post'
+import type { PostEffects } from './post'
 
 export interface StudioOptions {
   /** Skip WebGPU and run the WebGL 2 backend (`?gl=1`). Without it three still falls back on its own. */
   forceWebGL?: boolean
+  /** Post effects to turn off or on over the tier's own set (`?fx=`), for measuring what each costs. */
+  effects?: Partial<PostEffects>
+  /** Cap on the device pixel ratio the canvas is drawn at. Left out: 1.5 with the full post stack, 2 without. */
+  maxPixelRatio?: number
 }
 
 export interface StudioStats {
@@ -29,7 +37,12 @@ export interface StudioStats {
 
 export type FrameFn = (dt: number, now: number) => void
 
+// What the room falls away to, and the colour of the air between here and there.
 const BACKDROP = 0x0b0a09
+const HAZE_PER_CM = 0.00055
+// The most device pixels per CSS pixel each tier draws, unless the page says otherwise.
+const FILM_PIXEL_RATIO = 1.5
+const PLAIN_PIXEL_RATIO = 2
 // The default block is 60 x 100 x 60 cm standing on the origin; the camera orbits its middle.
 const TARGET = new THREE.Vector3(0, 50, 0)
 const CAMERA_HOME = new THREE.Vector3(128, 96, 204)
@@ -43,16 +56,48 @@ const BLOCK_NEAR = 50
 // HUD's subtitle and transport sit, by sliding the picture up.
 const SPARE_BELOW = 0.8
 
+// A perspective camera whose picture can be slid up the frame (a lens shift). The view offset
+// would do it, but TRAA sets and clears the view offset every frame for its jitter.
+class ShiftCamera extends THREE.PerspectiveCamera {
+  /** How far up the frame the picture is slid, as a share of the frame's height. */
+  shiftY = 0
+
+  override updateProjectionMatrix() {
+    super.updateProjectionMatrix()
+    if (this.shiftY === 0) return
+    this.projectionMatrix.elements[9]! -= this.shiftY * 2
+    this.projectionMatrixInverse.copy(this.projectionMatrix).invert()
+  }
+}
+
+// Whether the WebGL context is drawn by the CPU (SwiftShader or llvmpipe).
+function softwareGL(renderer: THREE.WebGPURenderer) {
+  const gl = (renderer.backend as { gl?: WebGL2RenderingContext }).gl
+  if (!gl) return false
+  const info = gl.getExtension('WEBGL_debug_renderer_info')
+  const name = String(gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER))
+  return /swiftshader|llvmpipe|software/i.test(name)
+}
+
 export class StudioRenderer {
   readonly scene = new THREE.Scene()
-  readonly camera = new THREE.PerspectiveCamera(35, 1, 1, 5000)
+  readonly camera: THREE.PerspectiveCamera = new ShiftCamera(35, 1, 4, 6000)
   /** Everything on the banker goes here: the stone's chunk meshes, offcuts, debug gizmos. */
   readonly stage = new THREE.Group()
-  readonly key = new THREE.DirectionalLight(0xfff1dc, 4.2)
+  /** The room: banker, floor, walls, window, and the light rig. */
+  readonly atelier: Atelier
+  /** The key light (the sun through the window). Same object as `atelier.key`. */
+  readonly key: THREE.DirectionalLight
   readonly renderer: THREE.WebGPURenderer
   readonly controls: OrbitControls
+  /** The stone's dials (translucency, veins), for tuning from the console. */
+  readonly marble = marbleDials
+  /** The post stack; null until init() has picked a backend. */
+  post: Post | null = null
 
-  private pipeline: THREE.RenderPipeline | null = null
+  private effects: Partial<PostEffects>
+  private lean = false
+  private maxPixelRatio: number
   private resizer: ResizeObserver
   private frameFns = new Set<FrameFn>()
   private waiters: { at: number, done: () => void }[] = []
@@ -61,31 +106,28 @@ export class StudioRenderer {
   private frameMs = 0
   private last = 0
   private disposed = false
+  private leave = () => {}
+  /** Resolves when the studio is disposed (the page left, or a hot reload replaced the scene): for whatever is awaiting frames that will now never come. */
+  readonly gone = new Promise<void>(done => this.leave = done)
+  private focus: { point: THREE.Vector3, aperture: number } | null = null
 
   constructor(private host: HTMLElement, options: StudioOptions = {}) {
-    this.renderer = new THREE.WebGPURenderer({ antialias: true, forceWebGL: options.forceWebGL === true })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.effects = options.effects ?? {}
+    // No MSAA on the canvas: the film tier anti-aliases with TRAA, which wants unresolved samples,
+    // and the plain tier asks for it on its own pass (post.ts).
+    this.renderer = new THREE.WebGPURenderer({ antialias: false, forceWebGL: options.forceWebGL === true })
+    this.maxPixelRatio = options.maxPixelRatio ?? 0
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, this.maxPixelRatio || PLAIN_PIXEL_RATIO))
     this.renderer.domElement.classList.add('block', 'size-full')
     host.appendChild(this.renderer.domElement)
 
     this.scene.background = new THREE.Color(BACKDROP)
+    this.scene.fog = new THREE.FogExp2(BACKDROP, HAZE_PER_CM)
     this.scene.add(this.stage)
-
-    // One warm key from the upper left and a dim cool fill. The atelier and its window are Sprint 4.
-    this.key.position.set(-140, 220, 160)
-    this.key.target.position.copy(TARGET)
-    // The key casts shadows, which is most of what makes tool marks read. The shadow camera is a
-    // box around the default block with room for a piece falling away.
     this.renderer.shadowMap.enabled = true
-    this.key.castShadow = true
-    this.key.shadow.mapSize.set(2048, 2048)
-    this.key.shadow.camera.left = this.key.shadow.camera.bottom = -90
-    this.key.shadow.camera.right = this.key.shadow.camera.top = 90
-    this.key.shadow.camera.near = 100
-    this.key.shadow.camera.far = 600
-    this.key.shadow.bias = -0.0004
-    this.key.shadow.normalBias = 0.25
-    this.scene.add(this.key, this.key.target, new THREE.HemisphereLight(0x8fa3c4, 0x1c1814, 0.55))
+    this.renderer.shadowMap.type = THREE.PCFShadowMap
+    this.atelier = new Atelier(this.scene)
+    this.key = this.atelier.key
 
     this.camera.position.copy(CAMERA_HOME)
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
@@ -103,9 +145,29 @@ export class StudioRenderer {
   async init() {
     await this.renderer.init()
     if (this.disposed) return
-    // One node for now. Sprint 4 chains ao, dof, bloom and the rest onto this pass in post.ts.
-    this.pipeline = new THREE.RenderPipeline(this.renderer, pass(this.scene, this.camera))
+    // Headless Chrome's software WebGL (the shoot script's --gl mode) is for layout and logic.
+    // It loses its context under the full-size shadow map, environment and vein bake.
+    this.lean = this.backend === 'webgl2' && softwareGL(this.renderer)
+    this.atelier.bake(this.renderer, this.lean)
+    // The whole stack on WebGPU; on the WebGL 2 fallback, the scene with tone mapping and grain.
+    this.post = new Post(this.renderer, this.scene, this.camera, this.key, this.backend === 'webgpu' ? 'film' : 'plain', this.effects, this.lean)
+    if (this.focus) this.post.setFocus(this.focus.point, this.focus.aperture)
+    this.atelier.temporal.value = this.post.effects.traa ? 1 : 0
+    // The full stack at the display's own 2x costs 25 ms a frame on an M4 Pro at 1440 x 900; at 1.5x, 10.
+    if (this.post.tier === 'film' && !this.maxPixelRatio) {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, FILM_PIXEL_RATIO))
+      this.resize()
+    }
     this.renderer.setAnimationLoop(now => this.frame(now))
+  }
+
+  /**
+   * Depth of field: keep `point` (world cm) sharp with an aperture from 0 (everything sharp) to 1
+   * (a macro lens wide open). null goes back to deep focus. Eased, so call it as often as you like.
+   */
+  setFocus(point: THREE.Vector3 | null, aperture = 0.5) {
+    this.focus = point ? { point: point.clone(), aperture } : null
+    this.post?.setFocus(point, aperture)
   }
 
   /** How far from its target the camera frames the whole block in the pane as it is now. */
@@ -128,6 +190,24 @@ export class StudioRenderer {
     return new Promise<void>(done => this.waiters.push({ at: this.frames + count, done }))
   }
 
+  /**
+   * Draws a couple of frames with nothing culled, so every material in the room has its pipelines
+   * in every pass before anyone is watching. Left to the first time it comes into view (the
+   * quarried blocks at the back, when the director first swings round for a slab fall), a lit
+   * material costs a 100 ms frame: its own shader, and the AO and contact-shadow passes it reads
+   * are set up again with it. Call it once everything is on the stage, before the scene reports ready.
+   */
+  async prewarm() {
+    const culled: THREE.Object3D[] = []
+    this.scene.traverse((object) => {
+      if (!object.frustumCulled) return
+      object.frustumCulled = false
+      culled.push(object)
+    })
+    await this.rendered(2)
+    for (const object of culled) object.frustumCulled = true
+  }
+
   stats(): StudioStats {
     const size = this.renderer.getSize(new THREE.Vector2())
     const { drawCalls, triangles } = this.renderer.info.render
@@ -136,17 +216,20 @@ export class StudioRenderer {
 
   dispose() {
     this.disposed = true
+    this.leave()
     this.renderer.setAnimationLoop(null)
     this.resizer.disconnect()
     this.controls.dispose()
     this.frameFns.clear()
-    this.pipeline?.dispose()
+    this.post?.dispose()
+    this.atelier.dispose()
+    disposeStone()
     this.renderer.dispose()
     this.renderer.domElement.remove()
   }
 
   private frame(now: number) {
-    if (!this.pipeline) return
+    if (!this.post) return
     const ms = this.last ? now - this.last : 16.7
     this.last = now
     this.frameMs = this.frameMs ? this.frameMs * 0.9 + ms * 0.1 : ms
@@ -154,7 +237,10 @@ export class StudioRenderer {
     const dt = Math.min(ms, 100) / 1000
     for (const fn of this.frameFns) fn(dt, now)
     this.controls.update()
-    this.pipeline.render()
+    // The veins of any stone preset that has turned up since the last frame.
+    bakeStone(this.renderer, this.lean)
+    this.post.update(dt)
+    this.post.render()
     this.frames++
     if (this.waiters.length) {
       this.waiters = this.waiters.filter((w) => {
@@ -185,7 +271,8 @@ export class StudioRenderer {
     this.fitDistance = fit
     // The stone is 1 - HOME_DISTANCE / fit shorter on screen than the home framing would have it.
     const lift = (1 - HOME_DISTANCE / fit) * (h / 2) * (SPARE_BELOW - 0.5) * 2
+    ;(this.camera as ShiftCamera).shiftY = Math.round(lift) / h
     // Also updates the projection for the new aspect.
-    this.camera.setViewOffset(w, h, 0, Math.round(lift), w, h)
+    this.camera.updateProjectionMatrix()
   }
 }

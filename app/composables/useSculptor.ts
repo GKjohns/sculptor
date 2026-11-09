@@ -22,6 +22,7 @@ import type { GridInfo } from '#shared/sculpt/types'
 import { KERNEL_VERSION } from '#shared/sculpt/version'
 import type { CameraRig } from '~/studio/camera'
 import type { Charcoal } from '~/studio/charcoal'
+import type { Cinema } from '~/studio/cinema'
 import type { KernelClient } from '~/studio/kernel'
 import type { StudioRenderer } from '~/studio/renderer'
 import { replayBlocker } from '~/studio/replay'
@@ -37,6 +38,8 @@ export interface SculptorStage {
   stone: Stone
   camera: CameraRig
   charcoal?: Charcoal
+  /** The film round the stone (debris, tools, sound, director): it follows whichever timeline it is bound to. */
+  cinema?: Cinema
 }
 
 export interface StartOptions {
@@ -212,6 +215,8 @@ export function useSculptor() {
     const t = new Timeline<QueuedPass, QueuedLook>(s.kernel, s.stone, { speed: view.value.transport.speed, elastic: true, camera: s.camera, rebuild })
     t.onChange = () => statsStale = true
     t.onSketch = strike => s.charcoal?.draw(strike)
+    // Charcoal goes with the stone it was drawn on.
+    t.listen({ strikes: events => s.charcoal?.erase(events) })
     t.onPass = (pass) => {
       // The stone the lines were drawn on is about to come off.
       if (pass.tool !== 'sketch' && pass.tool !== 'declare_form') s.charcoal?.clear()
@@ -223,6 +228,7 @@ export function useSculptor() {
       change(v => endLook(v))
       sync()
     }
+    s.cinema?.bind(t)
     timeline = t
     s.camera.sway = true
     return t

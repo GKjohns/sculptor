@@ -30,10 +30,17 @@
  * Backpressure on the sculptor: room() resolves when the screen is less than about a minute
  * behind and not paused. The loop's Studio waits on it before answering a call, so a sculptor
  * that outruns the screen is held at the next tool result.
+ *
+ * The film around the stone (debris, tools, sound, the camera director) listens in through
+ * listen(): every cut and saw cut as it lands, passes and looks as they begin and end, the block
+ * being rebuilt, the stone jumping ahead without playing. upcoming() says which strike the clock is
+ * on its way to, so a mallet can land on the beat and a saw can travel its cut. `timeScale`
+ * stretches tick time for slow motion; it is the director's, and 1 unless a slab is falling.
  */
 import { strikeMs } from '#shared/agent/replay'
 import { DENSITY } from '#shared/sculpt/grid'
-import type { GridInfo, SketchStrike, Strike } from '#shared/sculpt/types'
+import { nominalBiteCm3, TOOLS } from '#shared/sculpt/tools'
+import type { CutStrike, GridInfo, SawStrike, SketchStrike, Strike, ToolId, Vec3 } from '#shared/sculpt/types'
 import type { CameraRig } from './camera'
 import type { KernelClient } from './kernel'
 import type { Stone } from './stone'
@@ -97,6 +104,54 @@ export interface TimelineOptions {
   settle?: boolean
 }
 
+/** A cut or a saw cut as it landed on the shown stone: what debris, tools, sound and the director act on. */
+export interface StrikeEvent {
+  kind: 'cut' | 'saw'
+  tool: ToolId
+  /** Contact point, cm. A saw's is the point its plane was given by. */
+  at: Vec3
+  /** Unit vector the tool travelled into the stone. A saw's is its plane's normal, toward the side that came off. */
+  dir: Vec3
+  /** Tool width and bite depth, cm; 0 for a saw. */
+  size: number
+  depth: number
+  /** Stone this strike took, cm³: its share of what the worker measured for the batch. A saw's is 0; its offcuts say what they weigh. */
+  removedCm3: number
+  seed: number
+  /** The virtual time it took and the virtual clock when it landed, ms, and its place in the log. */
+  ms: number
+  atMs: number
+  index: number
+}
+
+/** The strike the clock is on its way to. */
+export interface UpcomingStrike {
+  strike: CutStrike | SawStrike
+  index: number
+  /** How far through its own time the clock is, 0 to 1. */
+  progress: number
+  /** Tick seconds until it lands at the current rate. */
+  inS: number
+}
+
+/** Everything a listener can hear. All optional; none may change what the timeline does. */
+export interface TimelineListener {
+  /** A batch of cuts and saw cuts has just landed, oldest first. `rate` is virtual seconds per tick second right now. */
+  strikes?: (events: StrikeEvent[], rate: number) => void
+  pass?: (pass: TimelinePass, index: number) => void
+  passEnd?: (pass: TimelinePass, index: number) => void
+  /** A look is on stage for `seconds` of tick time. */
+  look?: (look: TimelineLook, seconds: number) => void
+  lookEnd?: (look: TimelineLook) => void
+  /** The block is being rebuilt: whatever came off the old one is gone. */
+  reset?: () => void
+  /** The stone now stands at log entry `applied` without the entries before it having been played (a seek, a restored session). */
+  jump?: (log: readonly Strike[], applied: number) => void
+  change?: (state: TimelineState) => void
+  /** The timeline is gone. */
+  end?: () => void
+}
+
 /** How dull it got: tick seconds with the queue open and nothing on screen to watch. */
 export interface TimelineIdle {
   totalS: number
@@ -157,6 +212,8 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
 
   /** The shown stone's rev after the last batch the worker confirmed. */
   rev = 0
+  /** Tick seconds per second handed to tick(): below 1 is slow motion. The director's to set. */
+  timeScale = 1
   readonly idle: TimelineIdle = { totalS: 0, longestS: 0, longestStallS: 0, maxBehindS: 0 }
 
   private strikes: Strike[] = []
@@ -171,6 +228,8 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   private lookClock = 0
   private sent = 0
   private applied = 0
+  // Sketch entries below this have had their lines drawn.
+  private drawn = 0
   private flight: Promise<void> | null = null
   private staged: { look: L, left: number } | null = null
   private playing = false
@@ -192,6 +251,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   private stone: Stone
   private camera: CameraRig | null
   private rebuild: () => Promise<GridInfo>
+  private listeners = new Set<TimelineListener>()
   // Bumped by restart() and dispose(): replies to anything sent before are for a stone that is gone.
   private epoch = 0
 
@@ -244,6 +304,34 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
       done: !this.open && this.caughtUp(),
       busy: this.busy,
       error: this.error
+    }
+  }
+
+  // ---------- listening in ----------
+
+  /** Hears what happens on the timeline until the returned function is called. */
+  listen(listener: TimelineListener) {
+    this.listeners.add(listener)
+    return () => {
+      this.listeners.delete(listener)
+    }
+  }
+
+  /** The cut or saw cut the clock is on its way to; null while paused, looking, or with nothing due. */
+  upcoming(): UpcomingStrike | null {
+    if (!this.playing || this.busy || this.staged) return null
+    const limit = this.limit()
+    let i = this.sent
+    while (i < limit && this.strikes[i]!.kind !== 'cut' && this.strikes[i]!.kind !== 'saw') i++
+    if (i >= limit) return null
+    const end = this.ends[i]!
+    const start = i > 0 ? this.ends[i - 1]! : 0
+    const rate = this.rate > 0 && this.rate !== Infinity ? this.rate : 1
+    return {
+      strike: this.strikes[i] as CutStrike | SawStrike,
+      index: i,
+      progress: end > start ? clamp((this.clock - start) / (end - start), 0, 1) : 1,
+      inS: Math.max(0, end - this.clock) / 1000 / rate
     }
   }
 
@@ -326,6 +414,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   /** Advances the clock by dt seconds and hands the worker what has come due. */
   tick(dt: number) {
     if (!this.playing || this.busy) return
+    dt *= this.timeScale
     if (this.staged) {
       this.idleRun = 0
       this.lookClock += dt * 1000
@@ -376,9 +465,10 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.error = ''
     if (this.staged) this.camera?.release()
     this.staged = null
-    this.clock = this.lookClock = this.sent = this.applied = this.rev = this.cursor = this.landed = this.rate = 0
+    this.clock = this.lookClock = this.sent = this.applied = this.rev = this.cursor = this.landed = this.rate = this.drawn = 0
     this.announced = -1
     this.sinceSettle = this.unsettled = 0
+    for (const l of this.listeners) l.reset?.()
     this.emit()
     const grid = await this.rebuild()
     if (epoch !== this.epoch) return
@@ -409,6 +499,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     if (this.staged) {
       this.camera?.release()
       this.onLookEnd(this.staged.look)
+      for (const l of this.listeners) l.lookEnd?.(this.staged.look)
       this.staged = null
     }
     this.emit()
@@ -432,6 +523,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.skipMarks()
     this.busy = false
     void this.weigh()
+    for (const l of this.listeners) l.jump?.(this.strikes, this.applied)
     this.emit()
     this.release()
   }
@@ -451,6 +543,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.rev = rev
     this.skipMarks()
     void this.weigh()
+    for (const l of this.listeners) l.jump?.(this.strikes, this.applied)
     this.emit()
   }
 
@@ -460,6 +553,8 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     if (this.staged) this.camera?.release()
     this.staged = null
     this.onChange = this.onPass = this.onPassEnd = this.onLook = this.onLookEnd = this.onSketch = () => {}
+    for (const l of this.listeners) l.end?.()
+    this.listeners.clear()
     for (const done of this.waiters.slice()) done()
   }
 
@@ -506,6 +601,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
         this.announced = mark.index
         this.cursor++
         this.onPass(mark.pass, mark.index)
+        for (const l of this.listeners) l.pass?.(mark.pass, mark.index)
         this.land()
       } else {
         if (this.applied < mark.at || this.flight) break
@@ -522,6 +618,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
       if (pass.index > this.announced || this.applied < pass.end) break
       this.landed++
       this.onPassEnd(pass.pass, pass.index)
+      for (const l of this.listeners) l.passEnd?.(pass.pass, pass.index)
     }
   }
 
@@ -598,8 +695,10 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     }
     const seconds = this.lookSeconds(look)
     this.onLook(look)
+    for (const l of this.listeners) l.look?.(look, seconds)
     if (seconds <= 0) {
       this.onLookEnd(look)
+      for (const l of this.listeners) l.lookEnd?.(look)
       return
     }
     // The same share of a shortened look goes on walking as of a full one.
@@ -616,6 +715,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.staged = null
     this.camera?.release()
     this.onLookEnd(staged.look)
+    for (const l of this.listeners) l.lookEnd?.(staged.look)
     this.emit()
     this.release()
   }
@@ -630,8 +730,14 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     const settle = this.settles && this.speed !== 'max' && this.sinceSettle >= SETTLE_S && !checked
     if (settle || checked) this.sinceSettle = 0
     // A line is drawn as its entry is handed over, so it is on the stone before the pass after
-    // it is announced (and that pass, if it cuts, may wipe it).
-    for (const strike of batch) if (strike.kind === 'sketch') this.onSketch(strike)
+    // it is announced (and that pass, if it cuts, may wipe it). Once only: an entry the worker's
+    // budget left out is handed over again, by which time that pass has been announced and the
+    // line would be drawn back over stone that is already going.
+    for (let i = Math.max(from, this.drawn); i < to; i++) {
+      const strike = this.strikes[i]!
+      if (strike.kind === 'sketch') this.onSketch(strike)
+    }
+    this.drawn = Math.max(this.drawn, to)
     try {
       const reply = await this.kernel.strike(batch, 'shown', { budgetMs: BUDGET_MS, ...(settle ? { settle: true } : {}) })
       if (epoch !== this.epoch) return
@@ -645,6 +751,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
         else if (strike.kind === 'cut' || strike.kind === 'saw') this.unsettled++
       }
       if (settle) this.unsettled = 0
+      if (this.listeners.size) this.tell(batch, from, reply.applied, reply.removedCm3)
     } catch (e) {
       if (epoch !== this.epoch) return
       this.error = e instanceof Error ? e.message : String(e)
@@ -658,7 +765,36 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.release()
   }
 
+  // Tells the listeners which cuts and saw cuts of a batch went in. What the batch removed is
+  // shared out by each cut's nominal bite; a batch with a saw in it cannot be shared (the slab is
+  // in the figure), so its cuts are given their nominal bite as it stands.
+  private tell(batch: Strike[], from: number, applied: number, removedCm3: number) {
+    const events: StrikeEvent[] = []
+    let nominal = 0
+    let sawn = false
+    for (let i = 0; i < applied; i++) {
+      const strike = batch[i]!
+      if (strike.kind === 'saw') {
+        sawn = true
+        events.push({ kind: 'saw', tool: 'saw', at: strike.plane.point, dir: strike.plane.normal, size: 0, depth: 0, removedCm3: 0, seed: from + i, ms: strike.ms, atMs: this.ends[from + i]!, index: from + i })
+      } else if (strike.kind === 'cut') {
+        const spec = TOOLS[strike.tool]
+        // The rasp only takes the high spots and the polish takes nothing.
+        const bite = !spec || spec.mode === 'burnish' ? 0 : spec.mode === 'abrade' ? strike.size * strike.size * strike.depth * 0.02 : nominalBiteCm3(spec, strike.size, strike.depth)
+        nominal += bite
+        events.push({ kind: 'cut', tool: strike.tool, at: strike.at, dir: strike.dir, size: strike.size, depth: strike.depth, removedCm3: bite, seed: strike.seed, ms: strike.ms, atMs: this.ends[from + i]!, index: from + i })
+      }
+    }
+    if (!events.length) return
+    const share = sawn || nominal <= 0 ? 0.6 : Math.min(1.5, removedCm3 / nominal)
+    for (const event of events) event.removedCm3 *= share
+    const rate = this.rate > 0 && this.rate !== Infinity ? this.rate : 1
+    for (const l of this.listeners) l.strikes?.(events, rate)
+  }
+
   private emit() {
-    this.onChange(this.state())
+    const state = this.state()
+    this.onChange(state)
+    for (const l of this.listeners) l.change?.(state)
   }
 }

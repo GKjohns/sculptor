@@ -3,7 +3,8 @@ export default defineNuxtConfig({
   modules: ['@nuxt/eslint', '@nuxt/ui'],
   // The studio is one full-screen canvas; nothing to render on the server.
   ssr: false,
-  devtools: { enabled: true },
+  // Off: its pill sits over the transport bar at the bottom of the canvas.
+  devtools: { enabled: false },
   css: ['~/assets/css/main.css'],
   // Dark only: no colour-mode switching, app.vue pins the `dark` class.
   ui: { colorMode: false },

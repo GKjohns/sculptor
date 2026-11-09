@@ -2,6 +2,7 @@
 /**
  * The sculptor's own sentence for the pass on screen, as a film subtitle, with the tool in hand.
  * `label` is the small line over it; left out, the tool's name stands in (the replay viewer does that).
+ * The badge has the same dark backing as the sentence, so it reads over lit stone.
  * `pending` shimmers the sentence: nobody is speaking yet, the studio is waiting on something.
  * The block keeps room for three lines and grows upward from its bottom edge, so a longer sentence
  * moves nothing below or beside it.
@@ -20,7 +21,7 @@ const over = computed(() => props.label ?? props.tool?.replaceAll('_', ' '))
       color="primary"
       variant="subtle"
       size="sm"
-      class="max-w-full truncate tracking-wider uppercase backdrop-blur-sm"
+      class="max-w-full truncate bg-default/80 tracking-wider uppercase ring-primary/40 backdrop-blur-sm"
     >
       {{ over }}
     </UBadge>
