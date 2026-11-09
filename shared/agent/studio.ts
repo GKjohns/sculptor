@@ -7,15 +7,18 @@ import { chisel, drill, polish, rasp, roughOut, saw, silhouetteForm, sketch } fr
 import type { PassResult, RulerPoint } from '../sculpt/hand.ts'
 import { SLICE_VIEW, measureAll, measureSlice, surfaceFinish } from '../sculpt/measure.ts'
 import type { Mask, SideView } from '../sculpt/measure.ts'
-import { renderCloseup, renderContactSheet, renderSlice } from '../sculpt/observer.ts'
+import { PROFILE_SAMPLES, renderCloseup, renderContactSheet, renderSlice } from '../sculpt/observer.ts'
 import type { Image, ImageLike, Overlay } from '../sculpt/observer.ts'
 import { compileForm, declareForm, formDistance } from '../sculpt/shapes.ts'
 import { applyStrike } from '../sculpt/strike.ts'
 import { KERNEL_VERSION } from '../sculpt/version.ts'
-import type { ViewId } from '../sculpt/views.ts'
-import type { Form, FormStrike, Grid, Shape, SketchStrike, Strike } from '../sculpt/types.ts'
-import { NO_PROTECT, REFERENCE_TARGET } from './toolSchemas.ts'
-import type { ChiselArgs, CloseupArgs, DeclareFormArgs, DrillArgs, LookArgs, PolishArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, SketchArgs, SliceArgs, StudioCall, ViewPoint } from './toolSchemas.ts'
+import type { AxisView, ViewId } from '../sculpt/views.ts'
+import { expandShapes } from '../sculpt/anatomy.ts'
+import type { DeclaredShape } from '../sculpt/anatomy.ts'
+import { VIEWS } from '../sculpt/views.ts'
+import type { Form, FormStrike, Grid, SketchStrike, Strike, Vec3 } from '../sculpt/types.ts'
+import { FOCUS_STROKE_SHARE, NO_PROTECT, REFERENCE_TARGET } from './toolSchemas.ts'
+import type { ChiselArgs, CloseupArgs, DeclareFormArgs, DetailArgs, DrillArgs, FocusArgs, LookArgs, PolishArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, SketchArgs, SliceArgs, StudioCall, UnfocusArgs, ViewPoint } from './toolSchemas.ts'
 import type { Studio, StudioResult, ToolCall } from './types.ts'
 
 type Sides<T> = Partial<Record<SideView, T>>
@@ -56,16 +59,20 @@ export interface KernelStudio extends Studio {
   forms(): string[]
   // The charcoal lines drawn so far, oldest first: the log's own `sketch` entries.
   sketches(): SketchStrike[]
+  // Detail mode: the window the sculptor is focused on, or null.
+  focus(): Focus | null
   // The numbers a look reports, without rendering anything.
   measure(overlay?: Overlay): Record<string, number>
   // A contact sheet outside the conversation (the judge's, the report's).
   render(views: ViewId[], overlay?: Overlay): Image
 }
 
+export interface Focus { view: AxisView, center: ViewPoint, span: number }
+
 const r1 = (v: number) => Math.round(v * 10) / 10
 const pt = (p: ViewPoint): RulerPoint => [p.h, p.v]
 
-function kernelShape(s: ShapeArgs): Shape {
+function declaredShape(s: ShapeArgs): DeclaredShape {
   return { kind: s.kind, center: [s.center_x, s.center_y, s.center_z], size: [s.size_x, s.size_y, s.size_z], rotation: [s.rot_x, s.rot_y, s.rot_z] }
 }
 
@@ -145,6 +152,13 @@ export function createStudio(opts: StudioOptions): KernelStudio {
   const outlines: Sides<Mask> | null = front && left ? { front, left, back: mirrored(front), right: mirrored(left) } : null
   const tiles: Sides<ImageLike> | undefined = ref ? (ref.ok && ref.aligned ? ref.aligned : ref.tiles) : undefined
   let referenceDeclared = grid.forms.has(REFERENCE_TARGET)
+  // The form the stone was last cut to, which the rasp then keeps off: a rasp that could wear
+  // a declared nose down would undo the pass that brought it out.
+  let focus: Focus | null = null
+  let guarded: string | undefined
+  for (const s of strikes) {
+    if (s.kind === 'cut' && s.protect !== undefined && s.protect !== REFERENCE_TARGET && s.margin !== undefined) guarded = s.protect
+  }
 
   const measure = (overlay: Overlay = 'grid'): Record<string, number> => measureAll(grid, {
     forms: declared,
@@ -186,6 +200,11 @@ export function createStudio(opts: StudioOptions): KernelStudio {
 
   const look = async (a: LookArgs): Promise<StudioResult> => {
     if (a.overlay === 'reference' && !outlines) throw new Error('there are no reference outlines in this commission; look with the grid overlay')
+    if (focus) {
+      const f = focus
+      const r = await closeup({ view: f.view, center: f.center, span_cm: f.span, overlay: a.overlay }, `You are focused on the ${f.view} view, ${r1(f.span)} cm round (${r1(f.center.h)}, ${r1(f.center.v)}), so this look is that window (unfocus to see the whole stone), with the ${a.overlay} overlay and a grid line every centimetre.`)
+      return { ...r, views: [f.view] }
+    }
     const image = render(a.views, a.overlay)
     const png = await opts.encodeImage(image)
     const note = a.overlay === 'form' && declared.length === 0
@@ -199,13 +218,13 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     }
   }
 
-  const closeup = async (a: CloseupArgs): Promise<StudioResult> => {
+  const closeup = async (a: CloseupArgs, lead?: string): Promise<StudioResult> => {
     if (a.overlay === 'reference' && !outlines) throw new Error('there are no reference outlines in this commission; use the grid overlay')
     const shot = renderCloseup(grid, a.view, [a.center.h, a.center.v], a.span_cm, lookOptions(a.overlay))
     const png = await opts.encodeImage(shot.image)
     const axis = shot.axis.toUpperCase()
     const numbers: Record<string, number> = { window_stone_pct: r1(100 * shot.stoneShare) }
-    let summary = `Close-up of the ${a.view} view, ${r1(a.span_cm)} cm across, centred on (${r1(a.center.h)}, ${r1(a.center.v)}), with the ${a.overlay} overlay and a grid line every centimetre.`
+    let summary = lead ?? `Close-up of the ${a.view} view, ${r1(a.span_cm)} cm across, centred on (${r1(a.center.h)}, ${r1(a.center.v)}), with the ${a.overlay} overlay and a grid line every centimetre.`
     if (shot.stoneShare === 0) {
       summary += ' There is no stone in that window.'
     } else {
@@ -213,6 +232,13 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       numbers[`surface_${shot.axis}_max_cm`] = r1(shot.surfaceMax)
       numbers.relief_cm = r1(shot.surfaceMax - shot.surfaceMin)
       summary += ` The surface in the window lies between ${axis} ${r1(shot.surfaceMin)} and ${axis} ${r1(shot.surfaceMax)}.`
+      // The relief along the centre lines, so a profile can be read without guessing from shading.
+      const step = r1(a.span_cm / PROFILE_SAMPLES)
+      const line = (p: number[]) => p.map(v => Number.isNaN(v) ? 'none' : String(v)).join(', ')
+      const def = VIEWS[a.view]
+      const hAxis = def.h === 0 ? 'X' : 'Z'
+      const vAxis = def.v === 1 ? 'Y' : 'Z'
+      summary += ` ${axis} of the surface every ${step} cm along the window's horizontal centre line (${hAxis} from ${r1(a.center.h - a.span_cm / 2)} up): ${line(shot.profileH)}; along its vertical centre line (${vAxis} from ${r1(a.center.v - a.span_cm / 2)} up): ${line(shot.profileV)}.`
     }
     if (shot.proudMax !== undefined && shot.belowMax !== undefined) {
       numbers.window_proud_max_cm = r1(shot.proudMax)
@@ -256,7 +282,8 @@ export function createStudio(opts: StudioOptions): KernelStudio {
   }
 
   const declare = (a: DeclareFormArgs): StudioResult => {
-    const form: Form = { shapes: a.shapes.map(kernelShape), blend: a.blend_cm }
+    const heads = a.shapes.filter(s => s.kind === 'head').length
+    const form: Form = { shapes: expandShapes(a.shapes.map(declaredShape)), blend: a.blend_cm }
     const extent = formExtent(grid, form)
     if (extent.empty) throw new Error(`no part of "${a.name}" lies inside the block (X ${-grid.size[0] / 2} to ${grid.size[0] / 2}, Y 0 to ${grid.size[1]}, Z ${-grid.size[2] / 2} to ${grid.size[2] / 2}); check the centres and sizes`)
     const strike: FormStrike = { kind: 'form', name: a.name, shapes: form.shapes, blend: form.blend }
@@ -265,7 +292,7 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     const again = declared.includes(a.name)
     if (!again) declared.push(a.name)
     const { min, max } = extent
-    let summary = `${again ? 'Replaced' : 'Declared'} form "${a.name}" (${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}, blend ${r1(a.blend_cm)} cm). Inside the block it spans X ${r1(min[0])} to ${r1(max[0])}, Y ${r1(min[1])} to ${r1(max[1])}, Z ${r1(min[2])} to ${r1(max[2])} and holds about ${Math.round(extent.cm3 / 100) / 10} litres (${(extent.cm3 * DENSITY / 1000).toFixed(0)} kg). Nothing was cut.`
+    let summary = `${again ? 'Replaced' : 'Declared'} form "${a.name}" (${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}${heads > 0 ? `, ${heads === 1 ? 'the head' : `${heads} heads`} expanded to ${form.shapes.length} solids in all` : ''}, blend ${r1(a.blend_cm)} cm). Inside the block it spans X ${r1(min[0])} to ${r1(max[0])}, Y ${r1(min[1])} to ${r1(max[1])}, Z ${r1(min[2])} to ${r1(max[2])} and holds about ${Math.round(extent.cm3 / 100) / 10} litres (${(extent.cm3 * DENSITY / 1000).toFixed(0)} kg). Nothing was cut.`
     if (extent.outsidePct > 2) summary += ` ${Math.round(extent.outsidePct)}% of the form lies outside the block, where there is no stone to make it from.`
     if (min[1] > 1.5) summary += ` It does not reach the base (it starts ${r1(min[1])} cm up): rough_out will refuse it until something in the form stands on the base.`
     if (declared.length > 1) summary += ` Looks and numbers measure the stone against all your forms together: ${declared.map(n => `"${n}"`).join(', ')}.`
@@ -274,6 +301,15 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       numbers: { form_volume_cm3: Math.round(extent.cm3), form_y_min_cm: r1(min[1]), form_y_max_cm: r1(max[1]), form_outside_block_pct: r1(extent.outsidePct) },
       strikes: [strike]
     }
+  }
+
+  // A pass protects one form. Cutting to a second form while the figure is another would take
+  // off everything of the figure the new one does not cover (a torso declared on its own took a
+  // head off in the study), so the figure can only be replaced under its own name, or retired.
+  const sameFigure = (tool: string, to: string): void => {
+    if (guarded === undefined || to === guarded || !declared.includes(guarded) || !grid.forms.has(guarded)) return
+    if (formExtent(grid, grid.forms.get(guarded)!.source).cm3 < 1000) return
+    throw new Error(`the stone was last cut to "${guarded}", and ${tool} to "${to}" would remove everything of "${guarded}" that "${to}" does not cover. To change the design, declare "${guarded}" again under the same name and cut to that; to work on one part, declare it inside "${guarded}" and use detail with a window`)
   }
 
   const rough = (a: RoughOutArgs): StudioResult => {
@@ -290,9 +326,64 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       pass = roughOut(grid, { to: REFERENCE_TARGET, margin_cm: a.margin_cm, tool: a.tool, ...limit })
     } else {
       if (!declared.includes(a.to)) throw new Error(`no form named "${a.to}" has been declared${declared.length ? `; your forms: ${declared.map(n => `"${n}"`).join(', ')}` : '; declare one with declare_form first'}`)
+      sameFigure('rough_out', a.to)
       pass = roughOut(grid, { to: a.to, margin_cm: a.margin_cm, tool: a.tool, ...limit })
+      if (!pass.error) guarded = a.to
     }
     return settle(pass, pass.stats ? { outside_margin_max_cm: r1(pass.stats.proudMaxCm), outside_margin_mean_cm: Math.round(pass.stats.proudMeanCm * 100) / 100, saw_cuts: pass.stats.saws, chisel_strikes: pass.stats.chiselStrikes } : {})
+  }
+
+  // The square window of a view, span_cm across round a ruler point, pushed through the block:
+  // what `detail` works inside, on the surfaces that face that view.
+  const detail = (a: DetailArgs): StudioResult => {
+    if (!declared.includes(a.to)) throw new Error(`no form named "${a.to}" has been declared${declared.length ? `; your forms: ${declared.map(n => `"${n}"`).join(', ')}` : '; declare one with declare_form first'}`)
+    sameFigure('detail', a.to)
+    const def = VIEWS[a.view]
+    const [w, h, d] = grid.size
+    const lo: Vec3 = [-w / 2, 0, -d / 2]
+    const hi: Vec3 = [w / 2, h, d / 2]
+    const half = a.span_cm / 2
+    lo[def.h!] = a.center.h - half
+    hi[def.h!] = a.center.h + half
+    lo[def.v!] = a.center.v - half
+    hi[def.v!] = a.center.v + half
+    const facing: Vec3 = [-def.look[0], -def.look[1], -def.look[2]]
+    const pass = roughOut(grid, { to: a.to, margin_cm: 0.1, tool: 'flat', window: { box: { x0: lo[0], y0: lo[1], z0: lo[2], x1: hi[0], y1: hi[1], z1: hi[2] }, facing } })
+    if (!pass.error) guarded = a.to
+    return settle(pass, pass.stats ? { window_proud_max_cm: r1(pass.stats.proudMaxCm), window_proud_mean_cm: Math.round(pass.stats.proudMeanCm * 100) / 100, chisel_strikes: pass.stats.chiselStrikes } : {})
+  }
+
+  const focusOn = async (a: FocusArgs): Promise<StudioResult> => {
+    focus = { view: a.view, center: { h: a.center.h, v: a.center.v }, span: a.span_cm }
+    const r = await closeup({ view: a.view, center: a.center, span_cm: a.span_cm, overlay: a.overlay }, `Focused on the ${a.view} view, a window ${r1(a.span_cm)} cm across centred on (${r1(a.center.h)}, ${r1(a.center.v)}), with the ${a.overlay} overlay and a grid line every centimetre. Until you unfocus, looks show this window and strokes stay inside it, from this view, no wider than ${r1(a.span_cm * FOCUS_STROKE_SHARE)} cm.`)
+    return { ...r, views: [a.view] }
+  }
+
+  const unfocus = async (a: UnfocusArgs): Promise<StudioResult> => {
+    if (!focus) throw new Error('you are not focused on anything; focus first, or look')
+    const was = focus
+    focus = null
+    const views: ViewId[] = [was.view, was.view === 'right' || was.view === 'back' ? 'front_right' : 'front_left']
+    const r = await look({ views, overlay: 'grid' })
+    return { ...r, summary: `Stepped back from the ${was.view} window round (${r1(was.center.h)}, ${r1(was.center.v)}) ("${a.found.trim()}"). ${r.summary}`, views }
+  }
+
+  // Detail mode holds a stroke to the window: this view, inside it, and small.
+  const inWindow = (tool: string, view: AxisView, points: RulerPoint[], width: number): void => {
+    if (!focus) return
+    const f = focus
+    const where = `the ${f.view} view, ${r1(f.span)} cm round (${r1(f.center.h)}, ${r1(f.center.v)})`
+    if (view !== f.view) throw new Error(`you are focused on ${where}: ${tool} from the ${view} view is not allowed in detail mode. Work from ${f.view}, or unfocus first`)
+    const slack = 0.1 * f.span
+    const half = f.span / 2 + slack
+    for (const [h, v] of points) {
+      if (Math.abs(h - f.center.h) > half || Math.abs(v - f.center.v) > half) throw new Error(`you are focused on ${where}: the point (${r1(h)}, ${r1(v)}) lies outside the window. Keep strokes inside it, or unfocus first`)
+    }
+    const widest = f.span * FOCUS_STROKE_SHARE
+    if (width > widest) throw new Error(`you are focused on ${where}: strokes there are at most ${r1(widest)} cm wide, not ${r1(width)}. Use a smaller tool, or unfocus first`)
+  }
+  const wholeStone = (tool: string): void => {
+    if (focus) throw new Error(`${tool} works on the whole stone and is not allowed in detail mode; unfocus first`)
   }
 
   const landed = (pass: PassResult): Record<string, number> => {
@@ -306,33 +397,44 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       case 'look': return look(call.args)
       case 'closeup': return closeup(call.args)
       case 'slice': return slice(call.args)
+      case 'focus': return focusOn(call.args)
+      case 'unfocus': return unfocus(call.args)
       case 'sketch': return draw(call.args)
       case 'declare_form': return declare(call.args)
-      case 'rough_out': return rough(call.args)
+      case 'rough_out':
+        wholeStone('rough_out')
+        return rough(call.args)
+      case 'detail': return detail(call.args)
       case 'saw': {
         const a: SawArgs = call.args
+        wholeStone('saw')
         return settle(saw(grid, { view: a.view, from: pt(a.from), to: pt(a.to), discard: a.discard }))
       }
       case 'chisel': {
         const a: ChiselArgs = call.args
         const keep = a.protect !== undefined && a.protect !== NO_PROTECT ? a.protect : undefined
         if (keep !== undefined && !declared.includes(keep)) throw new Error(`no form named "${keep}" has been declared${declared.length ? `; your forms: ${declared.map(n => `"${n}"`).join(', ')}` : ''}. Pass protect "${NO_PROTECT}" to cut without protecting a form`)
+        inWindow('chisel', a.view, a.path.map(pt), a.width_cm)
         const pass = chisel(grid, { tool: a.tool, view: a.view, path: a.path.map(pt), depth_cm: a.depth_cm, width_cm: a.width_cm, ...(keep !== undefined ? { protect: keep } : {}) })
         return settle(pass, landed(pass))
       }
       case 'drill': {
         const a: DrillArgs = call.args
+        inWindow('drill', a.view, [pt(a.at)], a.diameter_cm)
         const pass = drill(grid, { view: a.view, at: pt(a.at), diameter_cm: a.diameter_cm, depth_cm: a.depth_cm })
         return settle(pass, { ...landed(pass), ...(pass.bore ? { depth_reached_cm: r1(pass.bore.depthCm), broke_through: pass.bore.through ? 1 : 0 } : {}) })
       }
       case 'polish': {
         const a: PolishArgs = call.args
+        inWindow('polish', a.view, a.path.map(pt), a.width_cm)
         const pass = polish(grid, { view: a.view, path: a.path.map(pt), width_cm: a.width_cm, passes: a.passes })
         return settle(pass, { ...landed(pass), ...(pass.sheen ? { finish_before: pass.sheen.before, finish_after: pass.sheen.after } : {}), surface_polished_pct: r1(100 * surfaceFinish(grid).polished) })
       }
       case 'rasp': {
         const a: RaspArgs = call.args
-        const pass = rasp(grid, { view: a.view, path: a.path.map(pt), width_cm: a.width_cm, passes: a.passes })
+        inWindow('rasp', a.view, a.path.map(pt), a.width_cm)
+        // Ridges above the last form cut to come down; the form itself stays.
+        const pass = rasp(grid, { view: a.view, path: a.path.map(pt), width_cm: a.width_cm, passes: a.passes, ...(guarded !== undefined && grid.forms.has(guarded) ? { protect: guarded } : {}) })
         return settle(pass, landed(pass))
       }
       default:
@@ -351,6 +453,7 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     }),
     forms: () => declared.slice(),
     sketches: () => drawn.slice(),
+    focus: () => focus,
     measure,
     render
   }

@@ -3,6 +3,7 @@
 // runs in the browser (Brain = POST /api/brain, Studio = the kernel worker) and in the bench.
 
 import type { ModelMessage } from 'ai'
+import type { ViewId } from '../sculpt/views.ts'
 import type { Strike } from '../sculpt/types.ts'
 
 // Passed back to the next turn verbatim: some providers require their own reasoning blocks to
@@ -54,6 +55,9 @@ export interface StudioResult {
   // encoder makes those. The loop sends them to the model as a user message after the tool
   // result, never inside it.
   images?: Uint8Array[]
+  // A look-like result that shows other views than its arguments name (unfocus shows the
+  // whole stone again): the views the image holds, for the record and the camera.
+  views?: ViewId[]
   strikes: Strike[]
 }
 
@@ -78,15 +82,15 @@ export type Stage = typeof STAGES[number]
 
 // Tools whose calls go in the pass record. `declare_form` and `sketch` cut nothing but are in
 // the record, because after a rebuild it is the only trace of which forms and lines exist.
-export const PASS_TOOLS = ['sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish'] as const
+export const PASS_TOOLS = ['sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish'] as const
 export type PassTool = typeof PASS_TOOLS[number]
 
 // Tools that answer with an image. Only `look` shows the whole stone, so only `look` counts
 // as having looked.
-export const LOOK_TOOLS = ['look', 'closeup', 'slice'] as const
+export const LOOK_TOOLS = ['look', 'closeup', 'slice', 'focus', 'unfocus'] as const
 export type LookTool = typeof LOOK_TOOLS[number]
 
-export const TOOL_NAMES = ['look', 'closeup', 'slice', 'sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'] as const
+export const TOOL_NAMES = ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'] as const
 export type ToolName = typeof TOOL_NAMES[number]
 
 export interface Block {

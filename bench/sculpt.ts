@@ -5,7 +5,10 @@
 //     [--tools direct|formed] [--ref on|off] [--round A|B|C] [--max-turns 60] [--max-usd 8]
 //     [--name label] [--brain gateway|script] [--dry] [--study-cap 100] [--dir .data/study]
 //     [--json-lines] [--reasoning medium] [--turn-timeout 90] [--voxel 0.4] [--no-judge]
-//     [--looks png|webp] [--resume <run-id>]
+//     [--looks png|webp] [--resume <run-id>] [--planner opus|fable|fable52|sol|gemini]
+//
+// --planner: a second model takes the opening turns (plan, sketch, form, first rough-out) and
+// --model carves the rest. The run id carries both, e.g. ...-fable52-plans-opus-...
 //
 // --json-lines: no tool schemas are sent; the model writes its calls as JSON in plain text.
 // For a provider that mishandles the schemas.
@@ -31,6 +34,7 @@ import { createGrid, hashGrid, stoneMassKg } from '../shared/sculpt/grid.ts'
 import { KERNEL_VERSION } from '../shared/sculpt/version.ts'
 import type { ViewId } from '../shared/sculpt/views.ts'
 import { parseArgs } from './args.ts'
+import { plannedBrain } from '../shared/agent/planner.ts'
 import { gatewayBrain } from './brain.ts'
 import type { BrainMeter, Reasoning } from './brain.ts'
 import { dryJudge, judge } from './judge.ts'
@@ -43,7 +47,7 @@ import { DRY_TURN_USD, scriptedBrain } from './script.ts'
 import { SUBJECTS, SUBJECT_IDS } from './subjects.ts'
 import type { SubjectId } from './subjects.ts'
 
-export const SCULPTORS = ['opus', 'fable', 'sol', 'gemini'] as const
+export const SCULPTORS = ['opus', 'fable', 'fable52', 'sol', 'gemini'] as const
 export type SculptorKey = typeof SCULPTORS[number]
 
 // The judge's two sheets: every side with rulers, then the piece in the round with none.
@@ -62,6 +66,9 @@ export interface RunConfigFile {
   commission: string
   model: SculptorKey
   modelId: string
+  // A planner model for the opening turns, or null for one model throughout.
+  planner: SculptorKey | null
+  plannerId: string | null
   tools: ToolSetId
   ref: boolean
   maxTurns: number
@@ -199,6 +206,8 @@ async function main(): Promise<number> {
       commission: SUBJECTS[subject].commission,
       model,
       modelId: resolveModel(model),
+      planner: args.has('planner') ? args.oneOf('planner', SCULPTORS, 'opus') : null,
+      plannerId: args.has('planner') ? resolveModel(args.oneOf('planner', SCULPTORS, 'opus')) : null,
       tools: args.oneOf('tools', ['direct', 'formed'] as const, 'formed'),
       ref: args.oneOf('ref', ['on', 'off'] as const, 'off') === 'on',
       maxTurns: args.num('max-turns', 60),
@@ -216,7 +225,7 @@ async function main(): Promise<number> {
       name: args.str('name') ?? null
     }
     const label = config.name ? `-${slug(config.name)}` : ''
-    id = `${config.round}-${config.subject}-${config.model}-${config.tools}-${config.ref ? 'ref' : 'noref'}${label}-${stamp()}-${Math.random().toString(16).slice(2, 5)}`
+    id = `${config.round}-${config.subject}-${config.planner ? `${config.planner}-plans-` : ''}${config.model}-${config.tools}-${config.ref ? 'ref' : 'noref'}${label}-${stamp()}-${Math.random().toString(16).slice(2, 5)}`
   }
   const stray = args.unknown()
   if (stray.length) throw new Error(`unknown flag${stray.length === 1 ? '' : 's'}: ${stray.join(', ')}`)
@@ -360,7 +369,10 @@ async function main(): Promise<number> {
     ? gatewayBrain({ model: config.modelId, toolSet: config.tools, reference, mode: config.jsonLines ? 'jsonl' : 'native', reasoning: config.reasoning, log: say })
     : null
   meter = gateway?.meter ?? null
-  const brain = gateway ?? scriptedBrain({ subject: config.subject, toolSet: config.tools, reference, turnUsd: DRY_TURN_USD })
+  const planner = gateway && config.plannerId
+    ? gatewayBrain({ model: config.plannerId, toolSet: config.tools, reference, mode: config.jsonLines ? 'jsonl' : 'native', reasoning: config.reasoning, log: say })
+    : null
+  const brain = planner && gateway ? plannedBrain({ planner, executor: gateway }) : gateway ?? scriptedBrain({ subject: config.subject, toolSet: config.tools, reference, turnUsd: DRY_TURN_USD })
 
   // ---------- events ----------
   const eventsFile = join(dir, 'events.ndjson')

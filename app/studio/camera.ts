@@ -35,7 +35,17 @@ interface Pose {
   polar: number
   /** As a multiple of the distance that frames the whole block. */
   reach: number
+  /** A macro shot: the point to turn about instead of the block's middle, and the window it frames, cm. */
+  macro?: Macro
 }
+
+/** The part of the stone a close-up framed: its centre in block cm and the width of the window. */
+export interface Macro { target: [number, number, number], span: number }
+
+// A macro shot stands this many window widths from its target, and never closer than this
+// share of the distance that frames the whole block.
+const MACRO_REACH = 1.5
+const MACRO_MIN = 0.18
 
 /** The middle of the default block, which the opening view and every staged look turn about. */
 export const HOME_TARGET = new THREE.Vector3(0, 50, 0)
@@ -145,9 +155,9 @@ export class CameraRig {
     return Math.atan2(camera.position.x - controls.target.x, camera.position.z - controls.target.z)
   }
 
-  /** Visits the viewpoints in turn, `seconds` on the way to each, and stays on the last until release(). */
-  walk(views: string[], seconds: number, close = false) {
-    this.stops = views.map(v => poseOf(v, close))
+  /** Visits the viewpoints in turn, `seconds` on the way to each, and stays on the last until release(). A macro shot turns about the close-up's own centre. */
+  walk(views: string[], seconds: number, close = false, macro?: Macro) {
+    this.stops = views.map(v => macro ? { ...poseOf(v, close), macro } : poseOf(v, close))
     this.stopSeconds = Math.max(0.05, seconds)
     this.stopLeft = 0
     // Settled by the time the next stop is due.
@@ -199,10 +209,12 @@ export class CameraRig {
         this.walkPose = this.stops.length > 1 ? this.stops.shift()! : this.stops[0]!
         this.stopLeft = this.stopSeconds
       }
-      this.goalTarget.copy(HOME_TARGET)
+      const macro = this.walkPose.macro
+      if (macro) this.goalTarget.set(macro.target[0], macro.target[1], macro.target[2])
+      else this.goalTarget.copy(HOME_TARGET)
       azimuth = this.walkPose.azimuth
       polar = this.walkPose.polar
-      distance = this.walkPose.reach * this.studio.homeDistance
+      distance = macro ? Math.max(MACRO_MIN * this.studio.homeDistance, MACRO_REACH * macro.span) : this.walkPose.reach * this.studio.homeDistance
       ease = this.walkEase
       this.jump = false
     } else if (this.wanted) {

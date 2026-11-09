@@ -58,6 +58,8 @@ export interface TimelineLook {
   views: string[]
   /** A close-up brings the camera in; anything else steps it back. */
   close?: boolean
+  /** A close-up's window: the camera turns about its centre and frames it (a macro shot). */
+  macro?: { target: [number, number, number], span: number }
   /** Stretches the look: 2 takes twice as long over it. */
   linger?: number
 }
@@ -765,7 +767,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     // The same share of a shortened look goes on walking as of a full one.
     const stops = Math.max(1, Math.min(look.views.length, LOOK_VIEWS))
     const perStop = seconds * LOOK_WALK_S / (LOOK_WALK_S * stops + LOOK_HOLD_S)
-    this.camera?.walk(look.views.slice(0, LOOK_VIEWS), perStop, look.close === true)
+    this.camera?.walk(look.views.slice(0, LOOK_VIEWS), perStop, look.close === true, look.macro)
     this.staged = { look, left: seconds }
     this.emit()
   }

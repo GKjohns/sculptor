@@ -42,6 +42,7 @@ app/
   workers/kernel.worker.ts        the kernel in a worker: the true stone with the Studio running against it, the shown stone remeshed chunk by chunk, look PNGs and the reference sheet decoded here, snapshots of a stone kept for scrubbing
 shared/
   sculpt/                         the kernel: grid, strikes, mesher (which also bakes the per-vertex thickness the marble reads), islands, hand, observer. No three.js, no DOM
+  sculpt/anatomy.ts               the sculptor's canon: a declared `head` expanded into kernel primitives before anything is logged
   sculpt/display.ts               DisplayStone: lets loose stone fall on screen ahead of the log's island check without touching the log's stone
   sculpt/protocol.ts              the messages between page and worker; every one names a stone ('true' | 'shown')
   agent/                          the look, think, carve loop and its Brain and Studio seams
@@ -60,7 +61,7 @@ All five sprints of the plan are built. Nothing is deployed: the gallery and dep
 
 Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 
-- `npm run dev`: port 3130. `/replay/<id>` is the replay page for a saved commission (`.data/sessions/`) or a study run (`.data/study/`): scrubber, film export, the title plaque; `?speed=` and `?at=end` work there as on `/?replay=`. `?stone=nero` puts the black marble on the banker (a commission records its stone, and its replays use it). `?gl=1` forces the WebGL 2 backend, `?hands=1` turns on hand-carving, `?demo=1` carves a fixed demo (sawn corner, rough, flat-chiselled and rasped patches) before the scene reports ready. `?replay=<run-id>` plays a finished study run (`?replay` alone lists them), with `?speed=1|8|30|120|max` and `?at=end` to go straight to the finished piece before the scene reports ready. `?session=<id>` puts a saved commission (`.data/sessions/`) back on the stone and carries on if it was unfinished; with `&pass=<n>` it shows the stone as it stood after pass n and resumes nothing. A commission's defaults are in `app/app.config.ts`; `?model=`, `?ref=0|1`, `?turns=`, `?usd=` and `?speed=1|4|8|20|60` override them for one page load.
+- `npm run dev`: port 3130. `/replay/<id>` is the replay page for a saved commission (`.data/sessions/`) or a study run (`.data/study/`): scrubber, film export, the title plaque; `?speed=` and `?at=end` work there as on `/?replay=`. `?stone=nero` puts the black marble on the banker (a commission records its stone, and its replays use it). `?gl=1` forces the WebGL 2 backend, `?hands=1` turns on hand-carving, `?demo=1` carves a fixed demo (sawn corner, rough, flat-chiselled and rasped patches) before the scene reports ready. `?replay=<run-id>` plays a finished study run (`?replay` alone lists them), with `?speed=1|8|30|120|max` and `?at=end` to go straight to the finished piece before the scene reports ready. `?session=<id>` puts a saved commission (`.data/sessions/`) back on the stone and carries on if it was unfinished; with `&pass=<n>` it shows the stone as it stood after pass n and resumes nothing. A commission's defaults are in `app/app.config.ts`; `?model=`, `?planner=` (a second model for the opening turns), `?ref=0|1`, `?turns=`, `?usd=` and `?speed=1|4|8|20|60` override them for one page load.
 - Film flags, all for one page load:
   - `?film=0`: no debris, tools, sound or director at all (the stone alone in the room), to measure what they cost.
   - `?cam=free`: the director leaves the camera alone; it stays where you, or a look preset, put it.
@@ -87,7 +88,7 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
   - `--downloads dir`: saves whatever the page hands the browser to save, e.g. `--eval "__sculptor.film({ seconds: 60 })" --downloads .shots/films`.
   - `--api`: lists every `/api/` request the page made (a replay should make no model calls).
 - Shots land in `.shots/` (gitignored). Keepers are copied by hand into a plan's `verification/screenshots/`.
-- `npm run bench:sculpt -- --subject pawn|cat|bust [--model opus|fable|sol|gemini] [--tools direct|formed] [--ref on|off] [--round A|B|C]`: one headless commission into `.data/study/<run-id>/`. `--dry` runs a scripted Brain with no key into `.data/study-dry/`. Flags are listed at the top of `bench/sculpt.ts`.
+- `npm run bench:sculpt -- --subject pawn|cat|bust [--model opus|fable|fable52|sol|gemini] [--tools direct|formed] [--ref on|off] [--round A|B|C] [--planner <model>]`: one headless commission into `.data/study/<run-id>/`. `--dry` runs a scripted Brain with no key into `.data/study-dry/`. Flags are listed at the top of `bench/sculpt.ts`.
 - `npm run bench:study -- --round A` (then `--round B --tools X`, `--round C --tools X --ref on|off`): a whole round, three runs at a time. Spend is capped per run (`--max-usd`, default 8) and across the study (`--study-cap`, default 100, summed from `.data/study/ledger/`).
 - `npm run bench:report`: writes `internal_docs/20261108_ai_sculptor/study/report.html` from whatever has been run.
 
@@ -122,6 +123,14 @@ Node 22 (`source ~/.nvm/nvm.sh && nvm use 22`), npm.
 - No semicolons, 2 spaces, no trailing commas, `1tbs` braces (ESLint stylistic, enforced by `npm run lint`).
 - Nuxt UI 4 primitives for every panel and control. Dark only. The canvas and the film-style HUD layout are the only custom layout.
 - Model calls go through the Vercel AI Gateway only (`AI_GATEWAY_API_KEY`), per `~/claude-ops/conventions/ai_sdk_usage.md`.
+
+**Carving tools (skill pass).**
+- `declare_form` accepts `kind: head`: `shared/sculpt/anatomy.ts` expands it to about two dozen kernel primitives (cranium, brow, sockets, nose, lips, chin, jaw, ears) before the form is logged, so logs hold only kernel kinds and replay on kernel 2. Tune the face there, offline, with no model spend; `tests/anatomy.test.ts` pins the landmarks.
+- `detail` is a windowed `roughOut` (`window` option in `hand.ts`): flat chisel, margin 0.1, no saw, only surfaces facing the view. It is how a face is finished; the form is what you get.
+- Detail mode: `focus` / `unfocus` live in the Studio (`shared/agent/studio.ts`), not the loop. While focused, `look` shows the window, strokes must be from that view, inside it and under a fifth of its width, and `rough_out` and `saw` are refused. Close-ups report the surface's relief along their centre lines. Focus is in-memory only: a reload or a context rebuild leaves the sculptor unfocused.
+- The rasp protects the form last cut to by `rough_out` or `detail` (`RaspPass.protect`), so smoothing cannot take a declared feature down.
+- `shared/agent/planner.ts` splits a commission between a planner (the first three turns: plan, form, first rough-out) and an executor; `--planner` in the bench, `?planner=` or `sculptor.planner` in `app.config.ts` in the app. The planner's reasoning parts are dropped before the executor sees the history.
+- The camera takes a macro shot for `closeup` and `focus` looks (`Macro` in `camera.ts`, carried on `TimelineLook.macro`).
 
 **Process.**
 - Commit locally per sprint. Do not push or create a remote until Kyle says so.

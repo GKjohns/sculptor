@@ -324,3 +324,65 @@ for (const arm of [{ toolSet: 'formed', withReference: true }, { toolSet: 'forme
     assert.equal(hashGrid(replayLog(JSON.parse(JSON.stringify(studio.log())), g => createGrid(g))), hashGrid(studio.grid))
   })
 }
+
+test('detail mode: focus shows a window with its relief, holds strokes to it, and unfocus steps back', async () => {
+  const studio = fresh()
+  await studio.run(call('declare_form', FIGURE))
+  await studio.run(call('rough_out', { to: 'figure', margin_cm: 2, tool: 'point', why: 'x' }))
+  assert.equal(studio.focus(), null)
+  const f = await studio.run(call('focus', { view: 'front', center: { h: 0, v: 60 }, span_cm: 16, overlay: 'grid', why: 'Going in on the face.' }))
+  assert.equal(f.images?.length, 1)
+  assert.deepEqual(f.views, ['front'])
+  assert.match(f.summary, /Focused on the front view, a window 16 cm across/)
+  assert.match(f.summary, /along the window's horizontal centre line \(X from -8 up\)/)
+  assert.ok(f.numbers!.relief_cm !== undefined)
+  assert.deepEqual(studio.focus(), { view: 'front', center: { h: 0, v: 60 }, span: 16 })
+  // A look while focused is the window.
+  const l = await studio.run(call('look', { views: ['front', 'left'], overlay: 'grid' }))
+  assert.match(l.summary, /You are focused on the front view/)
+  assert.deepEqual(l.views, ['front'])
+  // Strokes stay in the window, from its view, and small; whole-stone passes wait.
+  await assert.rejects(studio.run(call('chisel', { tool: 'roundel', view: 'left', path: [{ h: 0, v: 60 }, { h: 2, v: 60 }], depth_cm: 0.5, width_cm: 1, protect: 'none', why: 'x' })), /from the left view is not allowed in detail mode/)
+  await assert.rejects(studio.run(call('chisel', { tool: 'roundel', view: 'front', path: [{ h: 0, v: 60 }, { h: 14, v: 60 }], depth_cm: 0.5, width_cm: 1, protect: 'none', why: 'x' })), /lies outside the window/)
+  await assert.rejects(studio.run(call('chisel', { tool: 'flat', view: 'front', path: [{ h: 0, v: 60 }, { h: 2, v: 60 }], depth_cm: 0.5, width_cm: 5, protect: 'none', why: 'x' })), /at most 3.2 cm wide/)
+  await assert.rejects(studio.run(call('rough_out', { to: 'figure', margin_cm: 1, tool: 'claw', why: 'x' })), /not allowed in detail mode/)
+  const logged = studio.strikes.length
+  const ok = await studio.run(call('chisel', { tool: 'roundel', view: 'front', path: [{ h: -2, v: 60 }, { h: 2, v: 60 }], depth_cm: 0.5, width_cm: 1, protect: 'none', why: 'x' }))
+  assert.ok(ok.strikes.length > 0 && studio.strikes.length > logged)
+  const u = await studio.run(call('unfocus', { found: 'The mouth line is in.' }))
+  assert.deepEqual(u.views, ['front', 'front_left'])
+  assert.match(u.summary, /Stepped back from the front window round \(0, 60\) \("The mouth line is in."\)/)
+  assert.equal(studio.focus(), null)
+  await assert.rejects(studio.run(call('unfocus', { found: 'x' })), /not focused/)
+  const whole = await studio.run(call('look', { views: ['front'], overlay: 'grid' }))
+  assert.doesNotMatch(whole.summary, /focused/)
+})
+
+test('a head in a declared form becomes the canon solids, detail brings a window onto the form, and the log replays', async () => {
+  const studio = fresh()
+  const r = await studio.run(call('declare_form', { name: 'bust', shapes: [shape('box', [0, 3, 0], [50, 6, 40]), shape('capsule', [0, 35, 0], [16, 72, 16]), { ...shape('head', [0, 77, 0], [27, 40, 34]), rot_y: 15 }], blend_cm: 1.3, why: 'x' }))
+  assert.match(r.summary, /3 shapes, the head expanded to \d+ solids in all/)
+  const form = r.strikes[0]!
+  assert.ok(form.kind === 'form' && form.shapes.length > 20 && form.shapes.every(s => ['ellipsoid', 'box', 'capsule', 'cone'].includes(s.kind)))
+  await studio.run(call('rough_out', { to: 'bust', margin_cm: 1, tool: 'claw', why: 'x' }))
+  const d = await studio.run(call('detail', { to: 'bust', view: 'front', center: { h: 0, v: 77 }, span_cm: 44, why: 'Bringing the face down.' }))
+  assert.match(d.summary, /Brought the stone in the window down to 'bust' with the flat chisel, leaving 0.1 cm/)
+  assert.ok(d.numbers!.window_proud_mean_cm! < 1, `${d.numbers!.window_proud_mean_cm} cm proud`)
+  await assert.rejects(studio.run(call('detail', { to: 'nope', view: 'front', center: { h: 0, v: 77 }, span_cm: 20, why: 'x' })), /no form named "nope"/)
+  assert.equal(hashGrid(replayLog(JSON.parse(JSON.stringify(studio.log())), g => createGrid(g))), hashGrid(studio.grid))
+})
+
+test('cutting to a second form while the figure is another is refused; replacing the figure under its name is not', async () => {
+  const studio = fresh()
+  await studio.run(call('declare_form', FIGURE))
+  await studio.run(call('rough_out', { to: 'figure', margin_cm: 3, tool: 'point', why: 'x' }))
+  await studio.run(call('declare_form', { ...FIGURE, name: 'torso', shapes: [shape('box', [0, 20, 0], [40, 40, 40])] }))
+  const hash = hashGrid(studio.grid)
+  await assert.rejects(studio.run(call('rough_out', { to: 'torso', margin_cm: 1, tool: 'claw', why: 'x' })), /would remove everything of "figure" that "torso" does not cover/)
+  await assert.rejects(studio.run(call('detail', { to: 'torso', view: 'front', center: { h: 0, v: 20 }, span_cm: 30, why: 'x' })), /would remove everything of "figure"/)
+  assert.equal(hashGrid(studio.grid), hash)
+  // The same name replaces the design and may be cut to.
+  await studio.run(call('declare_form', { ...FIGURE, shapes: [shape('box', [0, 5, 0], [40, 10, 40]), shape('ellipsoid', [0, 45, 0], [30, 80, 30])] }))
+  const r = await studio.run(call('rough_out', { to: 'figure', margin_cm: 2, tool: 'claw', why: 'x' }))
+  assert.ok(r.strikes.length > 10)
+})

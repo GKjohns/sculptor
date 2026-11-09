@@ -928,3 +928,64 @@ test('loose stone never hangs for more than a few strikes: passes check for isla
   assert.ok(kinds.filter(k => k === 'detach').length > 10 && endsWithDetach(stroke))
   assert.ok(longestFloat(createGrid({ voxel: 0.8 }), stroke.strikes).strikes <= K)
 })
+
+test('a windowed pass takes only the window down onto the form, with the flat, and never saws', () => {
+  const grid = createGrid()
+  applyStrike(grid, { kind: 'form', name: 'egg', ...EGG })
+  assert.equal(roughOut(grid, { to: 'egg', margin_cm: 3, tool: 'point' }).error, undefined)
+  const egg = grid.forms.get('egg')!
+  // The front of the egg's upper half, worked from the front.
+  const box = { x0: -22, y0: 40, z0: -30, x1: 22, y1: 82, z1: 30 }
+  const result = roughOut(grid, { to: 'egg', margin_cm: 0.1, tool: 'flat', window: { box, facing: [0, 0, 1] } })
+  assert.equal(result.error, undefined)
+  assert.ok(result.strikes.every(s => s.kind !== 'saw'), 'no saw in a windowed pass')
+  assert.ok(result.strikes.filter(s => s.kind === 'cut').every(s => s.tool === 'flat' && s.protect === 'egg'))
+  assert.match(result.summary, /Brought the stone in the window down to 'egg' with the flat chisel/)
+  // Inside the window, the surface facing the viewer sits on the form; behind, the roughing margin still stands.
+  const { nx, ny, nz, voxel, x0, y0, z0, qPerCm } = grid
+  let frontSum = 0
+  let frontN = 0
+  let backSum = 0
+  let backN = 0
+  for (let z = 1; z < nz - 1; z++) {
+    for (let y = 1; y < ny - 1; y++) {
+      for (let x = 1; x < nx - 1; x++) {
+        const i = x + nx * (y + ny * z)
+        const d = grid.dist[i]!
+        if (d >= 0 || d < -12) continue
+        const wy = y0 + y * voxel
+        const wz = z0 + z * voxel
+        const wx = x0 + x * voxel
+        if (wy < 50 || wy > 75 || Math.abs(wx) > 10) continue
+        const h = formDistance(egg, wx, wy, wz) - d / qPerCm
+        if (wz > 5) {
+          frontSum += h
+          frontN++
+        } else if (wz < -5) {
+          backSum += h
+          backN++
+        }
+      }
+    }
+  }
+  assert.ok(frontN > 0 && backN > 0)
+  assert.ok(frontSum / frontN < 0.35, `front stands ${frontSum / frontN} cm proud`)
+  assert.ok(backSum / backN > 2, `back stands ${backSum / backN} cm proud`)
+  // The flat alone is refused without a window.
+  assert.match(roughOut(grid, { to: 'egg', margin_cm: 0.1, tool: 'flat' }).error ?? '', /point or the claw/)
+})
+
+test('a protected rasp wears ridges down to the form and not into it', () => {
+  const grid = createGrid()
+  applyStrike(grid, { kind: 'form', name: 'egg', ...EGG })
+  assert.equal(roughOut(grid, { to: 'egg', margin_cm: 0.3, tool: 'claw' }).error, undefined)
+  const egg = grid.forms.get('egg')!
+  const before = cloneGrid(grid)
+  const path: [number, number][] = [[-8, 70], [8, 70], [8, 60], [-8, 60], [-8, 50], [8, 50]]
+  const result = rasp(grid, { view: 'front', path, width_cm: 6, passes: 6, protect: 'egg' })
+  assert.equal(result.error, undefined)
+  assert.ok(result.removedCm3 > 0)
+  assert.ok(result.strikes.filter(s => s.kind === 'cut').every(s => s.protect === 'egg'))
+  assert.equal(cutInside(before, grid, (x, y, z) => formDistance(egg, x, y, z) < 0), 0)
+  assert.match(rasp(grid, { view: 'front', path, width_cm: 6, passes: 1, protect: 'nothing' }).error ?? '', /No form named 'nothing'/)
+})

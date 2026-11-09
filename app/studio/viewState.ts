@@ -17,7 +17,7 @@ import type { UIMessage } from 'ai'
 import { MODEL_LABELS } from '../../shared/agent/pricing.ts'
 import { describeCall } from '../../shared/agent/toolSchemas.ts'
 import { STAGES, TOOL_NAMES } from '../../shared/agent/types.ts'
-import type { Block, BudgetLevel, LoopEvent, PassRecord, RunEnd, Stage, ToolName } from '../../shared/agent/types.ts'
+import type { Block, BudgetLevel, LookTool, LoopEvent, PassRecord, RunEnd, Stage, ToolName } from '../../shared/agent/types.ts'
 
 // ---------- the view ----------
 
@@ -93,7 +93,7 @@ export interface PinnedSketch {
 
 // What a look sent the model, kept on its notebook row and shown large in the eye panel.
 export interface LookView {
-  tool: 'look' | 'closeup' | 'slice'
+  tool: LookTool
   // True for the loop's own look before a rebuild, which the model did not ask for.
   auto: boolean
   turn: number
@@ -243,9 +243,12 @@ const TOOL_LABELS: Record<ToolName, string> = {
   look: 'Looking',
   closeup: 'Looking closely',
   slice: 'Cross-section',
+  focus: 'Going in close',
+  unfocus: 'Stepping back',
   sketch: 'Sketch',
   declare_form: 'Declaring the form',
   rough_out: 'Roughing out',
+  detail: 'Flat chisel · detailing',
   saw: 'Saw',
   chisel: 'Chisel',
   drill: 'Drill',
@@ -272,7 +275,7 @@ export function toolLabel(tool: string, args?: Record<string, unknown>): string 
 export function subtitleLabel(tool: string, args: Record<string, unknown> | undefined, stage: Stage | null): string {
   const name = toolLabel(tool, args)
   // rough_out already says what it is doing, and the looking tools belong to no stage
-  if (!stage || tool === 'rough_out' || tool === 'look' || tool === 'closeup' || tool === 'slice' || tool === 'sketch') return name
+  if (!stage || tool === 'rough_out' || tool === 'detail' || tool === 'look' || tool === 'closeup' || tool === 'slice' || tool === 'focus' || tool === 'unfocus' || tool === 'sketch') return name
   return `${name} · ${STAGE_LABELS[stage].toLowerCase()}`
 }
 
@@ -487,6 +490,8 @@ function lookSentence(look: LookView): string {
   const from = views.length > 1 ? `${views.slice(0, -1).join(', ')} and ${views.at(-1)}` : views[0] ?? 'the front'
   if (look.tool === 'slice') return `Cutting the stone open on paper to see the section, drawn as the ${from} view.`
   if (look.tool === 'closeup') return `Leaning in for a close look from the ${from}.`
+  if (look.tool === 'focus') return `Going in close on one part, from the ${from}, to work it in detail.`
+  if (look.tool === 'unfocus') return `Stepping back from the detail to see the whole from the ${from}.`
   return `Stepping back to look from the ${from}.`
 }
 

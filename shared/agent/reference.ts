@@ -117,6 +117,7 @@ The block is ${B.width} cm wide, ${B.depth} cm deep and ${B.height} cm tall, and
 - No holes through the piece.
 - Bold, simplified forms that read from their outline. Detail smaller than about 2 cm will not survive, so make the part that matters most as large as the block allows: in a portrait, a head at least a third of the height.
 - It must fit the block's proportions. A piece that stands tall and fills the block uses the stone best.
+- Design it as a sculpture, the way a sculptor would model the study, not as a figurine or a mannequin: simplified planes, a considered pose with a slight turn or tilt rather than a stiff frontal stance, masses that set off one another (a hair mass or drapery against a smooth face, a strong neck into broad shoulders). For a portrait bust: head at least two fifths of the height, deep-set eyes under a clear brow, a nose with a bridge, a closed mouth, a defined jaw and chin, hair or headwear as one mass, a neck that carries the head into shoulders cut off in the classical way, on a low socle.
 
 Write three to six plain sentences covering:
 - what the piece is, its pose, and which side is its front

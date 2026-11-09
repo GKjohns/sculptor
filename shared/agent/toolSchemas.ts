@@ -4,6 +4,7 @@
 
 import { z } from 'zod'
 import type { ToolSet } from 'ai'
+import { HEAD_SHAPE_COUNT } from '../sculpt/anatomy.ts'
 import { AXIS_VIEWS, VIEW_IDS } from '../sculpt/views.ts'
 import { STAGES } from './types.ts'
 import type { LookTool, PassTool, ReferenceMode, ToolCall, ToolName, ToolSetId } from './types.ts'
@@ -19,7 +20,12 @@ export const REFERENCE_TARGET = 'reference'
 export const NO_PROTECT = 'none'
 
 const DIRECT: ToolName[] = ['look', 'saw', 'chisel', 'note', 'finish']
-const FORMED: ToolName[] = ['look', 'closeup', 'slice', 'sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish']
+const FORMED: ToolName[] = ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish']
+
+// Detail mode: the window of a focus is at most this wide, and strokes in it at most this
+// share of its width.
+export const FOCUS_SPAN = { min: 6, max: 30 } as const
+export const FOCUS_STROKE_SHARE = 0.2
 
 export function toolNames(toolSet: ToolSetId): ToolName[] {
   return toolSet === 'direct' ? DIRECT : FORMED
@@ -37,8 +43,14 @@ const why = z.string().min(1).describe(WHY)
 const carveView = z.enum(AXIS_VIEWS).describe('The axis view the points are read from')
 const path = z.array(point).min(2).max(16).describe('Points along the stroke, in order')
 
+// The solids a form is declared in: the kernel's four primitives and the canon `head`
+// (shared/sculpt/anatomy.ts), which becomes kernel primitives before anything is logged.
+export const SHAPE_KINDS = ['ellipsoid', 'box', 'capsule', 'cone', 'head'] as const
+// Shapes a form may hold. A head counts as one.
+export const MAX_SHAPES = 24
+
 const shape = z.object({
-  kind: z.enum(['ellipsoid', 'box', 'capsule', 'cone']),
+  kind: z.enum(SHAPE_KINDS),
   center_x: z.number(),
   center_y: z.number(),
   center_z: z.number(),
@@ -77,6 +89,16 @@ const SCHEMAS = {
     axis: z.enum(['x', 'y', 'z']).describe('The block axis the cutting plane is square to'),
     at_cm: z.number().describe('Where the plane sits on that axis, block cm')
   }),
+  focus: z.object({
+    view: carveView,
+    center: point,
+    span_cm: z.number().min(FOCUS_SPAN.min).max(FOCUS_SPAN.max).describe('Width and height of the square window, cm'),
+    overlay: z.enum(OVERLAYS),
+    why
+  }),
+  unfocus: z.object({
+    found: z.string().min(1).describe('One sentence on what the window shows now that you are done with it')
+  }),
   sketch: z.object({
     view: carveView,
     path: z.array(point).min(2).max(32).describe('Points along the line, in order'),
@@ -84,7 +106,7 @@ const SCHEMAS = {
   }),
   declare_form: z.object({
     name: z.string().min(1).max(40).refine(n => n !== REFERENCE_TARGET && n !== NO_PROTECT, { message: `"${REFERENCE_TARGET}" and "${NO_PROTECT}" are reserved; choose another name` }),
-    shapes: z.array(shape).min(1).max(12),
+    shapes: z.array(shape).min(1).max(MAX_SHAPES),
     blend_cm: z.number().min(0).max(10).describe('Radius of the smooth blend where shapes meet; 0 for hard joins'),
     why
   }),
@@ -92,6 +114,13 @@ const SCHEMAS = {
     to: z.string().min(1),
     margin_cm: z.number().min(0).max(10).describe('Stone left standing outside the target'),
     tool: z.enum(['point', 'claw']),
+    why
+  }),
+  detail: z.object({
+    to: z.string().min(1).describe('The name of a form you have declared'),
+    view: carveView,
+    center: point,
+    span_cm: z.number().min(8).max(60).describe('Width and height of the square window, cm'),
     why
   }),
   saw: z.object({
@@ -149,9 +178,12 @@ const SCHEMAS = {
 export type LookArgs = z.infer<typeof SCHEMAS.look>
 export type CloseupArgs = z.infer<typeof SCHEMAS.closeup>
 export type SliceArgs = z.infer<typeof SCHEMAS.slice>
+export type FocusArgs = z.infer<typeof SCHEMAS.focus>
+export type UnfocusArgs = z.infer<typeof SCHEMAS.unfocus>
 export type SketchArgs = z.infer<typeof SCHEMAS.sketch>
 export type DeclareFormArgs = z.infer<typeof SCHEMAS.declare_form>
 export type RoughOutArgs = z.infer<typeof SCHEMAS.rough_out>
+export type DetailArgs = z.infer<typeof SCHEMAS.detail>
 export type SawArgs = z.infer<typeof SCHEMAS.saw>
 // `protect` is absent in the stroke-only tool set, which has no forms to name.
 export type ChiselArgs = Omit<z.infer<typeof SCHEMAS.chisel>, 'protect'> & { protect?: string }
@@ -167,9 +199,12 @@ export interface ToolArgs {
   look: LookArgs
   closeup: CloseupArgs
   slice: SliceArgs
+  focus: FocusArgs
+  unfocus: UnfocusArgs
   sketch: SketchArgs
   declare_form: DeclareFormArgs
   rough_out: RoughOutArgs
+  detail: DetailArgs
   saw: SawArgs
   chisel: ChiselArgs
   drill: DrillArgs
@@ -218,6 +253,14 @@ function describe(name: ToolName, o: ToolOptions): string {
         'The section of your forms in the same plane is outlined in cyan, with stone outside it tinted yellow to red and form that has no stone in violet.' + (outlines ? ' The pink line is the reference: its front and left outlines pushed through the block.' : ''),
         'Numbers: the section\'s area and its extent on each ruler (section_*).'
       ].join(' ')
+    case 'focus':
+      return [
+        `Go in close on one part of the stone and stay there: detail mode. The window (span_cm across, ${FOCUS_SPAN.min} to ${FOCUS_SPAN.max} cm, centred on center in the view you name) is shown enlarged at once, as a closeup is, and from then on every look shows that window, with the stone's relief along its centre lines in numbers, until you unfocus. In the window only small work is allowed: chisel, drill, rasp and polish must be from this view, inside the window, and no wider than a fifth of it; rough_out and saw are refused. detail still works. Focus on one feature at a time: an eye, the mouth, an ear, a paw.`,
+        `The stone is a grid of ${'0.4'} cm cells: nothing under about 1 cm across can be cut or seen, and a line a cell wide reads as noise. Make a feature at least 2 cm across or leave it to the form.`,
+        POINTS
+      ].join(' ')
+    case 'unfocus':
+      return 'Leave detail mode and step back: the whole stone is shown again from the view you were focused on and a three-quarter view. Say in found what the window shows now, for the record.'
     case 'sketch':
       return [
         'Draw a line on the stone in charcoal, the way a sculptor marks a block before cutting: a profile on a face of the block, a centre line, where a feature will sit. path is the line, laid on the first surface it meets from that view.',
@@ -228,6 +271,7 @@ function describe(name: ToolName, o: ToolOptions): string {
       return [
         'Declare the masses the stone should end up as, as a few simple solids in block coordinates (cm). Nothing is cut. Declaring a name again replaces that form.',
         'Every shape has a centre, a full size along its own three axes, and a rotation in degrees (Euler order XYZ; 0 0 0 is upright, and most shapes need at most one turn). An ellipsoid or box fills its size. A capsule or cone stands along its own Y: size_y is its full length, size_x and size_z its thickness, and a cone has its base at the -Y end and its point at the +Y end.',
+        `kind head is a whole human head with its face already on it, the sculptor's canon (it becomes ${HEAD_SHAPE_COUNT} solids: cranium, forehead, brow ridges, cheekbones, eyes set in their sockets, a nose with bridge, tip and wings, lips, chin, jaw, ears). Its centre is the middle of the skull and its size is the skull alone: size_x temple to temple, size_y chin to crown, size_z brow to the back of the skull (about 0.68 and 0.85 of the height for ordinary proportions; the nose and ears stand outside it). rot_x tilts it (positive nods the face down), rot_y turns it (positive turns the face toward +X, the viewer's right), rot_z cocks it. The head looks along +Z with no rotation. A blend of 3 to 4 percent of its height suits it (1.3 cm for a 40 cm head); more softens the face away. Hair, a beard, a heavier brow or a larger nose are shapes of your own laid over it; its face needs no chisel work.`,
         'Overlap shapes that belong to one mass; blend_cm rounds the joins between them.',
         'Put the whole figure, base included, in one form: rough_out protects only the form it is given. The result says where the form sits in the block and warns if it does not reach the base.',
         'Whatever stands proud of a surface (a nose, ears, a brow, a chin, a muzzle, paws) belongs in the form as a small shape of its own, with a blend of 1 cm or less so it is not smoothed away. Declared, it is left standing by rough_out and can be protected from every stroke; left to be found later by chiselling, it is usually destroyed.'
@@ -236,7 +280,13 @@ function describe(name: ToolName, o: ToolOptions): string {
       return [
         'Remove the stone that lies outside a target, leaving margin_cm of stone standing all round it. The hand saws off any big slabs first, then works down with the chisel you choose: point is fast and coarse, claw is slower and leaves an even surface.',
         `to: the name of a form you have declared${outlines ? `, or "${REFERENCE_TARGET}" for the volume inside both the front and the left outline of the reference sheet` : ''}. Only that target is protected: stone inside any other form you declared is cut away like the rest. The target must be one connected mass standing on the base (Y 0); one that floats, or has a part not joined to the rest, is refused and nothing is cut.`,
-        'Start with a generous margin (3 to 4 cm) and come back with a smaller one after looking; stone cannot be put back. Once the form carries the features, a last pass with the claw at 0.5 cm or less is the safe way to bring them out of the stone.'
+        'Start with a generous margin (3 to 4 cm) and come back with a smaller one after looking; stone cannot be put back. Once the form carries the features, a last pass with the claw at 0.5 cm or less brings them out of the stone, and `detail` then takes the window round them down to the form itself.'
+      ].join(' ')
+    case 'detail':
+      return [
+        'Bring one part of the stone down onto your form with the flat chisel: inside a square window span_cm across centred on center in the view you name, every surface that faces that view is cut back to the form (a tenth of a centimetre over it), small bites laid side by side, so what you declared is what stands there, with the features the form carries and nothing of the claw\'s roughness. Stone turned away from the view, and everything outside the window, is left alone: work a head from the front, then each side, then the back and the top.',
+        'to: the name of a form you have declared; it is the only thing protected, so anything else inside the window goes. Use it after rough_out has come within a centimetre or so, and only where the form is already right: the form is what you get.',
+        POINTS
       ].join(' ')
     case 'saw':
       return [
@@ -289,10 +339,11 @@ export function toolDefs(o: ToolOptions): ToolDef[] {
   // Only the overlays this commission can draw are offered, so the model cannot ask for one that is not there.
   const look = SCHEMAS.look.extend({ overlay: z.enum(overlays) })
   const closeup = SCHEMAS.closeup.extend({ overlay: z.enum(overlays) })
+  const focus = SCHEMAS.focus.extend({ overlay: z.enum(overlays) })
   return toolNames(o.toolSet).map(name => ({
     name,
     description: describe(name, o),
-    schema: name === 'look' ? look : name === 'closeup' ? closeup : name === 'chisel' && o.toolSet === 'direct' ? chiselDirect : SCHEMAS[name]
+    schema: name === 'look' ? look : name === 'closeup' ? closeup : name === 'focus' ? focus : name === 'chisel' && o.toolSet === 'direct' ? chiselDirect : SCHEMAS[name]
   }))
 }
 
@@ -369,6 +420,12 @@ export function describeCall(name: ToolName, args: Record<string, unknown>): str
       const a = args as SliceArgs
       return `slice at ${a.axis.toUpperCase()} ${num(a.at_cm)}`
     }
+    case 'focus': {
+      const a = args as FocusArgs
+      return `focus ${a.view} at ${pt(a.center)}, ${num(a.span_cm)} cm across (${a.overlay})`
+    }
+    case 'unfocus':
+      return 'unfocus'
     case 'sketch': {
       const a = args as SketchArgs
       return `sketch ${a.view} ${a.path.map(pt).join('→')}`
@@ -384,6 +441,10 @@ export function describeCall(name: ToolName, args: Record<string, unknown>): str
     case 'rough_out': {
       const a = args as RoughOutArgs
       return `rough_out to "${a.to}", margin ${num(a.margin_cm)} cm, ${a.tool}`
+    }
+    case 'detail': {
+      const a = args as DetailArgs
+      return `detail to "${a.to}" from ${a.view} at ${pt(a.center)}, ${num(a.span_cm)} cm across`
     }
     case 'saw': {
       const a = args as SawArgs
