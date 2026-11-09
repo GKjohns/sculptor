@@ -1,0 +1,145 @@
+import { BAND_VOXELS, FINISH } from './grid.ts'
+import { valueNoise3 } from './rng.ts'
+import type { CutStrike, ToolId } from './types.ts'
+
+// How strike.ts applies a tool:
+//   plane   one cut through the whole stone (the saw; issued as a 'saw' strike)
+//   bite    removes a tool-shaped solid of revolution driven in along the strike direction
+//   abrade  wears down high spots inside a pad, never deeper than the surface around them
+export type ToolMode = 'plane' | 'bite' | 'abrade'
+
+// One row per tool. A bite's solid is a short shank of diameter `size` behind the contact
+// point, tapering over `depth` to a flat tip of diameter `size * tip`.
+export interface ToolSpec {
+  id: ToolId
+  mode: ToolMode
+  // Finish value written to the surface the tool leaves.
+  finish: number
+  // Tip diameter as a fraction of size: near 0 is a point, 1 is a straight-sided plug.
+  tip: number
+  // Shank length behind the contact point as a fraction of size. It clears stone standing
+  // proud around the contact point.
+  shank: number
+  // Seeded roughness of the cut face: amplitude and feature size as fractions of size.
+  noise: number
+  grain: number
+}
+
+// claw, roundel, drill and polish join as rows here (with a new mode where they need one).
+export const TOOLS: Partial<Record<ToolId, ToolSpec>> = {
+  saw: { id: 'saw', mode: 'plane', finish: FINISH.sawn, tip: 1, shank: 0, noise: 0, grain: 1 },
+  point: { id: 'point', mode: 'bite', finish: FINISH.point, tip: 0.1, shank: 0.5, noise: 0.12, grain: 0.4 },
+  flat: { id: 'flat', mode: 'bite', finish: FINISH.flat, tip: 0.8, shank: 0.5, noise: 0.03, grain: 0.5 },
+  rasp: { id: 'rasp', mode: 'abrade', finish: FINISH.rasp, tip: 1, shank: 0, noise: 0, grain: 1 }
+}
+
+export function toolSpec(id: ToolId): ToolSpec {
+  const spec = TOOLS[id]
+  if (!spec) throw new Error(`no such tool yet: ${id}`)
+  return spec
+}
+
+// Stone a bite takes out of a flat face struck square on, before noise: the volume of the
+// tapered part. The hand uses it to budget strikes.
+export function nominalBiteCm3(spec: ToolSpec, size: number, depth: number): number {
+  const r = size / 2
+  const rt = r * spec.tip
+  return Math.PI * depth * (r * r + r * rt + rt * rt) / 3
+}
+
+// A bite strike resolved to plain numbers, so the per-voxel loop allocates nothing.
+export interface PreparedTool {
+  ax: number
+  ay: number
+  az: number
+  dx: number
+  dy: number
+  dz: number
+  radius: number
+  tipRadius: number
+  depth: number
+  back: number
+  amp: number
+  // Noise lattice cells per cm.
+  freq: number
+  seed: number
+  // Beyond this distance from the tool's surface the stored value is clamped whatever the
+  // noise says, so the noise is skipped.
+  reach: number
+}
+
+export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): PreparedTool {
+  const [dx, dy, dz] = strike.dir
+  const len = Math.sqrt(dx * dx + dy * dy + dz * dz)
+  if (!(len > 0)) throw new Error('strike direction has no length')
+  const size = Math.max(strike.size, voxel)
+  const amp = spec.noise * size
+  // Features finer than a couple of voxels would alias on the grid.
+  const feature = Math.max(spec.grain * size, 2.5 * voxel)
+  return {
+    ax: strike.at[0],
+    ay: strike.at[1],
+    az: strike.at[2],
+    dx: dx / len,
+    dy: dy / len,
+    dz: dz / len,
+    radius: size / 2,
+    tipRadius: size / 2 * spec.tip,
+    depth: Math.max(strike.depth, voxel / 8),
+    back: spec.shank * size,
+    amp,
+    freq: 1 / feature,
+    seed: strike.seed | 0,
+    reach: BAND_VOXELS * voxel + amp
+  }
+}
+
+// Exact distance to the bite solid's profile in the (radial, along-axis) half plane, which is
+// also the 3D distance to the solid of revolution. w runs along the strike direction from the
+// contact point.
+function profileDistance(r: number, w: number, t: PreparedTool): number {
+  const R = t.radius
+  const rt = t.tipRadius
+  const depth = t.depth
+  const back = t.back
+  // Back cap.
+  let dr = r > R ? r - R : 0
+  let dw = w + back
+  let best = dr * dr + dw * dw
+  // Shank.
+  dr = r - R
+  dw = w < -back ? w + back : w > 0 ? w : 0
+  let d2 = dr * dr + dw * dw
+  if (d2 < best) best = d2
+  // Taper, from the mouth (R, 0) to the tip rim (rt, depth).
+  const ex = rt - R
+  let s = ((r - R) * ex + w * depth) / (ex * ex + depth * depth)
+  s = s < 0 ? 0 : s > 1 ? 1 : s
+  dr = r - R - ex * s
+  dw = w - depth * s
+  d2 = dr * dr + dw * dw
+  if (d2 < best) best = d2
+  // Tip face.
+  dr = r > rt ? r - rt : 0
+  dw = w - depth
+  d2 = dr * dr + dw * dw
+  if (d2 < best) best = d2
+  const d = Math.sqrt(best)
+  const inside = w > -back && w < depth && r < (w <= 0 ? R : R + ex * w / depth)
+  return inside ? -d : d
+}
+
+// Distance from a world point to the tool solid, cm, negative inside it, roughened by the
+// strike's seeded noise.
+export function toolDistance(t: PreparedTool, x: number, y: number, z: number): number {
+  const px = x - t.ax
+  const py = y - t.ay
+  const pz = z - t.az
+  const w = px * t.dx + py * t.dy + pz * t.dz
+  const r2 = px * px + py * py + pz * pz - w * w
+  let d = profileDistance(r2 > 0 ? Math.sqrt(r2) : 0, w, t)
+  if (t.amp > 0 && d < t.reach && d > -t.reach) {
+    d -= t.amp * valueNoise3(px * t.freq, py * t.freq, pz * t.freq, t.seed)
+  }
+  return d
+}

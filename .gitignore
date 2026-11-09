@@ -6,5 +6,7 @@ node_modules
 .env.*
 !.env.example
 .playwright-mcp
+# npm run shoot writes here
+.shots
 *.log
 .DS_Store

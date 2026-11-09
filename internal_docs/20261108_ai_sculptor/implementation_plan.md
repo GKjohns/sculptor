@@ -1,7 +1,7 @@
 # Sculptor — Implementation Plan
 
 **Created:** November 8, 2026
-**Status:** Not Started — awaiting Kyle's review
+**Status:** In Progress — Sprint 1 complete, Sprint 2 next (approved by Kyle November 8, 2026)
 **Context:** Kyle wants an AI that carves a virtual block of marble the way a sculptor does: it knocks stone off with different tools, walks around the piece, thinks, and goes back in. He wants to watch it happen live and have it look like a film.
 
 **Goal:** Type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export.
@@ -264,7 +264,7 @@ The reference sheet has no frame on purpose: the person watching never sees it.
 
 ## Sprint Breakdown
 
-### Sprint 1: Stone you can hit — Foundational `[Not Started]`
+### Sprint 1: Stone you can hit — Foundational `[Complete]`
 **Goal:** A block in the browser that you can carve by hand at 60 fps, backed by a tested kernel.
 **Estimated effort:** 5–7 hours
 
@@ -289,9 +289,22 @@ The reference sheet has no frame on purpose: the person watching never sees it.
   - Files: `tests/grid.test.ts`, `tests/mesher.test.ts`, `tests/islands.test.ts`, `scripts/shoot.mjs`
 
 #### Verification
-- [ ] `npm test` passes: a strike removes the expected volume within 5%; a protected shape is never cut; the mesh of a block with one corner chiselled is watertight across chunk seams; a sawn-off corner is returned as an offcut with the right volume; a thin bridge left standing is not detached.
-- [ ] In the browser, 200 rapid strikes hold 60 fps on Kyle's Mac (frame times logged).
-- [ ] Screenshot: a block with a sawn corner and visibly different rough and smooth patches.
+- [x] `npm test` passes (30/30): a strike removes the expected volume within 5%; a protected shape is never cut; the mesh of a block with one corner chiselled is watertight across chunk seams; a sawn-off corner is returned as an offcut with the right volume; a thin bridge left standing is not detached.
+- [x] In the browser, 200 rapid strikes hold 60 fps on Kyle's Mac: `burst(200)` on WebGPU at 120 Hz gave mean 8.33 ms, p95 9.0 ms, max 9.4 ms, no frame over 16 ms; `burst(1000)` gave the same. These are vsync-quantised frame intervals, so they prove no dropped frames, not how much main-thread headroom is left.
+- [x] Screenshot: a block with a sawn corner and visibly different rough and smooth patches — `verification/screenshots/sprint1_demo_stone_gpu.webp` (and `_gl`; same grid hash on both backends).
+
+#### Results and deviations
+- Kernel timings on the default grid (Node 22): strike 0.2 ms, chunk remesh 0.5 ms, island check 3–9 ms, full initial mesh 61 ms, saw through half the block 80–160 ms (in the worker).
+- **`form` log entry added.** Protected cuts depend on declared forms, which were not in the strike log, so a replay or the shown stone could not reproduce them. `Strike` gained `{ kind: 'form', name, shapes, blend, inflate? }`; it must precede any strike that names it, and both grids must receive it.
+- **Edge-contact cleanup.** After every edit, stone that touches other stone only along a voxel edge has its shallower sample turned to air; without it, surface nets produced edges shared by four triangles.
+- **Small strikes are less exact than 5%.** 4 cm strikes are within 3% of their true volume; 2 cm strikes (5 voxels across) can be 8% off.
+- The base is closed (the grid keeps a layer of air under the block). Detached pieces under 0.5 cm³ are counted as removed but produce no offcut. The kernel uses its own polynomial sin/cos so logs replay across JS engines; the hand must follow the same rule.
+- three is 0.187.0; the post class is `RenderPipeline`. The palette is `UFieldGroup` (Nuxt UI 4 has no `UButtonGroup`). Finish is widened to Float32 on the main thread because WebGPU has no one-byte vertex format.
+- The worker protocol already names a stone (`'true' | 'shown'`) on every message; only `shown` exists until Sprint 3.
+- Offcuts tip out and fall under plain gravity, then are removed. Real physics is Sprint 4.
+- Remeshing is not time-sliced: a saw remeshes about 30 chunks in one flush. Fine today; revisit in Sprint 4 if a slab fall drops a frame.
+- Finish-driven sheen only shows near the mirror angle because there is no environment light yet; rough versus smooth currently reads from geometry and shadow. The face away from the key light is very dark. Both are Sprint 4 lighting work.
+- `bench:sculpt` script is added in Sprint 2 with the bench. `shoot.mjs` gained `--eval`, hides `[data-hud]` for its blank-canvas check, and fails on page errors or the wrong backend.
 
 ---
 

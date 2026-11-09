@@ -1,0 +1,39 @@
+{
+  "name": "sculptor",
+  "private": true,
+  "description": "An AI carves a block of virtual marble while you watch.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev --port 3130",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "lint": "eslint .",
+    "typecheck": "nuxt typecheck",
+    "test": "node --test tests/*.test.ts",
+    "shoot": "node scripts/shoot.mjs"
+  },
+  "devDependencies": {
+    "@nuxt/eslint": "^1.17.0",
+    "@types/node": "^26.6.5",
+    "@types/three": "^0.187.0",
+    "eslint": "^10.13.0",
+    "eslint-plugin-better-tailwindcss": "^4.9.1",
+    "playwright": "^1.63.0",
+    "typescript": "^6.0.3",
+    "vue-tsc": "^3.3.13"
+  },
+  "dependencies": {
+    "@ai-sdk/gateway": "^4.0.0",
+    "@iconify-json/lucide": "^1.2.134",
+    "@nuxt/ui": "^4.12.0",
+    "ai": "^7.0.68",
+    "nuxt": "^4.6.1",
+    "tailwindcss": "^4.3.3",
+    "three": "^0.187.0",
+    "zod": "^4.4.3"
+  }
+}
