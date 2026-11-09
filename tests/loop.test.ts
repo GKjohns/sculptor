@@ -608,10 +608,10 @@ test('the prompt is tight and follows the tool set and the reference', () => {
   const full = buildInstructions({ ...base, toolSet: 'formed', reference: 'outlines' })
   const direct = buildInstructions({ ...base, toolSet: 'direct', reference: 'none' })
   // The head canon, `detail` and detail mode added about 450 words in the skill pass, and
-  // composition and pose (declare_figure, the torso, style tokens) about 430 in the second.
-  assert.ok(words(full) < 2450, `${words(full)} words`)
-  assert.ok(words(direct) < 1300, `${words(direct)} words`)
-  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 2300)
+  // composition and pose (declare_figure, the torso, style tokens, the wind-up of an action) about 530 in the second.
+  assert.ok(words(full) < 2550, `${words(full)} words`)
+  assert.ok(words(direct) < 1400, `${words(direct)} words`)
+  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 2400)
   // Pose by default, in both tool sets; the figure canon only where it exists.
   for (const text of [full, direct]) assert.match(text, /COMPOSITION AND POSE[\s\S]*frontal, symmetric, static pose[\s\S]*is a failure/)
   assert.match(full, /`declare_figure`/)
