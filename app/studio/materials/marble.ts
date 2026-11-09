@@ -13,7 +13,7 @@
  * thickness the mesher bakes (0 a knife edge, 1 THICKNESS_CM of stone or more).
  */
 import * as THREE from 'three/webgpu'
-import { attribute, color, diffuseColor, float, mix, mx_fractal_noise_float, mx_fractal_noise_vec3, mx_noise_float, mx_noise_vec3, normalLocal, normalView, positionLocal, positionViewDirection, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
+import { attribute, color, diffuseColor, float, mix, mx_fractal_noise_float, mx_fractal_noise_vec3, mx_noise_float, mx_noise_vec3, normalLocal, normalView, positionLocal, positionViewDirection, select, smoothstep, texture, transformNormalToView, uniform, uv, vec2, vec3, vec4 } from 'three/tsl'
 
 type Float = THREE.Node<'float'>
 type Vec3 = THREE.Node<'vec3'>
@@ -47,15 +47,15 @@ export interface StonePreset {
 export const CARRARA: StonePreset = {
   name: 'carrara',
   body: 0xf2ede4,
-  cloud: 0xc9c8c6,
-  vein: 0x7c8088,
-  veinScale: 0.05,
-  veinStrength: 1,
-  cloudStrength: 0.38,
+  cloud: 0xbdbcbb,
+  vein: 0x70747c,
+  veinScale: 0.072,
+  veinStrength: 1.15,
+  cloudStrength: 0.55,
   bedding: [0.45, 0.8, 0.4],
   roughRaw: 0.94,
-  roughSatin: 0.55,
-  roughPolished: 0.22,
+  roughSatin: 0.58,
+  roughPolished: 0.36,
   glow: 0xfff0de,
   translucency: 1.25,
   sheen: 1
@@ -85,7 +85,8 @@ export interface MarbleOptions {
   /**
    * Where the fragment sits in the block, cm. The chunk meshes are in block coordinates already,
    * so the default is the local position. A piece that has left the block passes the attribute
-   * that holds where each vertex was (see STONE_COORDS).
+   * that holds where each vertex was (see STONE_COORDS). Such a piece is shaded with its own
+   * normals; only the stone on the banker has the mesher's smooth ones.
    */
   coords?: Vec3
   /** 0 to 1 per fragment. Left out, the `finish` vertex attribute; a number for loose pieces. */
@@ -102,8 +103,8 @@ export const STONE_COORDS = 'stone'
 // its own shadow: the light would go out exactly where it should show. So the transmitted term
 // takes the light's colour before shadowing (still shaped by the window, see atelier.ts) and lets
 // the baked thickness do the attenuating.
-// Thickness is baked over THICKNESS_CM (2.4 cm); this many e-foldings of light are lost across it.
-const THROUGH_FALLOFF = 2.9
+// Thickness is baked over THICKNESS_CM (3.2 cm); this many e-foldings of light are lost across it.
+const THROUGH_FALLOFF = 2.4
 // How far past the terminator scattered light reaches, as a share of the quarter turn.
 const WRAP = 0.4
 
@@ -151,7 +152,11 @@ export const marbleDials = {
   /** Multiplies vein contrast. */
   veins: uniform(1),
   /** Multiplies the light scattered past the terminator. */
-  scatter: uniform(1)
+  scatter: uniform(1),
+  /** Multiplies the tool-mark normal noise on rough stone. */
+  marks: uniform(1),
+  /** Debug view, unlit: 0 off, 1 the finish, 2 the shading normal, 3 the thickness, 4 the mesh normal, 5 the veins. */
+  view: uniform(0)
 }
 
 // The veins of one preset, worked out once. The volume covers VOLUME_CM of stone at TEXEL_CM a
@@ -169,7 +174,7 @@ const TILES_Y = SLICES / TILES_X
 function veinField(p: Vec3, preset: StonePreset) {
   // The block is bent by a slow warp and frayed by a quicker one, then squeezed along the
   // bedding axis, so a noise read there has its zero crossings lying roughly in sheets. Near a
-  // sheet the stone greys: a broad smoky band with a thin dark core. Two such families, each
+  // sheet the stone greys: a broad smoky band with a fainter core. Two such families, each
   // switched on and off by a slower noise, so a vein runs a hand or two and dies away.
   const [bx, by, bz] = preset.bedding
   const bed = vec3(bx, by, bz).normalize()
@@ -179,11 +184,14 @@ function veinField(p: Vec3, preset: StonePreset) {
   const s = preset.veinScale
   const a = mx_noise_float(squeezed.mul(s)).abs().oneMinus()
   const b = mx_noise_float(squeezed.mul(s * 2.3).add(vec3(31.7, 4.1, 12.9))).abs().oneMinus()
-  const onA = smoothstep(-0.05, 0.4, mx_noise_float(p.mul(0.021).add(vec3(7.3, 1.9, 4.4))))
-  const onB = smoothstep(0, 0.45, mx_noise_float(p.mul(0.034).add(vec3(2.6, 8.8, 0.7))))
-  const major = a.pow(4).mul(0.5).add(a.pow(22).mul(0.36)).mul(onA)
-  const minor = b.pow(7).mul(0.34).add(b.pow(30).mul(0.24)).mul(onB)
-  const veining = major.add(minor).mul(preset.veinStrength).saturate()
+  const onA = smoothstep(-0.35, 0.25, mx_noise_float(p.mul(0.021).add(vec3(7.3, 1.9, 4.4))))
+  const onB = smoothstep(-0.25, 0.35, mx_noise_float(p.mul(0.034).add(vec3(2.6, 8.8, 0.7))))
+  const major = a.pow(3).mul(0.5).add(a.pow(18).mul(0.2)).mul(onA)
+  const minor = b.pow(5).mul(0.34).add(b.pow(24).mul(0.14)).mul(onB)
+  // And faint hairline feathering everywhere, finer than either, so that no carved face is blank.
+  const c = mx_noise_float(squeezed.mul(s * 3.1).add(vec3(5.9, 17.3, 2.2))).abs().oneMinus()
+  const feather = c.pow(8).mul(0.45).mul(mx_noise_float(p.mul(0.05).add(vec3(1.4, 6.6, 9.1))).mul(0.5).add(0.6).saturate())
+  const veining = major.add(minor).add(feather).mul(preset.veinStrength).saturate()
   // Clouding: broad smoky greys that follow the same bedding.
   const smoke = mx_fractal_noise_float(squeezed.mul(s * 0.5).add(vec3(3.1, 8.2, 5.5)), 4).mul(0.5).add(0.5)
   const clouding = smoothstep(0.42, 0.85, smoke).mul(preset.cloudStrength)
@@ -287,10 +295,11 @@ export function createMarble(preset: StonePreset = CARRARA, options: MarbleOptio
   material.colorNode = mix(stone, mix(stone, color(0xffffff), 0.12), raw.mul(raw))
 
   // Finish. Roughness falls slowly from the point chisel to the rasp, then quickly to the polish.
-  const worked = mix(float(preset.roughRaw), float(preset.roughSatin), smoothstep(0, 0.7, finish))
-  material.roughnessNode = mix(worked, float(preset.roughPolished), smoothstep(0.68, 1, finish)).add(grain.mul(raw).mul(2)).clamp(0.04, 1)
+  const matte = mix(float(preset.roughRaw), float(preset.roughSatin), smoothstep(0, 0.7, finish))
+  material.roughnessNode = mix(matte, float(preset.roughPolished), smoothstep(0.68, 1, finish)).add(grain.mul(raw).mul(2)).clamp(0.04, 1)
   material.metalnessNode = float(0)
-  material.specularIntensityNode = mix(float(0.5), float(0.8), finish).mul(preset.sheen)
+  // Polished stone, not glaze: a low, broad highlight.
+  material.specularIntensityNode = mix(float(0.45), float(0.6), finish).mul(preset.sheen)
   material.ior = 1.49
 
   // Tool marks below the size of a voxel: a coarse tooth and a fine one, both gone by the polish.
@@ -298,7 +307,17 @@ export function createMarble(preset: StonePreset = CARRARA, options: MarbleOptio
   const footprint = p.fwidth().length()
   const tooth = mx_noise_vec3(p.mul(7)).mul(raw.pow(1.5).mul(0.24)).mul(smoothstep(0.03, 0.09, footprint).oneMinus())
   const bite = mx_noise_vec3(p.mul(19)).mul(raw.mul(0.14)).mul(smoothstep(0.008, 0.026, footprint).oneMinus())
-  material.normalNode = transformNormalToView(normalLocal.add(tooth).add(bite).normalize())
+  // The surface the light sees. What the point chisel left keeps its own normals, craters and
+  // all. Anything worked further (claw, flat, saw, rasp, polish) is shaded with the mesher's smooth
+  // normals: the geometry still carries every groove, a voxel or two deep and as regular as the
+  // hand's strokes, and lit by its own normals a rasped cheek is corduroy.
+  const worked: Float = smoothstep(0.09, 0.2, finish)
+  const surface: Vec3 = options.coords ? normalLocal : mix(normalLocal, attribute('smoothNormal', 'vec3'), worked).normalize()
+  material.normalNode = transformNormalToView(surface.add(tooth.add(bite).mul(marbleDials.marks)).normalize())
+  const view = marbleDials.view
+  const shown = select(view.equal(1), vec3(finish), select(view.equal(2), surface.mul(0.5).add(0.5), select(view.equal(4), normalLocal.mul(0.5).add(0.5), select(view.equal(5), vec3(veining.oneMinus()), vec3(thickness)))))
+  material.emissiveNode = select(view.greaterThan(0), shown, vec3(0))
+  material.colorNode = select(view.greaterThan(0), vec3(0), material.colorNode)
 
   // Light through thin stone dies away with depth, by about two thirds every centimetre; the
   // curve is shifted so that the bake's full thickness lets nothing through. Veins and clouding
@@ -306,7 +325,8 @@ export function createMarble(preset: StonePreset = CARRARA, options: MarbleOptio
   const depth = thickness.saturate().mul(THROUGH_FALLOFF)
   const through = depth.negate().exp().sub(Math.exp(-THROUGH_FALLOFF)).max(0)
   material.glowNode = color(preset.glow).mul(float(preset.translucency).mul(marbleDials.translucency))
-  material.throughNode = through.mul(veining.mul(0.6).add(clouding.mul(0.3)).oneMinus())
+  // Much less of it off the point chisel: every crater rim is thin, and lit through they read as flecks.
+  material.throughNode = through.mul(veining.mul(0.6).add(clouding.mul(0.3)).oneMinus()).mul(mix(float(0.25), float(1), worked))
   // In Lambert's units: a third of what a square-on face returns, at the terminator.
   material.scatterNode = float(preset.translucency * 0.3).mul(marbleDials.scatter)
   return material

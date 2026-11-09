@@ -138,6 +138,10 @@ export interface MeshData {
   // How much stone stands behind each vertex, 0 (a knife edge) to 255 (THICKNESS_CM or more). Only
   // the renderer reads it, for light through thin sections. All 255 unless the bake was asked for.
   thickness: Uint8Array
+  // Unit normals again, from the distance gradient over a wider span, so that tool grooves a
+  // voxel or two deep do not show in them. Only the renderer reads them, to shade worked stone.
+  // A copy of `normals` unless the bake was asked for.
+  smooth: Float32Array
   // Triangle list, counter-clockwise seen from outside.
   indices: Uint32Array
 }

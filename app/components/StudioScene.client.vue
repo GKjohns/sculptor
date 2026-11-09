@@ -15,6 +15,7 @@
  *             (app.config.ts has the defaults); ?ref=1 also shows the reference sheet in the eye panel
  *   ?cam=free  the director leaves the camera alone (it stays where you, or a look preset, put it)
  *   ?film=0    no debris, tools, sound or director at all, to measure what they cost
+ *   ?prewarm=0  skips the unculled frames that build every material's pipelines before the scene reports ready
  */
 import { CameraRig } from '~/studio/camera'
 import { Charcoal } from '~/studio/charcoal'
@@ -269,6 +270,9 @@ onMounted(async () => {
   } else if ('replay' in route.query) {
     picking.value = true
   }
+  // Every material's pipelines, whatever the camera has seen so far: the first slab fall swings it
+  // round the room. ?prewarm=0 leaves it out, to measure what it saves.
+  if (route.query.prewarm !== '0') await s.prewarm()
   await s.rendered(3)
   if (studio === s) w.__sceneReady = true
 })

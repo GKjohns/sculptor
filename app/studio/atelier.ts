@@ -14,6 +14,7 @@
  * Scene units are block centimetres: the banker's top is y = BANKER_TOP_Y, where the block stands.
  */
 import * as THREE from 'three/webgpu'
+import { KEY_FROM } from '#shared/sculpt/mesher'
 import { CARRARA, createMarble } from './materials/marble'
 import { Fn, color, float, frameId, int, interleavedGradientNoise, mix, mx_fractal_noise_float, mx_noise_float, normalWorld, positionWorld, screenCoordinate, smoothstep, texture, uniform, vec3, vogelDiskSample } from 'three/tsl'
 
@@ -36,17 +37,28 @@ export const WINDOW = { y0: 130, y1: 372, z0: 96, z1: 304 }
 /** What the key is aimed at: the middle of the block. */
 export const KEY_TARGET = new THREE.Vector3(0, 55, 0)
 
+/** The banker's legs: how thick they are, and how far out from the middle each one's centre stands. */
+const BANKER_LEG_CM = 10
+const BANKER_LEG_REACH = BANKER_HALF - 9
+
 /**
- * Things debris can land on, as axis-aligned boxes (centre and half extents, cm). The floor is
- * the plane y = FLOOR_Y.
+ * Things debris can land on, as axis-aligned boxes (centre and half extents, cm): the banker's
+ * top and its four legs, with air between them as drawn. The floor is the plane y = FLOOR_Y.
  */
 export const ATELIER_SOLIDS: { name: string, center: [number, number, number], half: [number, number, number] }[] = [
   { name: 'banker-top', center: [0, BANKER_TOP_Y - BANKER_TOP_CM / 2, 0], half: [BANKER_HALF, BANKER_TOP_CM / 2, BANKER_HALF] },
-  { name: 'banker-frame', center: [0, (BANKER_TOP_Y - BANKER_TOP_CM + FLOOR_Y) / 2, 0], half: [40, (BANKER_TOP_Y - BANKER_TOP_CM - FLOOR_Y) / 2, 40] }
+  ...[-1, 1].flatMap(sx => [-1, 1].map(sz => ({
+    name: 'banker-leg',
+    center: [sx * BANKER_LEG_REACH, (BANKER_TOP_Y - BANKER_TOP_CM + FLOOR_Y) / 2, sz * BANKER_LEG_REACH] as [number, number, number],
+    half: [BANKER_LEG_CM / 2, (BANKER_TOP_Y - BANKER_TOP_CM - FLOOR_Y) / 2, BANKER_LEG_CM / 2] as [number, number, number]
+  })))
 ]
 
 const SUN = 0xffe2bd
-const DAYLIGHT = 0xcfe0ff
+const DAYLIGHT = 0xe2e7f0
+// What the window sheds into the room as soft light. Warmer than the sky looks: it is what fills
+// the stone's shadows, and a cool fill beside the sun's cream reads as slate blue.
+const SKYLIGHT = 0xf1ece4
 // Taps in the key's shadow filter.
 const SHADOW_TAPS = 8
 
@@ -90,13 +102,13 @@ export class Atelier {
   /** Everything built here; the stone is not in it. */
   readonly room = new THREE.Group()
   readonly key = new THREE.DirectionalLight(SUN, 1)
-  readonly fill = new THREE.DirectionalLight(0xb9c6e0, 0.09)
-  readonly ambient = new THREE.HemisphereLight(0xb4bccb, 0x2a2119, 0.045)
+  readonly fill = new THREE.DirectionalLight(0xc6c2bc, 0.09)
+  readonly ambient = new THREE.HemisphereLight(0xbcb8b2, 0x2a2119, 0.045)
   /** The way the key's light travels, unit length. */
   readonly keyDirection = new THREE.Vector3()
   /** The key's strength; the light's own colour and intensity fields are not read once it has a window. */
   readonly keyColor = uniform(new THREE.Color(SUN))
-  readonly keyStrength = uniform(2.8)
+  readonly keyStrength = uniform(2.2)
   /** Colour of the haze the shaft shows up in, for the post stack's god rays. */
   readonly haze = new THREE.Color(0xffe9cf)
   environment: THREE.Texture | null = null
@@ -113,7 +125,9 @@ export class Atelier {
 
   constructor(private scene: THREE.Scene) {
     this.room.name = 'atelier'
-    const from = new THREE.Vector3(WALL_X, (WINDOW.y0 + WINDOW.y1) / 2 + 14, (WINDOW.z0 + WINDOW.z1) / 2)
+    // Where the line the key comes down (the mesher bakes thickness along the same one) crosses
+    // the wall: a little above the middle of the window.
+    const from = KEY_TARGET.clone().addScaledVector(new THREE.Vector3(...KEY_FROM), WALL_X / KEY_FROM[0])
     this.keyDirection.copy(KEY_TARGET).sub(from).normalize()
     this.direction.value.copy(this.keyDirection)
 
@@ -187,11 +201,11 @@ export class Atelier {
     this.disposables.push(shell.geometry, shell.material as THREE.Material)
     const centre = KEY_TARGET
     // The window: the large soft source. Wider than the opening, as the sky behind it is.
-    card(WINDOW.z1 - WINDOW.z0 + 40, WINDOW.y1 - WINDOW.y0, DAYLIGHT, 2.6, new THREE.Vector3(WALL_X, (WINDOW.y0 + WINDOW.y1) / 2, (WINDOW.z0 + WINDOW.z1) / 2), centre)
+    card(WINDOW.z1 - WINDOW.z0 + 40, WINDOW.y1 - WINDOW.y0, SKYLIGHT, 2.3, new THREE.Vector3(WALL_X, (WINDOW.y0 + WINDOW.y1) / 2, (WINDOW.z0 + WINDOW.z1) / 2), centre)
     // The sunlit patch of floor behind and to the right, bouncing warm light back up.
     card(300, 220, 0xffc998, 0.5, new THREE.Vector3(170, FLOOR_Y, -150), new THREE.Vector3(170, 400, -150))
     // A broad cool fill from the camera's side of the room.
-    card(700, 500, 0x86a0d0, 0.28, new THREE.Vector3(420, 180, 420), centre)
+    card(700, 500, 0xb4b1ad, 0.26, new THREE.Vector3(420, 180, 420), centre)
     // The pale floor round the banker.
     card(900, 900, 0x4a443c, 0.07, new THREE.Vector3(0, FLOOR_Y, 0), new THREE.Vector3(0, 400, 0))
     const pmrem = new THREE.PMREMGenerator(renderer)
@@ -228,8 +242,8 @@ export class Atelier {
     const plank = (BANKER_HALF * 2) / 4
     for (let i = 0; i < 4; i++) banker.add(box(BANKER_HALF * 2, BANKER_TOP_CM, plank - 0.5, 0, top - BANKER_TOP_CM / 2, -BANKER_HALF + plank * (i + 0.5), x))
     // Apron, legs and low stretchers.
-    const leg = 10
-    const reach = BANKER_HALF - 9
+    const leg = BANKER_LEG_CM
+    const reach = BANKER_LEG_REACH
     const legH = under - FLOOR_Y
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) banker.add(box(leg, legH, leg, sx * reach, under - legH / 2, sz * reach, y))
@@ -296,10 +310,23 @@ export class Atelier {
       box(5, 5, z1 - z0, fx, y1 - 34, (z0 + z1) / 2, frame),
       box(5, y1 - y0, 5, fx, (y0 + y1) / 2, z0 + 34, frame)
     )
+    // The casing round the opening on the room's side, and a sill that catches the sun.
+    const casing = timber('y')
+    const lintel = timber('z')
+    const proud = WALL_X + 1.5
+    this.room.add(
+      box(3, y1 - y0 + 24, 12, proud, (y0 + y1) / 2, z0 - 6, casing),
+      box(3, y1 - y0 + 24, 12, proud, (y0 + y1) / 2, z1 + 6, casing),
+      box(3, 12, z1 - z0 + 24, proud, y1 + 6, (z0 + z1) / 2, lintel),
+      box(16, 5, z1 - z0 + 30, WALL_X + 4, y0 - 2.5, (z0 + z1) / 2, lintel)
+    )
     // The sky outside: what the window looks like from the room, and what bloom catches.
     const sky = new THREE.MeshBasicNodeMaterial()
     sky.name = 'sky'
-    sky.colorNode = color(DAYLIGHT).mul(5.5)
+    // Brightest overhead, and a darker band of whatever stands across the yard at the bottom.
+    const up = smoothstep(y0 - 20, y1 + 40, positionWorld.y)
+    const yard = smoothstep(y0 - 6, y0 + 70, positionWorld.y)
+    sky.colorNode = mix(color(0x6f7680).mul(0.5), mix(color(0xf2e8d8), color(DAYLIGHT), up).mul(mix(float(1.5), float(3.4), up)), yard)
     sky.fog = false
     const outside = new THREE.Mesh(new THREE.PlaneGeometry(z1 - z0 + 260, y1 - y0 + 260), sky)
     outside.name = 'sky'
@@ -310,8 +337,8 @@ export class Atelier {
     this.room.add(outside)
   }
 
-  // What stands about at the far end of the room, where the window's light lands: blocks waiting
-  // their turn and timber against the wall. They give the dark some depth and the lens something
+  // What stands about at the far end of the room, where the window's light lands (so the key
+  // gives each block its shadow on the floor): blocks waiting their turn, and timber against the wall. They give the dark some depth and the lens something
   // to lose focus on. All of it is well clear of the banker.
   private buildYard() {
     const yard = new THREE.Group()
@@ -332,8 +359,7 @@ export class Atelier {
     const rough = quarried([-120, 260, 30], 0.12)
     put(box(74, 52, 58, 236, FLOOR_Y + 26, -268, sawn), 0.34)
     put(box(46, 30, 40, 228, FLOOR_Y + 67, -272, rough), -0.22)
-    put(box(38, 96, 34, 118, FLOOR_Y + 48, -338, sawn), 0.12)
-    put(box(120, 7, 70, 330, FLOOR_Y + 3.5, -190, sawn), -0.5)
+    put(box(96, 30, 38, 176, FLOOR_Y + 15, -188, sawn), -0.42)
     const plank = timber('y')
     put(box(22, 250, 4, -40, FLOOR_Y + 122, BACK_Z + 26, plank), 0, 0)
     put(box(18, 230, 4, -12, FLOOR_Y + 112, BACK_Z + 22, plank), 0, 0.05)
@@ -356,7 +382,9 @@ export class Atelier {
     key.castShadow = true
     key.shadow.mapSize.set(4096, 4096)
     key.shadow.bias = -0.0002
-    key.shadow.normalBias = 0.12
+    // Centimetres off the surface before the map is read: more than a tool groove is deep, so a
+    // face shaded smooth does not pick up the shadow of every rib on it.
+    key.shadow.normalBias = 0.7
     // Texels of blur in the shadow filter: the sun is not a point, and TRAA resolves the dither.
     key.shadow.radius = 14
     ;(key.shadow as unknown as { filterNode: unknown }).filterNode = this.shadowFilter()

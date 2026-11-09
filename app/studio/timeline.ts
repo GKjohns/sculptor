@@ -228,6 +228,8 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
   private lookClock = 0
   private sent = 0
   private applied = 0
+  // Sketch entries below this have had their lines drawn.
+  private drawn = 0
   private flight: Promise<void> | null = null
   private staged: { look: L, left: number } | null = null
   private playing = false
@@ -463,7 +465,7 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     this.error = ''
     if (this.staged) this.camera?.release()
     this.staged = null
-    this.clock = this.lookClock = this.sent = this.applied = this.rev = this.cursor = this.landed = this.rate = 0
+    this.clock = this.lookClock = this.sent = this.applied = this.rev = this.cursor = this.landed = this.rate = this.drawn = 0
     this.announced = -1
     this.sinceSettle = this.unsettled = 0
     for (const l of this.listeners) l.reset?.()
@@ -728,8 +730,14 @@ export class Timeline<P extends TimelinePass = TimelinePass, L extends TimelineL
     const settle = this.settles && this.speed !== 'max' && this.sinceSettle >= SETTLE_S && !checked
     if (settle || checked) this.sinceSettle = 0
     // A line is drawn as its entry is handed over, so it is on the stone before the pass after
-    // it is announced (and that pass, if it cuts, may wipe it).
-    for (const strike of batch) if (strike.kind === 'sketch') this.onSketch(strike)
+    // it is announced (and that pass, if it cuts, may wipe it). Once only: an entry the worker's
+    // budget left out is handed over again, by which time that pass has been announced and the
+    // line would be drawn back over stone that is already going.
+    for (let i = Math.max(from, this.drawn); i < to; i++) {
+      const strike = this.strikes[i]!
+      if (strike.kind === 'sketch') this.onSketch(strike)
+    }
+    this.drawn = Math.max(this.drawn, to)
     try {
       const reply = await this.kernel.strike(batch, 'shown', { budgetMs: BUDGET_MS, ...(settle ? { settle: true } : {}) })
       if (epoch !== this.epoch) return

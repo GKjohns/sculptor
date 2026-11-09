@@ -14,6 +14,7 @@
 // Relative imports with extensions: tests run this file under plain node.
 
 import type { UIMessage } from 'ai'
+import { MODEL_LABELS } from '../../shared/agent/pricing.ts'
 import { describeCall } from '../../shared/agent/toolSchemas.ts'
 import { STAGES, TOOL_NAMES } from '../../shared/agent/types.ts'
 import type { Block, BudgetLevel, LoopEvent, PassRecord, RunEnd, Stage, ToolName } from '../../shared/agent/types.ts'
@@ -349,6 +350,9 @@ export function formatUsd(usd: number): string {
 export function priceHint(price: { input: number, output: number }): string {
   return `$${trim(price.input, 2)} in · $${trim(price.output, 2)} out per 1M tokens`
 }
+
+// A model's name as people know it ("Opus 5.5") from its short key ("opus"); the key itself if it is not one of ours.
+export const modelLabel = (key: string): string => (MODEL_LABELS as Record<string, string>)[key] ?? key
 
 // GET /api/health's model list as picker options.
 export function modelOptions(models: { key: string, label: string, default?: boolean, price: { input: number, output: number } }[]): ModelOption[] {

@@ -20,7 +20,6 @@ import type { ChunkMesh, Offcut, Strike } from '#shared/sculpt/types'
 import { ATELIER_SOLIDS, BACK_Z, BANKER_HALF, BANKER_TOP_Y, FLOOR_Y, WALL_X } from './atelier'
 import type { CameraRig } from './camera'
 import { Debris } from './debris'
-import type { Solid } from './debris'
 import { Director } from './director'
 import { Dust } from './dust'
 import type { KernelClient } from './kernel'
@@ -37,26 +36,6 @@ export interface FilmTimeline {
   listen: (listener: TimelineListener) => () => void
   upcoming: () => UpcomingStrike | null
   state: () => TimelineState
-}
-
-// What debris can land on. The atelier gives the banker's frame as one solid block; drawn, it is
-// four legs with air between them, and a slab leaning on that air looks wrong. So the frame is
-// taken as its legs: a square post at each corner of the block the atelier names.
-const LEG_HALF = 5
-function bankerSolids(): Solid[] {
-  const solids: Solid[] = []
-  for (const solid of ATELIER_SOLIDS) {
-    if (solid.name !== 'banker-frame') {
-      solids.push({ center: solid.center, half: solid.half })
-      continue
-    }
-    const [x, y, z] = solid.center
-    const [hx, hy, hz] = solid.half
-    for (const sx of [-1, 1]) {
-      for (const sz of [-1, 1]) solids.push({ center: [x + sx * (hx - LEG_HALF + 3), y, z + sz * (hz - LEG_HALF + 3)], half: [LEG_HALF, hy, LEG_HALF] })
-    }
-  }
-  return solids
 }
 
 type DustNode = Parameters<NonNullable<ConstructorParameters<typeof Dust>[1]['shaft']>>[0]
@@ -90,7 +69,7 @@ export class Cinema {
     this.chipMaterial = createChipMarble(stone.preset)
     this.debris = new Debris(studio, stone, {
       floorY: FLOOR_Y,
-      solids: bankerSolids(),
+      solids: ATELIER_SOLIDS,
       offcutMaterial: stone.offcutMaterial,
       chipMaterial: this.chipMaterial,
       coords: STONE_COORDS,

@@ -51,6 +51,16 @@ Each pass is one look-book shoot and what it led to.
 7. **Presets that stay put.** The camera rig was nudging the look-book shots between passes. `look()` now sets the pose again every frame. Pulled `medium` and `macro` back to hold the whole subject.
 8. **Final.** Cool fill back up (card 0.28, fill light 0.09): colour contrast against the warm key, and the director's shots from the shadow side were too dim to watch. `medium` stopped down so the plinth stays sharp.
 
+9. **Review fixes (Sprint 4, second look pass).** An outside review of the shots listed six faults; the cause and fix of each:
+   - *Vertical corduroy over the whole bust and plinth.* The geometry carries the claw's grooves (period three to six voxels, a voxel deep), and the Sprint 4 lights, sharper than Sprint 3's one key, read every groove off the mesh normals. Found by switching terms off on one frame: the ribs stayed with AO, contact shadows, translucency, scatter and even the key off, so they were in the normals. The mesher now bakes a `smoothNormal` attribute, the gradient of the distance field blurred by a Gaussian two voxels wide (`bakeSmooth` in `shared/sculpt/mesher.ts`); the marble shades everything past the point chisel with it (`worked` in `marble.ts`). An axis-line average over eight voxels was tried first and left the six-voxel ribs at about a third. Point-chiselled stone keeps its own normals: craters, not a comb. Geometry, grid and hashes untouched; meshing costs about 2 microseconds a vertex more, in the worker.
+   - *Sawtooth terminators, blotches, moire and hatching in the macros.* Screen-space contact shadows at half resolution against 0.4 cm voxels, and a shadow normal bias smaller than a groove is deep. Contact shadows are off in the film tier (`?fx=contact` brings them back), the key's normal bias is 0.7 cm.
+   - *Black-cored, streaked fin; dark ear.* The thickness bake averaged four rays down the mesh normal, so every groove on the fin's face changed its reading. It now marches from each vertex toward the key (`KEY_FROM`, which the atelier also aims its key along) and counts the stone in the way, along the smooth normal. The fin is now a 1.5 cm slab and glows evenly with veins standing dark in it. The bust's ear is relief on the skull with no air behind it, so it is thick from the window and stays unlit from behind, which is correct.
+   - *No veins on carved stone; porcelain polish.* Vein families were switched on over well under half the block, and the head sits in a gap. Both families now run over most of it, and a faint hairline feathering covers the rest. Polished roughness 0.26 to 0.36, specular 0.7 to 0.6.
+   - *Orange flecks, white dots.* Light through stone at crater rims (much less of it now on point-chiselled stone) and groove crests catching the key through the old normals. Gone with the two fixes above.
+   - *Slate-blue shadows.* The window card, fill, fill card and hemisphere were sky blue; they are now near-neutral and warm, and shadowed marble measures about (76, 72, 67) against (166, 154, 140) lit.
+
+   For finding the next one: `__sculptor.studio().marble.view.value` = 1 finish, 2 shading normal, 3 thickness, 4 mesh normal, 5 veins (unlit), and `.marks` scales the tool-mark normal noise.
+
 ## What it costs
 
 M4 Pro, 1440 x 900 window, drawn at 1.5x (2160 x 1350), whole stack, motion layer on. Frame intervals from `__sculptor.meter()` and `timeReplay(8, 20)`.
@@ -62,6 +72,8 @@ M4 Pro, 1440 x 900 window, drawn at 1.5x (2160 x 1350), whole stack, motion laye
 | Finished bust, still, no vsync | 6.4 ms | 15.7 ms | 16.2 ms |
 | Replay at 8x, no vsync | 7.0 ms | 23.2 ms | 41.5 ms |
 | Same at the display's own 2x (2880 x 1800), vsync: still / replay | 11.6 / 12.4 ms | 16.8 ms | 17.6 / 18.6 ms |
+
+After the review fixes (smooth normals, contact shadows off), same setup, measured while the other Sprint 4 agent had a software-WebGL shoot and a live session running on the machine: finished bust still 9.5 / 16.7 / 17.5 ms, replay at 8x for 20 s 12.4 / 17.1 / 25.1 ms (mean / p95 / max, 6 frames over 16 ms). Under 60 fps budget on the mean; read the tails against the shared machine.
 
 So the film tier draws at 1.5x by default (`?dpr=2` overrides): it holds 120 Hz there and only 60 at 2x.
 

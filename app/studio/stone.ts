@@ -9,8 +9,8 @@
  * mesh per bundle, rebuilt from its chunks' arrays whenever one of them changes.
  *
  * The look is materials/marble.ts: veins read at block coordinates, roughness and tool marks from the
- * per-vertex finish the tools left, light through thin stone from the per-vertex thickness the mesher
- * bakes. A piece that falls away keeps the block coordinates of its vertices in a `stone` attribute,
+ * per-vertex finish the tools left, worked faces shaded with the mesher's smooth normals, light
+ * through thin stone from the per-vertex thickness it bakes. A piece that falls away keeps the block coordinates of its vertices in a `stone` attribute,
  * so its veins stay where they were.
  */
 import * as THREE from 'three/webgpu'
@@ -239,6 +239,7 @@ export class Stone {
     const normal = g.getAttribute('normal') as THREE.BufferAttribute
     const finish = g.getAttribute('finish') as THREE.BufferAttribute
     const thickness = g.getAttribute('thickness') as THREE.BufferAttribute
+    const smoothed = g.getAttribute('smoothNormal') as THREE.BufferAttribute
     const smooth = finish.array
     const thick = thickness.array
     const index = g.index!.array
@@ -250,6 +251,7 @@ export class Stone {
       const count = part.finish.length
       position.array.set(part.positions, v * 3)
       normal.array.set(part.normals, v * 3)
+      smoothed.array.set(part.smooth, v * 3)
       // three r187 has no one-byte vertex format on the WebGPU path, so finish and thickness are widened to floats here.
       for (let i = 0; i < count; i++) {
         smooth[v + i] = part.finish[i]! / 255
@@ -264,6 +266,7 @@ export class Stone {
     refill(normal, verts * 3)
     refill(finish, verts)
     refill(thickness, verts)
+    refill(smoothed, verts * 3)
     refill(g.index!, corners)
     g.setDrawRange(0, corners)
   }
@@ -276,6 +279,7 @@ export class Stone {
     g.setAttribute('normal', dynamic(new Float32Array(vertexRoom * 3), 3))
     g.setAttribute('finish', dynamic(new Float32Array(vertexRoom), 1))
     g.setAttribute('thickness', dynamic(new Float32Array(vertexRoom), 1))
+    g.setAttribute('smoothNormal', dynamic(new Float32Array(vertexRoom * 3), 3))
     g.setIndex(dynamic(new Uint32Array(Math.ceil(corners * 1.4) + 6144), 1))
     // Fixed bounds from the grid: nothing the bundle's chunks can hold reaches outside them.
     const box = new THREE.Box3()

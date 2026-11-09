@@ -250,7 +250,9 @@ export class Dust {
           m.assign(vec4(u.dir.mul(speed).add(r.mul(u.speed).mul(u.spread)), u.life.mul(hash(s.add(91)).mul(0.8).add(0.6))))
         }).ElseIf(p.w.lessThan(m.w), () => {
           // Stone dust is heavy for dust: it is thrown, stalls in the air within a hand's width, then sinks.
-          const velocity = m.xyz.mul(exp(u.dt.mul(-2.4))).add(vec3(0.5, -11, -0.3).mul(u.dt)).toVar()
+          // Each grain sinks at its own rate, so a puff thins out downward instead of falling as one sheet.
+          const sink = hash(instanceIndex.add(4513)).mul(10).add(3)
+          const velocity = m.xyz.mul(exp(u.dt.mul(-2.4))).add(vec3(0.5, sink.negate(), -0.3).mul(u.dt)).toVar()
           const moved = p.xyz.add(velocity.mul(u.dt)).toVar()
           moved.y.assign(max(moved.y, floor))
           p.assign(vec4(moved, p.w.add(u.dt)))
@@ -270,10 +272,19 @@ export class Dust {
     // A puff particle swells as it slows. A mote is a speck: a pixel or three across however far
     // off it is, since a real one is seen by the light it scatters and not by its size.
     const far = here.xyz.sub(cameraPosition).length()
-    material.scaleNode = mote.select(far.mul(own.mul(0.0009).add(0.0008)), age.mul(4.5).add(0.9).mul(own.mul(0.6).add(0.7)).mul(here.w.lessThan(going.w).select(1, 0)))
-    const soft = smoothstep(0.5, 0.08, uv().sub(0.5).length())
+    // Puff grains are of every size, most small and a few broad and faint, so a cloud never reads as
+    // a fall of equal discs; and a long-lived puff (a slab landing) is made of broader ones than a blow's.
+    const grain = hash(instanceIndex.add(2671))
+    const broad = grain.pow(3).mul(2.6).add(0.35)
+    const lasting = going.w.mul(0.32).add(0.45).clamp(0.6, 2.4)
+    const motes = far.mul(hash(instanceIndex.add(331)).pow(4).mul(0.0026).add(own.mul(0.0007).add(0.0006)))
+    material.scaleNode = mote.select(motes, age.mul(4.5).add(0.9).mul(broad).mul(lasting).mul(here.w.lessThan(going.w).select(1, 0)))
+    // Soft all the way to the middle: a gaussian-ish blot, not a disc with a rim.
+    const soft = smoothstep(0.5, 0, uv().sub(0.5).length()).pow(2.2)
     const rise = smoothstep(0, 0.06, age)
-    const puffAlpha = rise.mul(age.oneMinus().pow(1.6)).mul(0.11)
+    // The broad grains are the faint ones; no grain is brighter than before, and most are fainter.
+    const thin = hash(instanceIndex.add(6007)).mul(0.7).add(0.35).div(broad.sqrt().max(1))
+    const puffAlpha = rise.mul(age.oneMinus().pow(1.6)).mul(0.15).mul(thin)
     // Motes come and go on their own slow beat, and there are only as many as the work has raised.
     const twinkle = sin(u.time.mul(own.mul(0.5).add(0.25)).add(own.mul(50))).mul(0.5).add(0.5)
     // A third of them at the most: the haze itself is the post stack's shaft, and these are the

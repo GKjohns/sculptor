@@ -97,6 +97,9 @@ const PUFFS_PER_S = 28
 export const MAX_MOVING = 24
 export const MAX_PIECES = 56
 export const MAX_TRIS = 450_000
+/** A piece that will not come off the sculpture is shrunk away over this long, s, after this many pushes. */
+const VANISH_S = 0.6
+const NUDGES = 2
 /** A restored pile is at most this many chips. */
 const RESTORED_CHIPS = 4600
 
@@ -149,6 +152,8 @@ interface Piece {
   vy: number
   vz: number
   sinceHit: number
+  /** Times it has come to rest on the stone and been pushed off again. */
+  nudges: number
 }
 
 // How many chips a bite of this much stone throws.
@@ -202,6 +207,8 @@ export class Debris {
   private moving = 0
   private tris = 0
   private stepMs = 0
+  // Pieces that came to rest on the sculpture and would not slide off, shrinking out of sight.
+  private vanishing: { mesh: THREE.Mesh, left: number, scale: number }[] = []
 
   // The stone as boxes: min xyz and max xyz per chunk, and the colliders made from them.
   private grid: GridInfo
@@ -242,6 +249,7 @@ export class Debris {
   private s = new THREE.Vector3()
   private e = new THREE.Euler()
   private tint = new THREE.Color()
+  private box = new THREE.Box3()
 
   constructor(private studio: StudioRenderer, private stone: Stone, options: DebrisOptions = {}) {
     this.floorY = options.floorY ?? -84
@@ -446,6 +454,7 @@ export class Debris {
     this.restTokens = Math.min(30, this.restTokens + REST_PER_S * dt)
     this.puffTokens = Math.min(8, this.puffTokens + PUFFS_PER_S * dt)
     this.simulate(dt)
+    this.shrink(dt)
     this.fly(dt)
     if (this.chipsDirty) {
       this.chipsDirty = false
@@ -458,6 +467,7 @@ export class Debris {
 
   /** A fresh block: the floor is swept, the air clears. */
   reset() {
+    this.clearVanishing()
     for (const piece of this.pieces) this.discard(piece)
     this.pieces = []
     this.jobs = []
@@ -479,6 +489,7 @@ export class Debris {
    * raises. The same log gives the same pile.
    */
   settle(log: readonly Strike[], applied: number) {
+    this.clearVanishing()
     for (const piece of this.pieces) this.discard(piece)
     this.pieces = []
     this.jobs = []
@@ -530,6 +541,7 @@ export class Debris {
   }
 
   dispose() {
+    this.clearVanishing()
     for (const piece of this.pieces) this.discard(piece)
     this.pieces = []
     this.jobs = []
@@ -717,7 +729,7 @@ export class Debris {
       mesh, body, cm3, origin, shell, low,
       tris: shell.indices.length / 3,
       age: 0, quiet: 0, grace, breakable, wantsBreak: false, big, fixed: false,
-      vx: v.x, vy: v.y, vz: v.z, sinceHit: 0
+      vx: v.x, vy: v.y, vz: v.z, sinceHit: 0, nudges: 0
     }
     this.pieces.push(piece)
     this.moving++
@@ -882,7 +894,8 @@ export class Debris {
       const y = Math.max(this.ground(t.x, t.z, t.y) + 1, t.y - 6)
       const weight = Math.min(1, piece.cm3 / 20000)
       this.dust?.raise(piece.cm3 * 0.04)
-      this.dust?.puff(t.x, y, t.z, 0, 0.5, 0, Math.min(60, (0.5 + weight * 30) * Math.min(1.5, lost / 200)), 90 + weight * 160)
+      // Slow and low, so the cloud stays round where the piece came down long enough to be seen.
+      this.dust?.puff(t.x, y, t.z, 0, 0.6, 0, Math.min(60, (1.5 + weight * 36) * Math.min(1.5, lost / 160)), 55 + weight * 70)
       const burst = Math.round(Math.min(breaks ? 36 : 12, (2 + weight * 40) * lost / 250))
       const size = Math.cbrt(piece.cm3)
       for (let i = 0; i < burst; i++) {
@@ -970,9 +983,24 @@ export class Debris {
     piece.mesh.matrixAutoUpdate = true
   }
 
-  // A piece that has stopped: frozen where it lies, still something to land on.
+  // A piece that has stopped: frozen where it lies, still something to land on. Except on the
+  // sculpture: nothing is left lodged on the piece being carved. It is pushed off, outward and a
+  // little up, and one that still comes to rest there is shrunk away.
   private fix(piece: Piece) {
     if (piece.fixed) return
+    if (this.onStone(piece)) {
+      if (piece.nudges < NUDGES && piece.age < 12) {
+        piece.nudges++
+        piece.quiet = 0
+        const { x, z } = piece.mesh.position
+        const away = Math.hypot(x, z) || 1
+        piece.body.setLinvel({ x: x / away * 70, y: 35, z: z / away * 70 }, true)
+        piece.body.setAngvel({ x: this.rng.range(-2, 2), y: 0, z: this.rng.range(-2, 2) }, true)
+        return
+      }
+      this.vanish(piece)
+      return
+    }
     piece.fixed = true
     piece.wantsBreak = false
     this.moving--
@@ -981,6 +1009,72 @@ export class Debris {
     piece.mesh.matrixAutoUpdate = false
     this.lighten(piece)
     this.trim()
+  }
+
+  // Resting on the sculpture rather than on the banker, the floor or the pile: within the block's
+  // footprint, and either higher above what is under it than a piece lying flat, or touching the
+  // stone and standing up off the flat (a slab leaning on the plinth).
+  private onStone(piece: Piece) {
+    const leans = this.leans(piece)
+    // leans() leaves the piece's middle in this.v.
+    const { x, z } = this.v
+    const g = this.grid
+    const span = g.chunk * g.voxel
+    if (!(x > g.x0 - 4 && x < g.x0 + g.ncx * span + 4 && z > g.z0 - 4 && z < g.z0 + g.ncz * span + 4)) return false
+    if (leans) return true
+    const box = piece.mesh.geometry.boundingBox
+    if (!box || !this.touchesStone(piece)) return false
+    const least = Math.min(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z)
+    this.m.compose(piece.mesh.position, piece.mesh.quaternion, this.s.set(1, 1, 1))
+    const tall = this.box.copy(box).applyMatrix4(this.m)
+    return tall.max.y - tall.min.y > least * 1.6 + 2
+  }
+
+  // Whether the piece's collider has a contact point on any of the stone's boxes.
+  private touchesStone(piece: Piece) {
+    const world = this.world
+    if (!world) return false
+    const mine = piece.body.collider(0)
+    let touching = false
+    world.contactPairsWith(mine, (other) => {
+      if (touching || !this.stoneColliders.includes(other)) return
+      world.contactPair(mine, other, (manifold) => {
+        if (manifold.numContacts() > 0) touching = true
+      })
+    })
+    return touching
+  }
+
+  private vanish(piece: Piece) {
+    const at = this.pieces.indexOf(piece)
+    if (at >= 0) this.pieces.splice(at, 1)
+    if (!piece.fixed) this.moving--
+    this.tris -= piece.tris
+    this.world?.removeRigidBody(piece.body)
+    piece.mesh.matrixAutoUpdate = true
+    this.vanishing.push({ mesh: piece.mesh, left: VANISH_S, scale: piece.mesh.scale.x })
+  }
+
+  private shrink(dt: number) {
+    for (let i = this.vanishing.length - 1; i >= 0; i--) {
+      const v = this.vanishing[i]!
+      v.left -= dt
+      const k = Math.max(0, v.left / VANISH_S)
+      // About its own middle: an offcut's mesh is centred on its centroid.
+      v.mesh.scale.setScalar(v.scale * k * k * (3 - 2 * k))
+      if (v.left > 0) continue
+      v.mesh.removeFromParent()
+      v.mesh.geometry.dispose()
+      this.vanishing.splice(i, 1)
+    }
+  }
+
+  private clearVanishing() {
+    for (const v of this.vanishing) {
+      v.mesh.removeFromParent()
+      v.mesh.geometry.dispose()
+    }
+    this.vanishing = []
   }
 
   // Past the budget, the oldest pieces at rest are cleared away.

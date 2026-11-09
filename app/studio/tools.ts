@@ -51,10 +51,14 @@ const RHYTHM_BELOW = 4.2
 const RHYTHM_HZ = 4.6
 // The share of a swing spent coming down, and how long the downswing takes when it follows a strike, s.
 const RAISED = 0.62
+// Where in its swing the mallet hangs when no blow is due: low, just off the chisel's head.
+const MALLET_REST = 0.06
 const DOWN_S = 0.13
 // After this long without a blow the tool backs off the stone; after this long it is put down.
 const PAUSE_S = 0.9
-const REST_S = 5
+const REST_S = 2.5
+// How long the saw waits, out of its cut, before it is put down: it leaves the piece once its cut is through.
+const SAW_LINGER_S = 0.25
 const STANDOFF_CM = 9
 // How long a pick-up or a put-down takes to mostly happen, s.
 const CARRY_S = 0.2
@@ -68,8 +72,23 @@ function steel(): THREE.MeshStandardNodeMaterial {
   const p = positionLocal as unknown as ReturnType<typeof vec3>
   const wear = mx_noise_float(vec3(p.x.mul(2.2), p.y.mul(0.35), p.z.mul(2.2))).mul(0.5).add(0.5)
   const pits = mx_noise_float(p.mul(5.5)).mul(0.5).add(0.5)
-  material.colorNode = mix(vec3(0.26, 0.24, 0.22), vec3(0.66, 0.67, 0.7), smoothstep(0.25, 0.8, wear)).mul(pits.mul(0.25).add(0.8))
-  material.roughnessNode = mix(float(0.62), float(0.3), smoothstep(0.3, 0.8, wear))
+  // Kept dark and no smoother than satin: the saw's blade is a hand's breadth of flat metal, and
+  // any brighter or glossier it mirrors the window and goes to white under the tone curve.
+  material.colorNode = mix(vec3(0.2, 0.185, 0.17), vec3(0.42, 0.43, 0.45), smoothstep(0.25, 0.8, wear)).mul(pits.mul(0.25).add(0.8))
+  material.roughnessNode = mix(float(0.7), float(0.46), smoothstep(0.3, 0.8, wear))
+  return material
+}
+
+// The saw's blade: a long flat of plain dull steel. The chisel's streaky wear, stretched over a
+// blade this size, read as birch bark; this is a faint grain along the blade and nothing more,
+// dark and matt enough that the window does not mirror in it and bloom it to white.
+function bladeSteel(): THREE.MeshStandardNodeMaterial {
+  const material = new THREE.MeshStandardNodeMaterial({ color: 0x55585c, metalness: 0.75, roughness: 0.6 })
+  material.name = 'tool-blade'
+  const p = positionLocal as unknown as ReturnType<typeof vec3>
+  const grain = mx_noise_float(vec3(p.x.mul(0.08), p.y.mul(3), p.z)).mul(0.5).add(0.5)
+  material.colorNode = mix(vec3(0.2, 0.205, 0.21), vec3(0.29, 0.3, 0.31), grain)
+  material.roughnessNode = mix(float(0.66), float(0.54), grain)
   return material
 }
 
@@ -165,6 +184,8 @@ export class Tools {
   private rate = 1
   private sawDust = 0
   private sawing = false
+  // Seconds since the saw was last in a cut.
+  private sawIdle = 99
 
   private sawPosition = new THREE.Vector3(0, 100, 0)
   private sawQuaternion = new THREE.Quaternion()
@@ -181,9 +202,10 @@ export class Tools {
     const half = options.bankerHalf ?? 47
     this.block = options.block ?? [60, 100, 60]
     const metal = steel()
+    const blade = bladeSteel()
     const timber = wood()
     const cloth = felt()
-    this.materials = [metal, timber, cloth]
+    this.materials = [metal, blade, timber, cloth]
     this.root.name = 'tools'
 
     // Chisel: tip at the origin, +Y back along the shaft to the struck end.
@@ -209,12 +231,12 @@ export class Tools {
     // across its back, so it can sink as deep as the block is. The middle of the toothed edge is
     // the origin; the blade runs along X, cuts toward -Y, and is thin in Z.
     const saw = new THREE.Group()
-    const blade = new THREE.BoxGeometry(96, 10, 0.24, 48, 1, 1)
-    const teeth = blade.getAttribute('position') as THREE.BufferAttribute
+    const plate = new THREE.BoxGeometry(96, 10, 0.24, 48, 1, 1)
+    const teeth = plate.getAttribute('position') as THREE.BufferAttribute
     // Teeth: every other vertex along the cutting edge is pulled back.
     for (let i = 0; i < teeth.count; i++) if (teeth.getY(i) < 0 && Math.round((teeth.getX(i) + 48) / 2) % 2 === 1) teeth.setY(i, teeth.getY(i) + 0.9)
-    blade.computeVertexNormals()
-    saw.add(mesh(at(blade, 0, 5, 0), metal))
+    plate.computeVertexNormals()
+    saw.add(mesh(at(plate, 0, 5, 0), blade))
     saw.add(mesh(mergeGeometries([
       at(new THREE.BoxGeometry(3.2, 13, 2.6), -47, 8, 0),
       at(new THREE.BoxGeometry(3.2, 13, 2.6), 47, 8, 0),
@@ -292,10 +314,7 @@ export class Tools {
   strikes(events: StrikeEvent[], rate: number) {
     this.rate = rate
     for (const event of events) {
-      if (event.kind === 'saw') {
-        this.sawing = false
-        continue
-      }
+      if (event.kind === 'saw') continue
       const actor = ACTOR[event.tool] ?? 'chisel'
       this.use(actor, event.tool)
       const [x, y, z] = event.at
@@ -320,10 +339,10 @@ export class Tools {
   /** The strike the clock is on its way to, every frame; null when nothing is due. */
   upcoming(next: UpcomingStrike | null) {
     this.next = next
-    if (next?.strike.kind === 'saw') {
-      this.sawing = true
-      this.use('saw', 'saw')
-    }
+    // Only while its cut is running: paused, held for a look or waiting on the sculptor, the saw
+    // is not left hanging over the piece where the next cut would start.
+    this.sawing = next?.strike.kind === 'saw'
+    if (this.sawing) this.use('saw', 'saw')
   }
 
   /** The sculptor has stepped back (true) or come back to the stone. */
@@ -339,6 +358,7 @@ export class Tools {
     this.blows = this.pendingBlows = 0
     this.rhythm = false
     this.sawing = false
+    this.sawIdle = 99
     this.next = null
   }
 
@@ -360,8 +380,9 @@ export class Tools {
     if (this.axis.lengthSq() < 1e-4) this.axis.copy(this.axisGoal)
     this.axis.normalize()
 
-    const idle = this.sawing ? 0 : this.sinceBlow
-    const down = this.looking || idle > REST_S || !this.active
+    this.sawIdle = this.sawing ? 0 : this.sawIdle + dt
+    const idle = this.active === 'saw' ? this.sawIdle : this.sinceBlow
+    const down = this.looking || idle > (this.active === 'saw' ? SAW_LINGER_S : REST_S) || !this.active
     const backOff = idle > PAUSE_S ? STANDOFF_CM : 0
     this.standoff += (backOff - this.standoff) * (1 - Math.exp(-dt / 0.25))
     // One tool in the air at a time: the new one waits for the old to be nearly down.
@@ -438,7 +459,10 @@ export class Tools {
     }
     const next = this.next
     const coming = next && next.strike.kind === 'cut' && ACTOR[next.strike.tool] === 'chisel' ? next.inS : Infinity
-    if (coming <= DOWN_S && this.phase >= RAISED - 0.08) {
+    if (this.sinceBlow > PAUSE_S && coming > 0.35) {
+      // Nothing due: the mallet is let down to hang by the chisel's head, and lifted again just before the next blow.
+      this.phase += (MALLET_REST - this.phase) * (1 - Math.exp(-dt / 0.3))
+    } else if (coming <= DOWN_S && this.phase >= RAISED - 0.08) {
       // Coming down to land as the strike does.
       this.phase = Math.max(this.phase, Math.min(0.995, 1 - (1 - RAISED) * coming / DOWN_S))
     } else if (this.phase < RAISED) {

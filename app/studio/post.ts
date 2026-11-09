@@ -3,7 +3,7 @@
  *
  *   pre-pass      depth and normals of everything opaque, in one flat material
  *   ao            GTAO at half resolution from the pre-pass; it dims indirect light only
- *   contact       screen-space shadows toward the key, multiplied into the key's shadow
+ *   contact       screen-space shadows toward the key, multiplied into the key's shadow (off by default)
  *   scene pass    the beauty render, lit with both of those through its context
  *   god rays      the window's shaft, marched through the key's shadow map at half resolution
  *   traa          temporal anti-aliasing (it also resolves the dithered soft shadows and the AO)
@@ -41,7 +41,9 @@ export interface PostEffects {
   vignette: boolean
 }
 
-const FILM: PostEffects = { ao: true, contact: true, godrays: true, traa: true, dof: true, bloom: true, grain: true, vignette: true }
+// Contact shadows are built but off: against 0.4 cm voxels at half resolution they drew blotches
+// and hatching on smooth stone and a hard edge over the key's penumbra. `?fx=contact` for a look.
+const FILM: PostEffects = { ao: true, contact: false, godrays: true, traa: true, dof: true, bloom: true, grain: true, vignette: true }
 const PLAIN: PostEffects = { ao: false, contact: false, godrays: false, traa: false, dof: false, bloom: false, grain: true, vignette: true }
 
 type Float = THREE.Node<'float'>

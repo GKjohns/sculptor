@@ -25,7 +25,7 @@ export interface LookPreset {
 
 export const LOOKS: Record<string, LookPreset> = {
   // The whole room: banker, floor, the shaft from the window, the back wall falling away.
-  wide: { from: [118, 58, 372], at: [34, 30, 0], fov: 36, focus: [0, 55, 0], aperture: 0.12 },
+  wide: { from: [64, 64, 226], at: [30, 36, -6], fov: 36, focus: [0, 55, 0], aperture: 0.12 },
   // Three-quarter on the stone, the default watching distance.
   medium: { from: [104, 86, 182], at: [0, 52, 0], fov: 32, focus: [0, 60, 20], aperture: 0.2 },
   // The face, or whatever is being worked at that height, on a long lens wide open.
@@ -108,7 +108,7 @@ const plan = (along: number, across: number): [number, number] => [along * ALONG
 /**
  * A fixed stone for storyboard frame 5: the block taken down to a table at 60 cm, left as the
  * point chisel leaves it, with one band of it rasped and one rasped and polished, and standing on
- * it a fin of stone a couple of centimetres thick at the middle and nothing at the rim.
+ * it a fin of stone: a slab a centimetre and a half thick.
  * `size` is the block, cm. Deterministic.
  */
 export function frame5Strikes(size: Vec3): Strike[] {
@@ -116,8 +116,9 @@ export function frame5Strikes(size: Vec3): Strike[] {
   const rng = createRng(505)
   const table = 60
   const [fx, fz] = plan(-5, -12)
-  // Thin along the light, so the light goes through it.
-  const fin = { kind: 'ellipsoid' as const, center: [fx, table + 5, fz] as Vec3, size: [2.4, 30, 19] as Vec3, rotation: [0, 39, 0] as Vec3 }
+  // A slab a centimetre and a half through, square to the grid so that its faces come out flat,
+  // standing across the light.
+  const fin = { kind: 'box' as const, center: [fx, table + 9, fz] as Vec3, size: [1.5, 26, 17] as Vec3, rotation: [0, 0, 0] as Vec3 }
   const strikes: Strike[] = [
     { kind: 'form', name: 'frame5', blend: 0, shapes: [{ kind: 'box', center: [0, table / 2, 0], size: [w + 4, table, d + 4], rotation: [0, 0, 0] }, fin] },
     { kind: 'form', name: 'frame5-fin', blend: 0, shapes: [fin] }

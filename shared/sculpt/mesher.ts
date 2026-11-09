@@ -1,5 +1,5 @@
 import { BAND_VOXELS, MESH_REACH, Q_MAX, chunkCoords, chunkCount } from './grid.ts'
-import type { ChunkMesh, Grid, MeshData } from './types.ts'
+import type { ChunkMesh, Grid, MeshData, Vec3 } from './types.ts'
 
 // Naive surface nets. Every cell (the cube between eight neighbouring samples) that the
 // surface passes through gets one vertex, and every sample-to-sample edge that crosses the
@@ -191,6 +191,7 @@ export function emptyMesh(): MeshData {
     normals: new Float32Array(0),
     finish: new Uint8Array(0),
     thickness: new Uint8Array(0),
+    smooth: new Float32Array(0),
     indices: new Uint32Array(0)
   }
 }
@@ -240,112 +241,191 @@ export function surfaceNets(
   // Drop the references so a large offcut field can be collected.
   fDist = NO_FIELD
   fFinish = null
+  const normals = vNrm.slice(0, nVert * 3)
   return {
     positions: vPos.slice(0, nVert * 3),
-    normals: vNrm.slice(0, nVert * 3),
+    normals,
     finish: vFin.slice(0, nVert),
     thickness: new Uint8Array(nVert).fill(255),
+    smooth: normals.slice(),
     indices: tris.slice(0, nIdx)
   }
 }
 
-// Thickness: how much stone stands behind each vertex, for the renderer's light through thin
-// sections (an ear, a drapery edge, the arris of the block). It is no part of the geometry: the
-// kernel never reads it and it changes no hash.
-//
-// From each vertex four rays go into the stone, one straight down the normal and three leaning
-// 45 degrees off it, each until it comes out the far side or has gone THICKNESS_CM. The vertex
-// gets their mean: a sheet is thin along all four, a ridge or an arris along one or two.
-// Rays step by the stored distance, which never overstates how far the surface is.
-export const THICKNESS_CM = 2.4
+// Smooth normals: the gradient of the distance field blurred by a Gaussian two voxels wide, for
+// the renderer to shade worked stone with. The geometry keeps every groove a tool left, a voxel or
+// two deep and as regular as the hand's strokes; shaded with its own normals a clawed or rasped
+// face reads as corduroy. The blur takes ridges three voxels apart down to nothing and ridges six
+// apart (the hand's stroke spacing) to about a tenth, where a nose or a brow, some centimetres
+// across, keeps its shape. Like thickness it is no part of the geometry.
+const SIGMA = 2
+// Samples either side of the vertex that the blur reads: 2.5 sigma.
+const SPAN = 5
+const SIDE = 2 * SPAN
+// The field's slope across the surface, q per voxel.
+const SLOPE = Q_MAX / BAND_VOXELS
+const wx = new Float64Array(SIDE)
+const ux = new Float64Array(SIDE)
+const wy = new Float64Array(SIDE)
+const uy = new Float64Array(SIDE)
+const wz = new Float64Array(SIDE)
+const uz = new Float64Array(SIDE)
+function gaussian(w: Float64Array, u: Float64Array, f: number): number {
+  let sum = 0
+  for (let k = 0; k < SIDE; k++) {
+    const d = k - (SPAN - 1) - f
+    w[k] = Math.exp(-d * d / (2 * SIGMA * SIGMA))
+    u[k] = w[k]! * d
+    sum += w[k]!
+  }
+  return sum
+}
 
-// A grid whose chunks are to be meshed with thickness. The rays leave the chunk, so a changed
-// sample has to flag every chunk with a vertex in ray's reach of it, not only the chunks whose
-// geometry reads it. Call it before the first edit.
+function bakeSmooth(grid: Grid, mesh: MeshData): void {
+  const { positions, normals, smooth } = mesh
+  const { nx, ny, nz, dist } = grid
+  const sxy = nx * ny
+  const inv = 1 / grid.voxel
+  for (let v = 0; v < smooth.length; v += 3) {
+    const px = (positions[v]! - grid.x0) * inv
+    const py = (positions[v + 1]! - grid.y0) * inv
+    const pz = (positions[v + 2]! - grid.z0) * inv
+    const x0 = Math.floor(px) - (SPAN - 1)
+    const y0 = Math.floor(py) - (SPAN - 1)
+    const z0 = Math.floor(pz) - (SPAN - 1)
+    // The weights are separable: one row of them per axis, and the same rows times the offset.
+    const norm = gaussian(wx, ux, px - Math.floor(px)) * gaussian(wy, uy, py - Math.floor(py)) * gaussian(wz, uz, pz - Math.floor(pz))
+    const inside = x0 >= 0 && y0 >= 0 && z0 >= 0 && x0 + SIDE <= nx && y0 + SIDE <= ny && z0 + SIDE <= nz
+    let gx = 0
+    let gy = 0
+    let gz = 0
+    for (let c = 0; c < SIDE; c++) {
+      const z = z0 + c
+      for (let b = 0; b < SIDE; b++) {
+        const y = y0 + b
+        // Along one row of x: the plain blur and the blur times the x offset.
+        let sx = 0
+        let tx = 0
+        if (inside) {
+          const row = x0 + nx * y + sxy * z
+          for (let a = 0; a < SIDE; a++) {
+            const d = dist[row + a]!
+            sx += d * wx[a]!
+            tx += d * ux[a]!
+          }
+        } else {
+          for (let a = 0; a < SIDE; a++) {
+            const xx = x0 + a
+            // Beyond the grid is air.
+            const d = xx < 0 || y < 0 || z < 0 || xx >= nx || y >= ny || z >= nz ? Q_MAX : dist[xx + nx * y + sxy * z]!
+            sx += d * wx[a]!
+            tx += d * ux[a]!
+          }
+        }
+        gx += tx * wy[b]! * wz[c]!
+        gy += sx * uy[b]! * wz[c]!
+        gz += sx * wy[b]! * uz[c]!
+      }
+    }
+    // The blurred field's gradient, q per voxel.
+    const k = 1 / (norm * SIGMA * SIGMA)
+    gx *= k
+    gy *= k
+    gz *= k
+    const len = Math.sqrt(gx * gx + gy * gy + gz * gz)
+    if (len < 1e-6) continue
+    // A sheet or a spike thinner than the blur has stone on both sides of it and next to no slope
+    // left, or a slope that is not its own: it eases back to its own normal.
+    const own = gx * normals[v]! + gy * normals[v + 1]! + gz * normals[v + 2]!
+    const t = ease(len / SLOPE, 0.15, 0.45) * ease(own / len, 0.2, 0.6)
+    if (t <= 0) continue
+    const ox = normals[v]! * (1 - t) + gx / len * t
+    const oy = normals[v + 1]! * (1 - t) + gy / len * t
+    const oz = normals[v + 2]! * (1 - t) + gz / len * t
+    const ol = Math.sqrt(ox * ox + oy * oy + oz * oz) || 1
+    smooth[v] = ox / ol
+    smooth[v + 1] = oy / ol
+    smooth[v + 2] = oz / ol
+  }
+}
+
+function ease(x: number, from: number, to: number): number {
+  const t = Math.min(1, Math.max(0, (x - from) / (to - from)))
+  return t * t * (3 - 2 * t)
+}
+
+// Thickness: how much stone the studio's key light has to come through to reach each vertex
+// from behind, for the renderer's light through thin sections (an ear, a drapery edge, a slab
+// left standing). It is no part of the geometry: the kernel never reads it and it changes no hash.
+//
+// A vertex that faces the light is lit from the front and is given full thickness. One that
+// faces away sends a ray from just under its surface toward the light and adds up the stone
+// along its first THICKNESS_CM. A head is thick this way whatever its surface is doing; a slab
+// or an ear with air behind it is as thin as it is.
+export const THICKNESS_CM = 3.2
+
+// Where the key light comes from, block coordinates, unit length: down through the studio's
+// window (app/studio/atelier.ts places its key on this line).
+export const KEY_FROM: Vec3 = [-0.65294, 0.54847, 0.52235]
+
+// A grid whose chunks are to be meshed with smooth normals and thickness. The rays leave the
+// chunk, so a changed sample has to flag every chunk with a vertex in ray's reach of it, not only
+// the chunks whose geometry reads it. Call it before the first edit.
 export function trackThickness(grid: Grid): void {
   grid.reach = MESH_REACH + Math.ceil(THICKNESS_CM / grid.voxel)
 }
 
-const LEAN = Math.SQRT1_2
-// The three leaning rays stand 120 degrees apart round the normal.
-const RING_COS = [1, -0.5, -0.5]
-const RING_SIN = [0, 0.8660254037844386, -0.8660254037844386]
 const VOXELS_PER_Q = BAND_VOXELS / Q_MAX
-// Voxels down the normal that the rays start from.
-const START = 1.6
+// Voxels under the surface that a ray starts from.
+const START = 0.9
+// How squarely a vertex has to face the light before it counts as lit from the front, and how
+// far past edge-on the thickness is eased toward full, so the terminator has no seam.
+const FRONT = 0.2
+const BEHIND = -0.15
 
-// Distance in voxels from (px, py, pz), in sample coordinates, along a unit direction to the
-// first air, or `reach` if there is none that near. The start has to be well inside the stone:
-// samples are read at the nearest one, and next to the surface the nearest one can be air.
-function throughStone(grid: Grid, px: number, py: number, pz: number, dx: number, dy: number, dz: number, reach: number): number {
+// How many voxels of stone lie along the first `reach` voxels of a ray from (px, py, pz), in
+// sample coordinates. All of it, not just as far as the first air: the far flank of a tool
+// groove has a rib and then the whole block between it and the light, and is not thin.
+// Each half-voxel step counts for as much of itself as the stored distance says is stone.
+const STEP = 0.5
+function stoneAlong(grid: Grid, px: number, py: number, pz: number, dx: number, dy: number, dz: number, reach: number): number {
   const { nx, ny, nz, dist } = grid
-  let t = 0
-  let before = 0
-  let qBefore = -1
-  while (t < reach) {
+  let stone = 0
+  for (let t = STEP / 2; t < reach; t += STEP) {
     const x = Math.round(px + dx * t)
     const y = Math.round(py + dy * t)
     const z = Math.round(pz + dz * t)
-    if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) return t
-    const q = dist[x + nx * (y + ny * z)]!
-    // Out the far side: the crossing lies between this sample and the one before.
-    if (q >= 0) return before + (t - before) * (qBefore / (qBefore - q - 0.5))
-    before = t
-    qBefore = q
-    const step = -q * VOXELS_PER_Q * 0.85
-    t += step > 0.6 ? step : 0.6
+    // Beyond the grid there is only air, however far the ray goes on.
+    if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) break
+    const inside = 0.5 - dist[x + nx * (y + ny * z)]! * VOXELS_PER_Q / STEP
+    stone += inside >= 1 ? STEP : inside > 0 ? inside * STEP : 0
   }
-  return reach
+  return stone
 }
 
 function bakeThickness(grid: Grid, mesh: MeshData): void {
-  const { positions, normals, thickness } = mesh
+  const { positions, smooth, thickness } = mesh
   const inv = 1 / grid.voxel
   const reach = THICKNESS_CM * inv
+  const [lx, ly, lz] = KEY_FROM
   for (let v = 0; v < thickness.length; v++) {
-    const px = (positions[3 * v]! - grid.x0) * inv
-    const py = (positions[3 * v + 1]! - grid.y0) * inv
-    const pz = (positions[3 * v + 2]! - grid.z0) * inv
-    // Into the stone.
-    const ix = -normals[3 * v]!
-    const iy = -normals[3 * v + 1]!
-    const iz = -normals[3 * v + 2]!
-    // Two directions square to it and to each other, starting from the axis it leans on least.
-    let ux: number
-    let uy: number
-    let uz: number
-    if (Math.abs(ix) < 0.57) {
-      ux = 0
-      uy = -iz
-      uz = iy
-    } else {
-      ux = iz
-      uy = 0
-      uz = -ix
+    const nx = smooth[3 * v]!
+    const ny = smooth[3 * v + 1]!
+    const nz = smooth[3 * v + 2]!
+    const facing = nx * lx + ny * ly + nz * lz
+    if (facing >= FRONT) {
+      thickness[v] = 255
+      continue
     }
-    const ul = 1 / Math.sqrt(ux * ux + uy * uy + uz * uz)
-    ux *= ul
-    uy *= ul
-    uz *= ul
-    const wx = iy * uz - iz * uy
-    const wy = iz * ux - ix * uz
-    const wz = ix * uy - iy * ux
-    // Every ray starts from the same point a little way down the normal.
-    const ox = px + ix * START
-    const oy = py + iy * START
-    const oz = pz + iz * START
-    const left = reach - START
-    let sum = throughStone(grid, ox, oy, oz, ix, iy, iz, left)
-    for (let r = 0; r < 3; r++) {
-      const c = RING_COS[r]! * LEAN
-      const s = RING_SIN[r]! * LEAN
-      sum += throughStone(
-        grid, ox, oy, oz,
-        ix * LEAN + ux * c + wx * s, iy * LEAN + uy * c + wy * s, iz * LEAN + uz * c + wz * s,
-        left
-      )
-    }
-    thickness[v] = Math.round(255 * (START + sum / 4) / reach)
+    const through = stoneAlong(
+      grid,
+      (positions[3 * v]! - grid.x0) * inv - nx * START,
+      (positions[3 * v + 1]! - grid.y0) * inv - ny * START,
+      (positions[3 * v + 2]! - grid.z0) * inv - nz * START,
+      lx, ly, lz, reach
+    ) / reach
+    const eased = facing > BEHIND ? through + (1 - through) * (facing - BEHIND) / (FRONT - BEHIND) : through
+    thickness[v] = Math.round(255 * eased)
   }
 }
 
@@ -353,8 +433,8 @@ let padDist = new Int8Array(0)
 let padFinish = new Uint8Array(0)
 
 // Meshes one chunk. The returned arrays are freshly allocated and exactly sized, ready to
-// transfer out of a worker. A chunk with no surface in it returns empty arrays. Thickness is
-// baked only on a grid that trackThickness() was called on.
+// transfer out of a worker. A chunk with no surface in it returns empty arrays. Smooth normals
+// and thickness are baked only on a grid that trackThickness() was called on.
 export function meshChunk(grid: Grid, chunk: number): ChunkMesh {
   const { nx, ny, nz, dist, finish } = grid
   const c = grid.chunk
@@ -404,7 +484,10 @@ export function meshChunk(grid: Grid, chunk: number): ChunkMesh {
     2, 2, 2, c + 2, c + 2, c + 2,
     bx, by, bz, grid.x0, grid.y0, grid.z0, grid.voxel
   )
-  if (grid.reach > MESH_REACH) bakeThickness(grid, mesh)
+  if (grid.reach > MESH_REACH) {
+    bakeSmooth(grid, mesh)
+    bakeThickness(grid, mesh)
+  }
   return { chunk, ...mesh }
 }
 

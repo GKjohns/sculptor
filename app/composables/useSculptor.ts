@@ -215,6 +215,8 @@ export function useSculptor() {
     const t = new Timeline<QueuedPass, QueuedLook>(s.kernel, s.stone, { speed: view.value.transport.speed, elastic: true, camera: s.camera, rebuild })
     t.onChange = () => statsStale = true
     t.onSketch = strike => s.charcoal?.draw(strike)
+    // Charcoal goes with the stone it was drawn on.
+    t.listen({ strikes: events => s.charcoal?.erase(events) })
     t.onPass = (pass) => {
       // The stone the lines were drawn on is about to come off.
       if (pass.tool !== 'sketch' && pass.tool !== 'declare_form') s.charcoal?.clear()

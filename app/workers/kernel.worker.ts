@@ -84,7 +84,7 @@ function flush() {
     const drawn = held.stone.drawn()
     const chunks = takeDirty(drawn).map(id => meshChunk(drawn, id))
     const buffers: Transferable[] = []
-    for (const c of chunks) buffers.push(c.positions.buffer, c.normals.buffer, c.finish.buffer, c.thickness.buffer, c.indices.buffer)
+    for (const c of chunks) buffers.push(c.positions.buffer, c.normals.buffer, c.finish.buffer, c.thickness.buffer, c.smooth.buffer, c.indices.buffer)
     // Sent even when nothing changed, so the page can follow rev.
     send({ type: 'chunks', stone, rev: held.rev, chunks }, buffers)
     if (held.offcuts.length) {

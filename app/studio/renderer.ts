@@ -106,6 +106,9 @@ export class StudioRenderer {
   private frameMs = 0
   private last = 0
   private disposed = false
+  private leave = () => {}
+  /** Resolves when the studio is disposed (the page left, or a hot reload replaced the scene): for whatever is awaiting frames that will now never come. */
+  readonly gone = new Promise<void>(done => this.leave = done)
   private focus: { point: THREE.Vector3, aperture: number } | null = null
 
   constructor(private host: HTMLElement, options: StudioOptions = {}) {
@@ -187,6 +190,24 @@ export class StudioRenderer {
     return new Promise<void>(done => this.waiters.push({ at: this.frames + count, done }))
   }
 
+  /**
+   * Draws a couple of frames with nothing culled, so every material in the room has its pipelines
+   * in every pass before anyone is watching. Left to the first time it comes into view (the
+   * quarried blocks at the back, when the director first swings round for a slab fall), a lit
+   * material costs a 100 ms frame: its own shader, and the AO and contact-shadow passes it reads
+   * are set up again with it. Call it once everything is on the stage, before the scene reports ready.
+   */
+  async prewarm() {
+    const culled: THREE.Object3D[] = []
+    this.scene.traverse((object) => {
+      if (!object.frustumCulled) return
+      object.frustumCulled = false
+      culled.push(object)
+    })
+    await this.rendered(2)
+    for (const object of culled) object.frustumCulled = true
+  }
+
   stats(): StudioStats {
     const size = this.renderer.getSize(new THREE.Vector2())
     const { drawCalls, triangles } = this.renderer.info.render
@@ -195,6 +216,7 @@ export class StudioRenderer {
 
   dispose() {
     this.disposed = true
+    this.leave()
     this.renderer.setAnimationLoop(null)
     this.resizer.disconnect()
     this.controls.dispose()
