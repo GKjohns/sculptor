@@ -1,7 +1,7 @@
 import { BAND_VOXELS, OCC, Q_MAX, Q_PER_VOXEL, markDirtyBox, unitsToCm3 } from './grid.ts'
 import { detachIslands, extractOffcuts } from './islands.ts'
 import { sampleDistance } from './raycast.ts'
-import { declareForm, formDistance } from './shapes.ts'
+import { declareForm, formDistance, formDistanceAt } from './shapes.ts'
 import { prepareTool, toolDistance, toolSpec } from './tools.ts'
 import type { ToolSpec } from './tools.ts'
 import type { CompiledForm, CutStrike, Grid, SawStrike, Strike, StrikeResult } from './types.ts'
@@ -24,8 +24,8 @@ function guardOf(grid: Grid, strike: CutStrike): CompiledForm | null {
 
 // The stored distance of a point from a protected form. Anything inside the form, however
 // slightly, stays at least one unit inside the stone.
-function protectedLimit(form: CompiledForm, x: number, y: number, z: number, qPerCm: number): number {
-  const d = formDistance(form, x, y, z)
+function protectedLimit(form: CompiledForm, grid: Grid, index: number, x: number, y: number, z: number, qPerCm: number): number {
+  const d = formDistanceAt(form, grid, index, x, y, z)
   const q = Math.round(d * qPerCm)
   return d < 0 && q > -1 ? -1 : q
 }
@@ -178,7 +178,7 @@ function bite(grid: Grid, strike: CutStrike, spec: ToolSpec): StrikeResult {
         if (q <= old) continue
         if (q > Q_MAX) q = Q_MAX
         if (form !== null) {
-          const limit = protectedLimit(form, px, py, pz, qPerCm)
+          const limit = protectedLimit(form, grid, i, px, py, pz, qPerCm)
           if (limit < q) {
             if (limit <= old) continue
             q = limit
@@ -560,7 +560,7 @@ function level(grid: Grid, strike: CutStrike, form: CompiledForm | null, mark: n
         if (q <= old) continue
         if (q > Q_MAX) q = Q_MAX
         if (form !== null) {
-          const limit = protectedLimit(form, px, py, pz, qPerCm)
+          const limit = protectedLimit(form, grid, i, px, py, pz, qPerCm)
           if (limit < q) {
             if (limit <= old) continue
             q = limit
@@ -700,7 +700,7 @@ function abrade(grid: Grid, strike: CutStrike, spec: ToolSpec): StrikeResult {
           if (stone > q) q = stone
         }
         if (q > old && form !== null) {
-          const limit = protectedLimit(form, px, py, pz, qPerCm)
+          const limit = protectedLimit(form, grid, i, px, py, pz, qPerCm)
           if (limit < q) q = limit
         }
         let edited = false

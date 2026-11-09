@@ -5,6 +5,7 @@
 import { z } from 'zod'
 import type { ToolSet } from 'ai'
 import { STYLE_TOKENS } from '../sculpt/anatomy.ts'
+import { ANIMAL_POSES, ARM_GESTURES, DRAPERIES, FIGURE_BODIES, FIGURE_BUILDS, LEADS, LEG_ACTIONS, SPECIES, SUPPORTS, TAILS, WEIGHT_SIDES } from '../sculpt/figure.ts'
 import { AXIS_VIEWS, VIEW_IDS } from '../sculpt/views.ts'
 import { STAGES } from './types.ts'
 import type { LookTool, PassTool, ReferenceMode, ToolCall, ToolName, ToolSetId } from './types.ts'
@@ -20,7 +21,7 @@ export const REFERENCE_TARGET = 'reference'
 export const NO_PROTECT = 'none'
 
 const DIRECT: ToolName[] = ['look', 'saw', 'chisel', 'note', 'finish']
-const FORMED: ToolName[] = ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish']
+const FORMED: ToolName[] = ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'declare_figure', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish']
 
 // Detail mode: the window of a focus is at most this wide, and strokes in it at most this
 // share of its width.
@@ -61,6 +62,46 @@ const shape = z.object({
   rot_y: z.number().describe('Degrees about Y'),
   rot_z: z.number().describe('Degrees about Z'),
   style: z.array(z.enum(STYLE_TOKENS)).max(12).describe('For a head or torso: who the sitter is, the expression, hair and drapery. An empty list for any other kind')
+})
+
+// ---------- Composition and pose: posed figures, animals and groups (sculpt/figure.ts) ----------
+
+// Subjects one declare_figure may hold, figures and animals together.
+export const MAX_SUBJECTS = 3
+
+const figure = z.object({
+  body: z.enum(FIGURE_BODIES),
+  build: z.enum(FIGURE_BUILDS),
+  ground_x: z.number().describe('Where it stands: the point on the ground between its feet, block cm'),
+  ground_y: z.number().describe('Height of the ground it stands on (the top of your base), cm'),
+  ground_z: z.number(),
+  height_cm: z.number().min(15).max(200).describe('Standing height sole to crown, as if upright; a kneeling or seated figure comes out lower'),
+  facing_deg: z.number().min(-360).max(360).describe('0 faces the viewer (+Z); positive turns it toward +X'),
+  legs: z.enum(LEG_ACTIONS),
+  weight_on: z.enum(WEIGHT_SIDES).describe('The figure\'s own leg that carries it: contrapposto when standing, the front leg of a stride or lunge, the planted foot of a kneel'),
+  twist_deg: z.number().min(-70).max(70).describe('Shoulders turned against the hips; positive turns the chest toward the figure\'s own left'),
+  lean_deg: z.number().min(-50).max(70).describe('Torso bent forward (+) or back (-) at the waist'),
+  head_turn_deg: z.number().min(-80).max(80).describe('Positive turns the face toward the figure\'s own left'),
+  head_tilt_deg: z.number().min(-45).max(45).describe('Positive nods the face down, negative throws the head back'),
+  left_arm: z.enum(ARM_GESTURES).describe('The figure\'s own left arm'),
+  right_arm: z.enum(ARM_GESTURES),
+  drapery: z.enum(DRAPERIES),
+  support: z.enum(SUPPORTS).describe('What a marble figure leans on: a tree stump by the weighted leg, a rock under or behind it (a rock under the free foot when standing). A seated figure always gets a seat; this says what it is'),
+  style: z.array(z.enum(STYLE_TOKENS)).max(8).describe('The head canon\'s tokens for this person: hair, beard, expression, nose, age. Sex and age come from body unless given')
+})
+
+const animal = z.object({
+  species: z.enum(SPECIES),
+  pose: z.enum(ANIMAL_POSES),
+  ground_x: z.number().describe('The point on the ground under the middle of its footprint, block cm'),
+  ground_y: z.number().describe('Height of the ground it stands on, cm; it is dropped onto it'),
+  ground_z: z.number(),
+  length_cm: z.number().min(10).max(150).describe('Body length, point of the chest to point of the rump (head, neck and tail add about half again)'),
+  facing_deg: z.number().min(-360).max(360).describe('0 faces the viewer (+Z); positive turns it toward +X. 45 or -45 lays a long animal along the diagonal of the block'),
+  head_turn_deg: z.number().min(-80).max(80).describe('Positive turns the head toward the animal\'s own left'),
+  head_raise_deg: z.number().min(-45).max(45).describe('Positive raises the head, negative lowers it (a charging bull is -15 to -30)'),
+  tail: z.enum(TAILS),
+  lead: z.enum(LEADS).describe('The foreleg that reaches first in a walk, trot, gallop or charge')
 })
 
 const OVERLAYS = ['grid', 'form', 'reference'] as const
@@ -110,6 +151,18 @@ const SCHEMAS = {
     shapes: z.array(shape).min(1).max(MAX_SHAPES),
     blend_cm: z.number().min(0).max(10).describe('Radius of the smooth blend where shapes meet; 0 for hard joins'),
     why
+  }),
+  declare_figure: z.object({
+    name: z.string().min(1).max(40).refine(n => n !== REFERENCE_TARGET && n !== NO_PROTECT, { message: `"${REFERENCE_TARGET}" and "${NO_PROTECT}" are reserved; choose another name` }),
+    figures: z.array(figure).max(MAX_SUBJECTS).describe('Posed human figures; an empty list for none'),
+    animals: z.array(animal).max(MAX_SUBJECTS).describe('Posed animals; an empty list for none'),
+    shapes: z.array(shape).max(MAX_SHAPES).describe('Your own solids in the same form: the base, a rock or ground, a branch, a sling, hair, a weapon. Same fields as declare_form'),
+    blend_cm: z.number().min(0).max(10).describe('Radius of the smooth blend where solids meet; 1 to 1.5 for a figure of 80 to 95 cm'),
+    why
+  }).superRefine((a, ctx) => {
+    const n = a.figures.length + a.animals.length
+    if (n === 0) ctx.addIssue({ code: 'custom', path: ['figures'], message: 'give at least one figure or animal; for plain solids use declare_form' })
+    if (n > MAX_SUBJECTS) ctx.addIssue({ code: 'custom', path: ['animals'], message: `at most ${MAX_SUBJECTS} figures and animals together in one form` })
   }),
   rough_out: z.object({
     to: z.string().min(1),
@@ -183,6 +236,9 @@ export type FocusArgs = z.infer<typeof SCHEMAS.focus>
 export type UnfocusArgs = z.infer<typeof SCHEMAS.unfocus>
 export type SketchArgs = z.infer<typeof SCHEMAS.sketch>
 export type DeclareFormArgs = z.infer<typeof SCHEMAS.declare_form>
+export type DeclareFigureArgs = z.infer<typeof SCHEMAS.declare_figure>
+export type FigureArgs = z.infer<typeof figure>
+export type AnimalArgs = z.infer<typeof animal>
 export type RoughOutArgs = z.infer<typeof SCHEMAS.rough_out>
 export type DetailArgs = z.infer<typeof SCHEMAS.detail>
 export type SawArgs = z.infer<typeof SCHEMAS.saw>
@@ -204,6 +260,7 @@ export interface ToolArgs {
   unfocus: UnfocusArgs
   sketch: SketchArgs
   declare_form: DeclareFormArgs
+  declare_figure: DeclareFigureArgs
   rough_out: RoughOutArgs
   detail: DetailArgs
   saw: SawArgs
@@ -276,6 +333,16 @@ function describe(name: ToolName, o: ToolOptions): string {
         'Overlap shapes that belong to one mass; blend_cm rounds the joins between them.',
         'Put the whole figure, base included, in one form: rough_out protects only the form it is given. The result says where the form sits in the block and warns if it does not reach the base.',
         'Whatever stands proud of a surface (a nose, ears, a brow, a chin, a muzzle, paws) belongs in the form as a small shape of its own, with a blend of 1 cm or less so it is not smoothed away. Declared, it is left standing by rough_out and can be protected from every stroke; left to be found later by chiselling, it is usually destroyed.'
+      ].join(' ')
+    case 'declare_figure':
+      return [
+        'Declare a posed figure, an animal, or a group of up to three, as one form: the sculptor\'s canon of the body. You give the pose; each subject is built for you from anatomically jointed solids (torso, pelvis, limbs reaching from hip and shoulder, hands, feet, and for a human the head canon with its face and hair), turned to its facing, and set on its ground point. Nothing is cut. Declaring a name again replaces that form, as declare_form does, and rough_out, detail, protect and every overlay treat it like any other form.',
+        'A figure: body and build; where it stands (ground_x/y/z: between its feet, on the top of your base) and how tall it would stand upright; facing; legs (stand, stride, lunge, kneel, sit, recline, crouch, ride); weight_on, the figure\'s own leg that carries it (contrapposto when standing: that hip up and out, the shoulders tilted against it, the other knee bent); twist_deg, the shoulders turned against the hips; lean_deg; the head turned and tilted; each arm\'s gesture (down, akimbo, across the body, forward, raised, overhead, back, out to the side, to_head); drapery (loincloth, collar, mantle over one shoulder, cloak flying behind and reaching the ground, robe); support (stump, rock); style, tokens for the head. Left and right are the figure\'s own: facing you, its left is your right (+X).',
+        'An animal: species (horse, bull, lion, dog, cat); pose (stand, walk, trot, gallop, rear, charge, lie, sit); its ground point under the middle of its footprint; length_cm, chest to rump; facing; head turned and raised or lowered; tail (down, out, raised, curled); lead foreleg. A rearing animal stands on its hind legs and its tail. It is dropped so its lowest hoof or paw stands on ground_y.',
+        'A figure with legs ride sits astride the first animal in the form (a second rider on the second animal), facing as it faces; its own ground point is ignored.',
+        'shapes are your own solids in the same form: the base (a box 5 to 8 cm tall, which every figure needs), a rock or ground the subject stands on, a tree stump, a sling, a laurel branch, hair, a weapon. Put the subjects on the base by setting ground_y to its top.',
+        'The result gives each subject\'s extent and where its head, hands, feet (or muzzle and back) ended up in block cm, so you can lay your own solids on them, and says if anything lies outside the block. Check that from the front and the side; then look with the form overlay before cutting.',
+        'Body parts are 3 cm or more thick only on a figure of about 80 cm or more; a smaller figure loses its wrists and ankles. A figure under about 70 cm gets a plain head with no face.'
       ].join(' ')
     case 'rough_out':
       return [
@@ -438,6 +505,14 @@ export function describeCall(name: ToolName, args: Record<string, unknown>): str
         return `${s.kind} at ${num(s.center_x)},${num(s.center_y)},${num(s.center_z)} size ${num(s.size_x)}×${num(s.size_y)}×${num(s.size_z)}${rot}`
       })
       return `declare_form "${a.name}": ${shapes.join('; ')}; blend ${num(a.blend_cm)}`
+    }
+    case 'declare_figure': {
+      const a = args as DeclareFigureArgs
+      const who = [
+        ...a.figures.map(f => `${f.body} ${f.legs}${f.weight_on === 'both' ? '' : ` on ${f.weight_on}`} at ${num(f.ground_x)},${num(f.ground_y)},${num(f.ground_z)} ${num(f.height_cm)} cm facing ${num(f.facing_deg)}, twist ${num(f.twist_deg)}, arms ${f.left_arm}/${f.right_arm}${f.drapery === 'none' ? '' : `, ${f.drapery}`}${f.support === 'none' ? '' : `, ${f.support}`}`),
+        ...a.animals.map(n => `${n.species} ${n.pose} at ${num(n.ground_x)},${num(n.ground_y)},${num(n.ground_z)} ${num(n.length_cm)} cm facing ${num(n.facing_deg)}`)
+      ]
+      return `declare_figure "${a.name}": ${who.join('; ')}${a.shapes.length ? `; ${a.shapes.length} own shape${a.shapes.length === 1 ? '' : 's'}` : ''}; blend ${num(a.blend_cm)}`
     }
     case 'rough_out': {
       const a = args as RoughOutArgs

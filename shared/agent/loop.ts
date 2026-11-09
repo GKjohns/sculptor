@@ -255,7 +255,7 @@ export async function runCommission(opts: RunOptions): Promise<RunResult> {
         }
         state.passes.push(pass)
         // Declaring a form and drawing a line change nothing a look would show differently.
-        if (tool !== 'declare_form' && tool !== 'sketch') sinceLook++
+        if (tool !== 'declare_form' && tool !== 'declare_figure' && tool !== 'sketch') sinceLook++
       }
 
       results.push({ id: call.id, name: call.name, ok: true, text })

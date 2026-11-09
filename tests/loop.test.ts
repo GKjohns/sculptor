@@ -312,7 +312,7 @@ test('invalid arguments come back as an error result and nothing is cut', async 
   const second = parts(seen[2]!.at(-1))
   const [unknown, refused] = second.map(x => x.output as { type: string, value: string })
   assert.equal(unknown!.type, 'error-text')
-  assert.match(unknown!.value, /no tool called "glue".*Your tools: look, closeup, slice, focus, unfocus, sketch, declare_form, rough_out, detail, saw, chisel, drill, rasp, polish, note, finish/)
+  assert.match(unknown!.value, /no tool called "glue".*Your tools: look, closeup, slice, focus, unfocus, sketch, declare_form, declare_figure, rough_out, detail, saw, chisel, drill, rasp, polish, note, finish/)
   // The Studio's own refusal reaches the model the same way.
   assert.equal(refused!.type, 'error-text')
   assert.match(refused!.value, /rough_out to "missing".* was refused: no form named "missing"/)
@@ -546,7 +546,7 @@ test('tool schemas are flat: no unions, nothing optional, and the right tools pe
   const direct = jsonTools({ toolSet: 'direct', reference: 'none' })
   const formed = jsonTools({ toolSet: 'formed', reference: 'outlines' })
   assert.deepEqual(direct.map(t => t.name), ['look', 'saw', 'chisel', 'note', 'finish'])
-  assert.deepEqual(formed.map(t => t.name), ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'])
+  assert.deepEqual(formed.map(t => t.name), ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'declare_figure', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'])
 
   const walk = (node: unknown, at: string) => {
     if (!node || typeof node !== 'object') return
@@ -567,7 +567,7 @@ test('tool schemas are flat: no unions, nothing optional, and the right tools pe
   assert.deepEqual(overlay(jsonTools({ toolSet: 'formed', reference: 'view' })), ['grid', 'form'])
 
   // Every carving tool asks for a why; points are {h, v}; only axis views can be carved from.
-  for (const name of ['sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish']) {
+  for (const name of ['sketch', 'declare_form', 'declare_figure', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish']) {
     const t = formed.find(x => x.name === name)!
     assert.ok((t.parameters.required as string[]).includes('why'), name)
   }

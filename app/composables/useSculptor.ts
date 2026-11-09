@@ -253,7 +253,7 @@ export function useSculptor() {
     t.listen({ strikes: events => s.charcoal?.erase(events) })
     t.onPass = (pass) => {
       // The stone the lines were drawn on is about to come off.
-      if (pass.tool !== 'sketch' && pass.tool !== 'declare_form') s.charcoal?.clear()
+      if (pass.tool !== 'sketch' && pass.tool !== 'declare_form' && pass.tool !== 'declare_figure') s.charcoal?.clear()
       change(v => showPass(v, pass))
       sync()
     }

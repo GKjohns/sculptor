@@ -221,6 +221,18 @@ export interface CompiledSilhouette {
   left: OutlineField
 }
 
+// The space round a form of many shapes, in cells: each cell's list of the shapes that can
+// change the union there, built the first time a point in it is measured.
+export interface Bins {
+  x0: number
+  y0: number
+  z0: number
+  nx: number
+  ny: number
+  nz: number
+  lists: (Int32Array | undefined)[]
+}
+
 export interface CompiledForm {
   count: number
   kinds: Uint8Array
@@ -232,6 +244,12 @@ export interface CompiledForm {
   // from its centre is at least a * r - c: lets formDistance pass over shapes that cannot
   // change the answer (see there).
   reach?: Float64Array
+  // Two numbers per shape bounding its distance from above (shapes.ts), and the cells that keep
+  // the shapes that matter near each point (shapes.ts, bins). Filled as points are measured.
+  ceil?: Float64Array
+  bins?: Bins
+  // The union measured at grid samples, by sample index (shapes.ts, formDistanceAt).
+  memo?: { table?: { keys: Int32Array, values: Float64Array, nx: number, ny: number, voxel: number, x0: number, y0: number, z0: number } }
   silhouette?: CompiledSilhouette
   // What it was compiled from, so the hand can declare the same form again with a margin.
   source: Form

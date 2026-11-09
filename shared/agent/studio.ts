@@ -14,11 +14,13 @@ import { applyStrike } from '../sculpt/strike.ts'
 import { KERNEL_VERSION } from '../sculpt/version.ts'
 import type { AxisView, ViewId } from '../sculpt/views.ts'
 import { expandCanon, settleCuts } from '../sculpt/anatomy.ts'
-import type { DeclaredShape } from '../sculpt/anatomy.ts'
+import type { DeclaredShape, RoughCut } from '../sculpt/anatomy.ts'
+import { expandScene } from '../sculpt/figure.ts'
+import type { AnimalSpec, FigureSpec } from '../sculpt/figure.ts'
 import { VIEWS } from '../sculpt/views.ts'
-import type { CanonCut, Form, FormStrike, Grid, SketchStrike, Strike, Vec3 } from '../sculpt/types.ts'
+import type { CanonCut, Form, FormStrike, Grid, Shape, SketchStrike, Strike, Vec3 } from '../sculpt/types.ts'
 import { FOCUS_STROKE_SHARE, NO_PROTECT, REFERENCE_TARGET } from './toolSchemas.ts'
-import type { ChiselArgs, CloseupArgs, DeclareFormArgs, DetailArgs, DrillArgs, FocusArgs, LookArgs, PolishArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, SketchArgs, SliceArgs, StudioCall, UnfocusArgs, ViewPoint } from './toolSchemas.ts'
+import type { AnimalArgs, ChiselArgs, CloseupArgs, DeclareFigureArgs, DeclareFormArgs, FigureArgs, DetailArgs, DrillArgs, FocusArgs, LookArgs, PolishArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, SketchArgs, SliceArgs, StudioCall, UnfocusArgs, ViewPoint } from './toolSchemas.ts'
 import type { Studio, StudioResult, ToolCall } from './types.ts'
 
 type Sides<T> = Partial<Record<SideView, T>>
@@ -71,6 +73,21 @@ export interface Focus { view: AxisView, center: ViewPoint, span: number }
 
 const r1 = (v: number) => Math.round(v * 10) / 10
 const pt = (p: ViewPoint): RulerPoint => [p.h, p.v]
+
+function figureSpec(f: FigureArgs): FigureSpec {
+  return {
+    body: f.body, build: f.build, ground: [f.ground_x, f.ground_y, f.ground_z], height: f.height_cm, facing: f.facing_deg,
+    legs: f.legs, weightOn: f.weight_on, twist: f.twist_deg, lean: f.lean_deg, headTurn: f.head_turn_deg, headTilt: f.head_tilt_deg,
+    leftArm: f.left_arm, rightArm: f.right_arm, drapery: f.drapery, support: f.support, style: f.style
+  }
+}
+
+function animalSpec(n: AnimalArgs): AnimalSpec {
+  return {
+    species: n.species, pose: n.pose, ground: [n.ground_x, n.ground_y, n.ground_z], length: n.length_cm, facing: n.facing_deg,
+    headTurn: n.head_turn_deg, headRaise: n.head_raise_deg, tail: n.tail, lead: n.lead
+  }
+}
 
 function declaredShape(s: ShapeArgs): DeclaredShape {
   return { kind: s.kind, center: [s.center_x, s.center_y, s.center_z], size: [s.size_x, s.size_y, s.size_z], rotation: [s.rot_x, s.rot_y, s.rot_z], ...(s.style && s.style.length > 0 ? { style: s.style } : {}) }
@@ -297,30 +314,56 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     }
   }
 
-  const declare = (a: DeclareFormArgs): StudioResult => {
-    const canon = a.shapes.filter(s => s.kind === 'head' || s.kind === 'torso').map(s => s.kind)
-    const expanded = expandCanon(a.shapes.map(declaredShape))
-    const form: Form = { shapes: expanded.shapes, blend: a.blend_cm }
+  // A form as kernel shapes, with the canon's hollows settled on it: logged, and described.
+  const lay = (name: string, shapes: Shape[], rough: RoughCut[], blend: number, what: string, extra: (min: Vec3, max: Vec3) => string = () => ''): StudioResult => {
+    const form: Form = { shapes, blend }
     const extent = formExtent(grid, form)
-    if (extent.empty) throw new Error(`no part of "${a.name}" lies inside the block (X ${-grid.size[0] / 2} to ${grid.size[0] / 2}, Y 0 to ${grid.size[1]}, Z ${-grid.size[2] / 2} to ${grid.size[2] / 2}); check the centres and sizes`)
-    const cuts = expanded.cuts.length > 0 ? settleCuts(form, expanded.cuts) : []
-    const strike: FormStrike = { kind: 'form', name: a.name, shapes: form.shapes, blend: form.blend, ...(cuts.length > 0 ? { cuts } : {}) }
+    if (extent.empty) throw new Error(`no part of "${name}" lies inside the block (X ${-grid.size[0] / 2} to ${grid.size[0] / 2}, Y 0 to ${grid.size[1]}, Z ${-grid.size[2] / 2} to ${grid.size[2] / 2}); check the centres and sizes`)
+    const cuts = rough.length > 0 ? settleCuts(form, rough) : []
+    const strike: FormStrike = { kind: 'form', name, shapes: form.shapes, blend: form.blend, ...(cuts.length > 0 ? { cuts } : {}) }
     applyStrike(grid, strike)
-    cutsOf.set(a.name, cuts)
+    cutsOf.set(name, cuts)
     strikes.push(strike)
-    const again = declared.includes(a.name)
-    if (!again) declared.push(a.name)
+    const again = declared.includes(name)
+    if (!again) declared.push(name)
     const { min, max } = extent
-    let summary = `${again ? 'Replaced' : 'Declared'} form "${a.name}" (${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}${canon.length > 0 ? `, the ${canon.join(' and ')} expanded to ${form.shapes.length} solids in all` : ''}, blend ${r1(a.blend_cm)} cm). Inside the block it spans X ${r1(min[0])} to ${r1(max[0])}, Y ${r1(min[1])} to ${r1(max[1])}, Z ${r1(min[2])} to ${r1(max[2])} and holds about ${Math.round(extent.cm3 / 100) / 10} litres (${(extent.cm3 * DENSITY / 1000).toFixed(0)} kg). Nothing was cut.`
+    let summary = `${again ? 'Replaced' : 'Declared'} form "${name}" (${what}, blend ${r1(blend)} cm). Inside the block it spans X ${r1(min[0])} to ${r1(max[0])}, Y ${r1(min[1])} to ${r1(max[1])}, Z ${r1(min[2])} to ${r1(max[2])} and holds about ${Math.round(extent.cm3 / 100) / 10} litres (${(extent.cm3 * DENSITY / 1000).toFixed(0)} kg). Nothing was cut.`
+    summary += extra(min, max)
     if (extent.outsidePct > 2) summary += ` ${Math.round(extent.outsidePct)}% of the form lies outside the block, where there is no stone to make it from.`
     if (min[1] > 1.5) summary += ` It does not reach the base (it starts ${r1(min[1])} cm up): rough_out will refuse it until something in the form stands on the base.`
     if (cuts.length > 0) summary += ` The canon also marks ${cuts.length} hollows to cut into it (${[...new Set(cuts.map(c => c.label))].join(', ')}); \`detail\` cuts those in its window, and they show as cut below the form.`
     if (declared.length > 1) summary += ` Looks and numbers measure the stone against all your forms together: ${declared.map(n => `"${n}"`).join(', ')}.`
     return {
       summary,
-      numbers: { form_volume_cm3: Math.round(extent.cm3), form_y_min_cm: r1(min[1]), form_y_max_cm: r1(max[1]), form_outside_block_pct: r1(extent.outsidePct) },
+      numbers: { form_volume_cm3: Math.round(extent.cm3), form_y_min_cm: r1(min[1]), form_y_max_cm: r1(max[1]), form_outside_block_pct: r1(extent.outsidePct), form_solids: form.shapes.length },
       strikes: [strike]
     }
+  }
+
+  const declare = (a: DeclareFormArgs): StudioResult => {
+    const canon = a.shapes.filter(s => s.kind === 'head' || s.kind === 'torso').map(s => s.kind)
+    const expanded = expandCanon(a.shapes.map(declaredShape))
+    const what = `${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}${canon.length > 0 ? `, the ${canon.join(' and ')} expanded to ${expanded.shapes.length} solids in all` : ''}`
+    return lay(a.name, expanded.shapes, expanded.cuts, a.blend_cm, what)
+  }
+
+  // Posed figures, animals and the model's own solids as one form (sculpt/figure.ts).
+  const declareFigure = (a: DeclareFigureArgs): StudioResult => {
+    const scene = expandScene({ figures: a.figures.map(figureSpec), animals: a.animals.map(animalSpec), shapes: [] })
+    const own = expandCanon(a.shapes.map(declaredShape))
+    // Big masses first, so formDistance can pass over the many small parts far from a point.
+    const volume = (s: Shape) => s.size[0] * s.size[1] * s.size[2]
+    const shapes = [...scene.shapes].sort((x, y) => volume(y) - volume(x))
+    shapes.push(...own.shapes)
+    const n = a.figures.length + a.animals.length
+    const what = `${n === 1 ? 'one subject' : `${n} subjects`}${a.shapes.length ? ` and ${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'} of yours` : ''}, ${shapes.length} solids in all`
+    const pt3 = (p: Vec3) => `(${r1(p[0])}, ${r1(p[1])}, ${r1(p[2])})`
+    const said = (): string => ' ' + scene.subjects.map((s, i) => {
+      const where = Object.entries(s.points).map(([k, p]) => `${k.replace('_', ' ')} ${pt3(p)}`).join(', ')
+      const outside = s.min[0] < -grid.size[0] / 2 - 0.5 || s.max[0] > grid.size[0] / 2 + 0.5 || s.min[2] < -grid.size[2] / 2 - 0.5 || s.max[2] > grid.size[2] / 2 + 0.5 || s.max[1] > grid.size[1] + 0.5
+      return `Subject ${i + 1}, ${s.label}: X ${r1(s.min[0])} to ${r1(s.max[0])}, Y ${r1(s.min[1])} to ${r1(s.max[1])}, Z ${r1(s.min[2])} to ${r1(s.max[2])}${outside ? ' (part of it lies outside the block)' : ''}; ${where}.`
+    }).join(' ')
+    return lay(a.name, shapes, [...scene.cuts, ...own.cuts], a.blend_cm, what, said)
   }
 
   // A pass protects one form. Cutting to a second form while the figure is another would take
@@ -426,6 +469,7 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       case 'unfocus': return unfocus(call.args)
       case 'sketch': return draw(call.args)
       case 'declare_form': return declare(call.args)
+      case 'declare_figure': return declareFigure(call.args)
       case 'rough_out':
         wholeStone('rough_out')
         return rough(call.args)

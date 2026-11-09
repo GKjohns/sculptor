@@ -1,5 +1,5 @@
 import { compileSilhouette, silhouetteDistance } from './silhouette.ts'
-import type { CompiledForm, Form, Grid, ShapeKind } from './types.ts'
+import type { Bins, CompiledForm, Form, Grid, ShapeKind } from './types.ts'
 
 // Signed distances (cm, negative inside) for the primitives a form is declared in, and forms
 // themselves: a smooth union of rotated primitives. A strike that names a form is clipped by
@@ -103,6 +103,7 @@ export function compileForm(form: Form): CompiledForm {
   const kinds = new Uint8Array(count)
   const data = new Float64Array(count * STRIDE)
   const reach = new Float64Array(count * 3)
+  const ceil = new Float64Array(count * 2)
   const sc = new Float64Array(2)
   for (let i = 0; i < count; i++) {
     const shape = form.shapes[i]!
@@ -145,25 +146,38 @@ export function compileForm(form: Form): CompiledForm {
     const hy = data[o + 4]!
     const hz = data[o + 5]!
     const q = i * 3
+    // And an upper bound, for the bins below: for the ellipsoid's approximation,
+    // (rmax / rmin)² max(0, r - rmin); for the others, r less the radius of the ball round the
+    // centre that the shape holds (in the squashed frame for the round kinds).
+    const w = i * 2
     if (kind === 0) {
       const lo = Math.min(hx, hy, hz)
       const hi = Math.max(hx, hy, hz)
       reach[q] = (lo / hi) * (lo / hi)
       reach[q + 1] = reach[q]! * hi
       reach[q + 2] = hi
+      ceil[w] = (hi / lo) * (hi / lo)
+      ceil[w + 1] = lo
     } else if (kind === 1) {
       reach[q] = 1
       reach[q + 1] = Math.sqrt(hx * hx + hy * hy + hz * hz)
+      ceil[w] = 1
+      ceil[w + 1] = Math.min(hx, hy, hz)
     } else {
       const squash = hx / hz
       const sphere = kind === 2 ? Math.max(hx, hy) : Math.sqrt(hx * hx + hy * hy)
       const big = squash > 1 ? squash : 1
       reach[q] = (squash < 1 ? squash : 1) / big
       reach[q + 1] = sphere / big
+      ceil[w] = 1
+      ceil[w + 1] = (kind === 2 ? hx : Math.min(hy, hx * hy / Math.sqrt(hx * hx + 4 * hy * hy))) / big
     }
   }
   const compiled: CompiledForm = {
-    count, kinds, data, reach,
+    count, kinds, data, reach, ceil,
+    bins: count >= BIN_MIN_SHAPES ? binsFor(data, count) : undefined,
+    // A holder, so the copies a strike makes with its own margin share one table.
+    memo: count >= MEMO_MIN_SHAPES ? {} : undefined,
     blend: Math.max(0, form.blend),
     inflate: form.inflate ?? 0,
     // A plain copy: the form may arrive as a log entry carrying other fields.
@@ -177,12 +191,126 @@ export function compileForm(form: Form): CompiledForm {
   return compiled
 }
 
+// ---------- bins ----------
+// A form of many solids (a posed figure is a hundred and more) is costly to measure at every
+// sample, and most of its solids are far from any one point. The space round it is cut into
+// cells, and each cell keeps, in the form's own order, only the solids that can change the
+// union somewhere in it: a solid is left out when its least distance anywhere in the cell is a
+// blend or more above the greatest distance of a solid kept before it. The union is a running
+// smooth minimum that never rises, and smoothMin(best, d) is exactly best when d is a blend or
+// more above it, so leaving such a solid out changes nothing, to the last bit: forms of any size
+// measure as before and every log replays as it was written.
+
+const BIN_MIN_SHAPES = 8
+const BIN_CM = 2.5
+// The cells reach this far past the solids' own bounds; beyond them every solid is measured.
+const BIN_PAD = 8
+
+function binsFor(data: Float64Array, count: number): Bins {
+  const lo = [Infinity, Infinity, Infinity]
+  const hi = [-Infinity, -Infinity, -Infinity]
+  for (let i = 0; i < count; i++) {
+    const o = i * STRIDE
+    const r = Math.sqrt(data[o + 3]! ** 2 + data[o + 4]! ** 2 + data[o + 5]! ** 2)
+    for (let k = 0; k < 3; k++) {
+      lo[k] = Math.min(lo[k]!, data[o + k]! - r)
+      hi[k] = Math.max(hi[k]!, data[o + k]! + r)
+    }
+  }
+  const n = [0, 0, 0]
+  for (let k = 0; k < 3; k++) {
+    lo[k] = lo[k]! - BIN_PAD
+    n[k] = Math.max(1, Math.min(160, Math.ceil((hi[k]! + BIN_PAD - lo[k]!) / BIN_CM)))
+  }
+  return { x0: lo[0]!, y0: lo[1]!, z0: lo[2]!, nx: n[0]!, ny: n[1]!, nz: n[2]!, lists: new Array(n[0]! * n[1]! * n[2]!) }
+}
+
+// The solids that matter anywhere in one cell, in order.
+function binList(form: CompiledForm, bins: Bins, ix: number, iy: number, iz: number): Int32Array {
+  const { count, data, reach, ceil, blend } = form
+  const half = BIN_CM / 2
+  const cx = bins.x0 + (ix + 0.5) * BIN_CM
+  const cy = bins.y0 + (iy + 0.5) * BIN_CM
+  const cz = bins.z0 + (iz + 0.5) * BIN_CM
+  const spread = Math.sqrt(3) * half
+  const keep: number[] = []
+  let top = Infinity
+  for (let i = 0; i < count; i++) {
+    const o = i * STRIDE
+    const dx = cx - data[o]!
+    const dy = cy - data[o + 1]!
+    const dz = cz - data[o + 2]!
+    const r = Math.sqrt(dx * dx + dy * dy + dz * dz)
+    const near = r - spread
+    const q = i * 3
+    // The least this solid's distance can be anywhere in the cell.
+    const floor = near > reach![q + 2]! ? reach![q]! * near - reach![q + 1]! : -Infinity
+    if (keep.length > 0 && floor >= top + blend + 1e-6) continue
+    keep.push(i)
+    // The most it can be anywhere in the cell.
+    const w = i * 2
+    const far = r + spread
+    const most = form.kinds[i] === 0 ? ceil![w]! * Math.max(0, far - ceil![w + 1]!) : far - ceil![w + 1]!
+    if (most < top) top = most
+  }
+  const list = Int32Array.from(keep)
+  bins.lists[ix + bins.nx * (iy + bins.ny * iz)] = list
+  return list
+}
+
 // Distance from a world point to the form, cm, negative inside.
 export function formDistance(form: CompiledForm, x: number, y: number, z: number): number {
   if (form.silhouette !== undefined) return silhouetteDistance(form.silhouette, x, y, z) - form.inflate
-  const { count, kinds, data, blend, reach } = form
+  return union(form, x, y, z) - form.inflate
+}
+
+// ---------- the sample memo ----------
+// A strike clipped by a form measures the form at every sample it would cut, and the bites of
+// one pass overlap many times. A form of many solids keeps what it measured at grid samples in
+// a fixed table (slot by sample index, newest wins), so a sample measured again costs a lookup.
+// It is the same number to the last bit; only a sample's index and its grid's layout key it.
+
+const MEMO_BITS = 19
+const MEMO_MIN_SHAPES = 16
+
+export interface SampleGrid { nx: number, ny: number, voxel: number, x0: number, y0: number, z0: number }
+
+// formDistance at grid sample `index`, which sits at (x, y, z) of `grid`.
+export function formDistanceAt(form: CompiledForm, grid: SampleGrid, index: number, x: number, y: number, z: number): number {
+  const box = form.memo
+  if (form.silhouette !== undefined || box === undefined) return formDistance(form, x, y, z)
+  let memo = box.table
+  if (memo === undefined) {
+    memo = { keys: new Int32Array(1 << MEMO_BITS).fill(-1), values: new Float64Array(1 << MEMO_BITS), nx: grid.nx, ny: grid.ny, voxel: grid.voxel, x0: grid.x0, y0: grid.y0, z0: grid.z0 }
+    box.table = memo
+  } else if (memo.nx !== grid.nx || memo.ny !== grid.ny || memo.voxel !== grid.voxel || memo.x0 !== grid.x0 || memo.y0 !== grid.y0 || memo.z0 !== grid.z0) {
+    return formDistance(form, x, y, z)
+  }
+  const slot = Math.imul(index, 0x9e3779b1) >>> (32 - MEMO_BITS)
+  if (memo.keys[slot] === index) return memo.values[slot]! - form.inflate
+  const u = union(form, x, y, z)
+  memo.keys[slot] = index
+  memo.values[slot] = u
+  return u - form.inflate
+}
+
+// The smooth union of the form's solids at a point, before any inflation.
+function union(form: CompiledForm, x: number, y: number, z: number): number {
+  const { count, kinds, data, blend, reach, bins } = form
+  let list: Int32Array | undefined
+  if (bins !== undefined) {
+    const ix = Math.floor((x - bins.x0) / BIN_CM)
+    const iy = Math.floor((y - bins.y0) / BIN_CM)
+    const iz = Math.floor((z - bins.z0) / BIN_CM)
+    if (ix >= 0 && iy >= 0 && iz >= 0 && ix < bins.nx && iy < bins.ny && iz < bins.nz) {
+      list = bins.lists[ix + bins.nx * (iy + bins.ny * iz)] ?? binList(form, bins, ix, iy, iz)
+    }
+  }
+  const n = list === undefined ? count : list.length
   let best = 1e9
-  for (let i = 0; i < count; i++) {
+  let first = true
+  for (let t = 0; t < n; t++) {
+    const i = list === undefined ? t : list[t]!
     const o = i * STRIDE
     const px = x - data[o]!
     const py = y - data[o + 1]!
@@ -190,7 +318,7 @@ export function formDistance(form: CompiledForm, x: number, y: number, z: number
     // A shape whose distance here is surely a blend or more above the union so far cannot
     // change it: smoothMin(best, d) is exactly best when d >= best + blend. So skipping it
     // gives the same number, to the last bit, and every log replays as before.
-    if (reach !== undefined && i > 0) {
+    if (reach !== undefined && !first) {
       const r = Math.sqrt(px * px + py * py + pz * pz)
       const q = i * 3
       if (r > reach[q + 2]! && reach[q]! * r - reach[q + 1]! >= best + blend + 1e-6) continue
@@ -216,9 +344,10 @@ export function formDistance(form: CompiledForm, x: number, y: number, z: number
         : sdCone(lx, ly, lz * squash, hx, 2 * hy)
       if (squash > 1) d /= squash
     }
-    best = i === 0 ? d : smoothMin(best, d, blend)
+    best = first ? d : smoothMin(best, d, blend)
+    first = false
   }
-  return best - form.inflate
+  return best
 }
 
 // Registers (or replaces) a named form on a grid. Strikes with protect: name will not cut
