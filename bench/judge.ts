@@ -35,9 +35,9 @@ function hashText(text: string): number {
 
 // The same run always sees the same order; different runs see different ones, so no label
 // wins by sitting first.
-export function shuffledLabels(seed: string): string[] {
+export function shuffledLabels(seed: string, list: string[] = JUDGE_LABELS): string[] {
   const rng = createRng(hashText(seed))
-  const out = JUDGE_LABELS.slice()
+  const out = list.slice()
   for (let i = out.length - 1; i > 0; i--) {
     const j = rng.int(i + 1)
     const t = out[i]!
@@ -52,12 +52,14 @@ export interface JudgeOptions {
   sheets: Uint8Array[]
   // Seeds the label order.
   runId: string
+  // The labels to choose from (the subject's list); the original twelve if left out.
+  labels?: string[]
   signal?: AbortSignal
   log?: (line: string) => void
 }
 
 export async function judge(opts: JudgeOptions): Promise<Verdict> {
-  const labels = shuffledLabels(opts.runId)
+  const labels = shuffledLabels(opts.runId, opts.labels)
   const model = MODELS[JUDGE_MODEL]
   const schema = z.object({
     pick: z.enum(labels as [string, ...string[]]),
@@ -93,8 +95,8 @@ export async function judge(opts: JudgeOptions): Promise<Verdict> {
 }
 
 // --dry: no model. Recognises the pawn and misses the others, so the report shows both.
-export function dryJudge(runId: string, subjectLabel: string, isPawn: boolean): Verdict {
-  const labels = shuffledLabels(runId)
+export function dryJudge(runId: string, subjectLabel: string, isPawn: boolean, list?: string[]): Verdict {
+  const labels = shuffledLabels(runId, list)
   const pick = isPawn ? subjectLabel : labels.find(l => l !== subjectLabel)!
   return {
     pick,

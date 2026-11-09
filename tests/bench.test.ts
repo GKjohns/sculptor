@@ -8,7 +8,7 @@ import { newMeter, parseJsonLines, reportedCost, settleCost } from '../bench/bra
 import { shuffledLabels } from '../bench/judge.ts'
 import { Ledger } from '../bench/ledger.ts'
 import { shrink } from '../bench/reference.ts'
-import { JUDGE_LABELS, SUBJECTS, tidySentence } from '../bench/subjects.ts'
+import { FIGURE_JUDGE_LABELS, JUDGE_LABELS, SUBJECTS, judgeLabels, tidySentence } from '../bench/subjects.ts'
 import { imageMediaType } from '../shared/agent/context.ts'
 import { costUsd } from '../shared/agent/pricing.ts'
 
@@ -86,7 +86,10 @@ test('cost: the larger of our price and the gateway\'s is charged, and an unpric
 test('judge labels: twelve, the three subjects among them, shuffled the same way for the same run', () => {
   assert.equal(JUDGE_LABELS.length, 12)
   assert.equal(new Set(JUDGE_LABELS).size, 12)
-  for (const s of Object.values(SUBJECTS)) assert.ok(JUDGE_LABELS.includes(s.label))
+  assert.equal(FIGURE_JUDGE_LABELS.length, 12)
+  assert.equal(new Set(FIGURE_JUDGE_LABELS).size, 12)
+  for (const s of Object.values(SUBJECTS)) assert.ok(judgeLabels(s.id).includes(s.label), s.id)
+  assert.ok(FIGURE_JUDGE_LABELS.includes('human figure standing at rest'), 'a static pose is a distractor')
   const a = shuffledLabels('A-cat-opus-formed-noref-1')
   assert.deepEqual(a, shuffledLabels('A-cat-opus-formed-noref-1'))
   assert.deepEqual(a.slice().sort(), JUDGE_LABELS.slice().sort())

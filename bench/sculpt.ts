@@ -44,7 +44,7 @@ import { encodePng } from './png.ts'
 import { dryReference, loadReference, makeReference } from './reference.ts'
 import type { CostLine, ReferenceAttempt, ReferenceSheet } from './reference.ts'
 import { DRY_TURN_USD, scriptedBrain } from './script.ts'
-import { SUBJECTS, SUBJECT_IDS } from './subjects.ts'
+import { SUBJECTS, SUBJECT_IDS, judgeLabels } from './subjects.ts'
 import type { SubjectId } from './subjects.ts'
 
 export const SCULPTORS = ['opus', 'fable', 'fable52', 'sol', 'gemini'] as const
@@ -508,8 +508,8 @@ async function main(): Promise<number> {
   // the study cap must not spend past it.
   if (config.judge && studio.strikes.length > 0 && !stopReason) {
     const verdict = config.dry
-      ? dryJudge(id, config.subjectLabel, config.subject === 'pawn')
-      : await judge({ sheets: [finalPng, roundPng], runId: id, log: say })
+      ? dryJudge(id, config.subjectLabel, config.subject === 'pawn', judgeLabels(config.subject))
+      : await judge({ sheets: [finalPng, roundPng], runId: id, labels: judgeLabels(config.subject), log: say })
     if (verdict.cost) lines.push(verdict.cost)
     run.judge = { ...verdict, correct: !verdict.error && verdict.pick === config.subjectLabel }
     say(verdict.error

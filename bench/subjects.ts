@@ -52,21 +52,12 @@ export const SUBJECT_IDS = Object.keys(SUBJECTS) as SubjectId[]
 
 // Distractors are compact, base-standing shapes of the kind these three fail into: a pawn that
 // lost its collar is a bowling pin or a bottle, a cat with no ears is an egg or a sitting dog,
-// a bust with no features is a mushroom or a vase.
+// a bust with no features is a mushroom or a vase. The original three keep this list as it
+// was, so their runs stay comparable with the study's.
 export const JUDGE_LABELS: string[] = [
   SUBJECTS.pawn.label,
   SUBJECTS.cat.label,
   SUBJECTS.bust.label,
-  SUBJECTS.david.label,
-  SUBJECTS.bull.label,
-  SUBJECTS.rider.label,
-  // A figure or animal in no particular action is what a timid pose fails into.
-  'human figure standing at rest',
-  'horse standing',
-  'cow standing',
-  'lion',
-  'centaur',
-  'dancer',
   'egg',
   'bowling pin',
   'bottle',
@@ -77,6 +68,27 @@ export const JUDGE_LABELS: string[] = [
   'sitting dog',
   'rabbit'
 ]
+
+// The figure subjects' list: the three plus what a timid or failed pose reads as. The same
+// subject at rest is among them, so a static pose is scored as a miss.
+export const FIGURE_JUDGE_LABELS: string[] = [
+  SUBJECTS.david.label,
+  SUBJECTS.bull.label,
+  SUBJECTS.rider.label,
+  'human figure standing at rest',
+  'seated human figure',
+  'dancer',
+  'two wrestlers',
+  'horse standing',
+  'cow standing',
+  'centaur',
+  'lion',
+  'dog'
+]
+
+export function judgeLabels(subject: SubjectId): string[] {
+  return FIGURE_SUBJECTS.includes(subject) ? FIGURE_JUDGE_LABELS : JUDGE_LABELS
+}
 
 // A judge model now and then lets a piece of its JSON wrapper slip inside the string it is
 // writing ("...or bust.}"). The answer still parses, so the stray bracket or quote arrives as
