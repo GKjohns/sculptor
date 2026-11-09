@@ -1,0 +1,444 @@
+# Sculptor — Implementation Plan
+
+**Created:** November 8, 2026
+**Status:** Not Started — awaiting Kyle's review
+**Context:** Kyle wants an AI that carves a virtual block of marble the way a sculptor does: it knocks stone off with different tools, walks around the piece, thinks, and goes back in. He wants to watch it happen live and have it look like a film.
+
+**Goal:** Type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export.
+
+**Scope:** One new Nuxt app, `sculptor`, local-first. Marble first, with the stone's look and tool behaviour kept in one preset so other media can follow. No accounts, no database, no public deploy until Sprint 5.
+
+Companion files in this folder: [storyboard.html](storyboard.html) (open it in a browser), [research_notes.md](research_notes.md).
+
+---
+
+## The idea in one page
+
+Four decisions carry the whole design.
+
+**1. The stone is a grid of distances, not a mesh.** Each voxel stores how far it is from the stone's surface (a signed distance field, SDF). Removing stone is one `max()` per voxel, it can never produce broken geometry however many thousand cuts pile up, and the amount removed is measurable. A triangle mesh is rebuilt from the grid only for the chunks a cut touched. A second number per voxel records the surface finish, so a chiselled face and a polished face look different.
+
+**2. The model directs; a deterministic "hand" does the striking.** A language model cannot place ten thousand individual chisel blows, and should not try. It issues **passes**: "rough out everything outside this form with the point chisel, leaving 4 cm", "run the flat chisel along this line 1 cm deep". Code we call the **hand** expands each pass into the individual **strikes** you see on screen. The model decides what comes off and where. The hand supplies rhythm and physical plausibility.
+
+**3. The same kernel runs in the browser and in Node.** The stone, the hand, and a small software renderer that produces the model's views are plain TypeScript in `shared/` with no three.js or DOM imports. In the browser it runs in a worker behind the live studio. In Node it runs headless, which lets us test whether models can actually sculpt before spending a sprint on cinematography.
+
+**4. A sculpture is its log of strikes.** The ordered list of strikes, stamped with the kernel version that produced it, reproduces the piece exactly. That gives replays, scrubbing and offline film export without storing geometry, and a public gallery of replays makes no model calls.
+
+The loop the model runs is the one Kyle described: **look → think → carve → look**. A look returns neutral clay-style renders from named viewpoints with a centimetre grid, plus numbers computed by code (mass remaining, how far the stone still stands proud of the intended shape). The research is blunt that vision models are poor judges of subtle 3D differences, so the numbers are there to keep the model honest.
+
+Optionally, and invisibly to the person watching, the sculptor works from a **reference sheet** produced by an image model before the first cut.
+
+Stone cannot be put back. There is no undo. That is the product's tension and the reason the model is told to leave a margin and close in gradually.
+
+---
+
+## Handoff / Execution Notes (read first — this plan is self-contained)
+
+**Repo and runtime**
+- Repo root: `~/Programming/Workspace/sculptor`. Nuxt lives at the root, like Voice World (`~/Programming/Workspace/conjure`), not in `src/` like cosmo. Do not bootstrap from cosmo: this is a single full-screen canvas with no auth, database or marketing site, which is the documented exception in `~/claude-ops/conventions/project_bootstrap.md`.
+- Scaffold by copying Voice World's `nuxt.config.ts`, `eslint.config.mjs`, `tsconfig.json`, `.env.example` and `package.json`, then trimming: keep its dependency set minus `@mediapipe/tasks-vision`, bump `three` and `@types/three` to `^0.187`, rename to `sculptor`, drop the Voice World scripts. `ssr: false`. npm, Node 22 (`nvm use 22`).
+- Dev server: `npm run dev` on **port 3130**. Start it in the background and open the page at the start of every session.
+- Checks: `npm run typecheck`, `npm run lint`, `npm test` (`node --test tests/*.test.ts`), `npm run shoot`, `npm run bench:sculpt`.
+- Env: `AI_GATEWAY_API_KEY` only. Kyle creates a capped gateway key for this project (suggested `sculptor-100`). The app boots and hand-carving works without it.
+
+**Conventions to match**
+- Model calls: `~/claude-ops/conventions/ai_sdk_usage.md`. Gateway only, `ai@7`, bare `'provider/model'` strings. Copy the model map and price table from `picnic-panic/shared/utils/pricing.ts` and `picnic-panic/shared/agents/types.ts`, which cover every model used here. (Voice World's table prices only Anthropic models and returns $0 for anything else, which would silently defeat the spend cap.) Turn on `providerOptions.gateway.caching: 'auto'`.
+- Every model turn has a 90-second deadline and one retry, as in Picnic Panic's gateway helper. Reasoning level `medium` unless the study says otherwise.
+- Tool schemas stay small and flat with no unions and few optionals. Voice World hit a provider refusing a schema with many optional fields, after which the gateway silently fell back to a slower route (header of `conjure/server/utils/gateway.ts`). If tool calls misbehave, fall back to one JSON object per line in plain text with Voice World's `server/utils/opStream.ts` scanner.
+- Imports: `#shared/...` from `app/` and `server/`. Inside `shared/`, `tests/` and `bench/`, relative imports with `.ts` extensions, because those files also run under plain `node`.
+- three.js: raw three.js inside one `*.client.vue` component with the scene code in plain `.ts` modules under `app/studio/`, the way `conjure/app/world/` is organised. No TresJS. The page sets `window.__sceneReady` and exposes a small `window.__sculptor` debug handle for the shoot script.
+- Web worker: no sibling repo has one to copy. Use `new Worker(new URL('../workers/kernel.worker.ts', import.meta.url), { type: 'module' })` and put the message types in `shared/sculpt/protocol.ts`.
+- UI: Nuxt UI 4 primitives for every panel and control; the canvas and film-style HUD are the only custom layout (reasons in the storyboard's footer). Dark only.
+- Code style: no semicolons, 2 spaces, Voice World's ESLint stylistic settings.
+
+**Execution order and rules**
+- Sprints run in order, one at a time. Sprint 2 ends in a **gate**: stop and show Kyle the study report before starting Sprint 3.
+- Per-sprint loop: implement → typecheck, lint, tests → screenshot verification (delegate multi-image review to a subagent that returns text and paths) → update this file's status and deviations → report.
+- A verification page (`verification/index.html` with captioned `.webp` screenshots, per `~/claude-ops/conventions/verification_artifacts.md`) is required before the work is called done.
+
+**Commit and push policy:** commit locally per sprint. Do not push or create the GitHub repo until Kyle says so.
+
+---
+
+## Current State
+
+### What exists
+- This repo, containing this plan folder, a README and a `.gitignore`. No app code.
+- Reference code in sibling repos: Voice World (`conjure/`: Nuxt-at-root layout, shoot script, three.js module organisation, sound, reference-image generation in `server/utils/forge.ts`) and Picnic Panic (`picnic-panic/shared/agents/types.ts` for the Brain seam and model map, `shared/runner.ts` for a headless model-versus-model runner whose replays are stamped with an engine version, `shared/utils/pricing.ts`).
+
+### What gets built
+- A sculpting kernel in `shared/sculpt/`: the stone grid, strikes, the mesher, raycasts, island detection, the hand, and the observer (software renderer).
+- An agent loop in `shared/agent/` with two seams, **Brain** (one model turn) and **Studio** (execute one tool), so the same loop runs in the browser and in the bench.
+- The live studio in `app/`: WebGPU scene, marble material, debris, tools, sound, an automatic camera, and the HUD from the storyboard.
+- A headless study in `bench/` that produces a report comparing tool sets, reference on and off, and models.
+
+### What stays untouched
+- Every other repo. If the WebGPU work turns up something the fleet should know, it goes in a new conventions note at the end, with Kyle's OK.
+
+---
+
+## Architecture
+
+```
+                         ┌──────────────────────── browser tab ────────────────────────┐
+ commission ──▶ agent loop (shared/agent/loop.ts)                                       │
+                  │   ▲                                                                 │
+        Brain     │   │ tool results (text, numbers, images)                            │
+   POST /api/brain│   │                                                                 │
+   (stateless,    ▼   │                                                                 │
+    gateway)   model turn ──▶ tool call ──▶ Studio ──▶ kernel worker                    │
+                                                        │                               │
+                                       true stone ◀─────┤ strikes applied at once;      │
+                                       (looks, numbers) │ looks and numbers read this   │
+                                                        │                               │
+                                       shown stone ◀────┘ same strikes, applied as the  │
+                                       (meshed)           timeline's clock reaches them │
+                                            │                                           │
+                                            ▼                                           │
+                              three.js studio (app/studio/*)                            │
+                              stone · debris · tools · sound · camera                   │
+                         └─────────────────────────────────────────────────────────────┘
+
+ bench/sculpt.ts (Node): the same loop, Brain = direct gateway call, Studio = the kernel in-process, true stone only
+```
+
+**Why the loop runs in the browser.** A commission can take an hour and a couple of hundred model turns, and the stone is megabytes of state that changes on every strike. Keeping the loop next to the stone means the server is one stateless route that holds the gateway key and proxies a single model turn, which deploys to Vercel with no durable-execution machinery. The cost is that the tab must stay open. Server-side runs with spectators are deferred.
+
+### The stone
+
+- **Units and axes.** Centimetres, block-local. Origin at the centre of the block's base. +Y up, +Z toward a viewer standing in front, +X to that viewer's right. Default block 60 wide × 100 tall × 60 deep. Carrara marble at 2.71 g/cm³, so the untouched block weighs about 975 kg.
+- **Grid.** Voxel size 0.4 cm, so 160 × 256 × 160 voxels (6.5 million), in 32³ chunks. Dimensions and voxel size are parameters; Sprint 4 tries 0.25 cm if faces look coarse.
+- **Distance channel.** `Int8Array`, negative inside stone, clamped to ±4 voxels and scaled to ±127.
+- **Finish channel.** `Uint8Array`, 0 to 255 smoothness written by whichever tool last touched the surface (point chisel ≈ 20, claw ≈ 60, sawn ≈ 90, flat ≈ 110, rasp ≈ 170, polished 255).
+- **A strike** removes the intersection of a tool-shaped volume with the stone: `d = max(d, -tool(p))` over the tool's bounding box padded by the 4-voxel band, with seeded noise on the tool shape so no two chips match. If the strike names a protected shape, the removal volume is clipped by it, so a strike can never bite into stone the model said to keep.
+- **The rasp** only ever raises distances (removes high spots) and re-clamps, which avoids the distance-field collapse reported for naive smoothing brushes.
+- **The saw** removes stone on one side of a plane in a single operation, and the removed region becomes an offcut directly.
+- **Islands.** After each pass, a full-resolution flood fill from the base finds stone that is no longer attached. Detached pieces leave the grid and become offcuts. (Half resolution was considered and rejected: it either bridges a saw cut so the slab never falls, or snaps off thin features.) The check is recorded in the strike list as its own entry so both copies of the stone run it at the same point.
+- **Meshing.** Naive surface nets per chunk with a one-voxel pad, normals from the distance gradient so chunk seams are invisible, finish baked per vertex. "Watertight" in tests means every edge of the stitched mesh is shared by exactly two triangles.
+
+### Strikes and the log
+
+```ts
+// shared/sculpt/types.ts — the contract between hand, kernel, timeline and renderer
+type ToolId = 'saw' | 'point' | 'claw' | 'flat' | 'roundel' | 'drill' | 'rasp' | 'polish'
+
+type Strike =
+  | { kind: 'cut', tool: ToolId, at: Vec3, dir: Vec3, size: number, depth: number, seed: number, protect?: string, ms: number }
+  | { kind: 'saw', plane: { point: Vec3, normal: Vec3 }, ms: number }   // removes the side the normal points to
+  | { kind: 'detach' }                                                  // run the island check here
+
+// at: contact point on the surface (cm). dir: unit vector the tool travels into the stone.
+// ms: virtual duration, used by the timeline.
+
+interface Offcut { positions: Float32Array, normals: Float32Array, indices: Uint32Array, centroid: Vec3, cm3: number }
+
+// applyStrike(grid, strike) → { dirtyChunks: number[], removedCm3: number, offcuts: Offcut[] }
+// offcuts is non-empty only for 'saw' and 'detach'.
+```
+
+The hand (`shared/sculpt/hand.ts`) turns one pass into an ordered list of strikes by reading the true stone. Its output depends on the stone's state and on the hand's own code, so **the saved log is the expanded strike list plus a `KERNEL_VERSION` stamp**, not the passes. Passes are saved alongside for captions and the notebook. A log replays only on the kernel version that wrote it; on a mismatch the replay page says so.
+
+### Looking: views and addressing
+
+| View | Looks along | Horizontal ruler | Vertical ruler | Carve from it? |
+|---|---|---|---|---|
+| `front` | −Z | X, increasing to the right | Y | yes |
+| `back` | +Z | X, increasing to the left | Y | yes |
+| `right` | −X (camera on the +X side) | Z, increasing to the left | Y | yes |
+| `left` | +X | Z, increasing to the right | Y | yes |
+| `top` | −Y | X, increasing to the right | Z, increasing downward | yes |
+| `front_left`, `front_right`, `back_left`, `back_right` | 45° between two axis views, pitched 20° down | none | none | no, looking only |
+
+Rulers are labelled in **block coordinates**, so a point in the `back` view carries the same X it has in the `front` view. Carving tools take a view and a point in that view's two ruler coordinates; the hand casts a ray along the view direction to the first surface it meets. Every carving result reports the 3D point that was hit, or says the ray missed, so a misplaced stroke is visible in the very next message. Surfaces hidden from all five axis views cannot be addressed in this version (see Deferred).
+
+The observer (`shared/sculpt/observer.ts`) renders axis views by scanning grid columns, which is fast, and three-quarter views by stepping rays through the grid. Shading is neutral clay under a raking key light. Ruler labels use a tiny bitmap digit font embedded in the file. It returns RGBA; PNG encoding lives at the edges (`node:zlib` in the bench, a canvas in the browser).
+
+### What the model can do
+
+Every carving tool also takes a required `why`: one sentence in the sculptor's voice. It becomes the on-screen subtitle and the notebook entry, so there is always something to read even when a model returns tool calls with no other text.
+
+**Core tools (Sprint 2, used in the study)**
+
+| Tool | Arguments | What happens |
+|---|---|---|
+| `look` | `views` (up to 6), `overlay`: `grid` \| `form` \| `reference` | One contact sheet. Also returns numbers: mass remaining, bounding box, and how far the stone stands proud of the declared form (maximum and mean). With `reference`, each view sits beside the matching reference quadrant and the numbers include silhouette agreement with the reference outlines. |
+| `declare_form` | `name`, `shapes`: a list where every shape has the same flat fields (`kind`: ellipsoid \| box \| capsule \| cone, `center` x y z, `size` x y z, `rotation` x y z in degrees), `blend_cm` | Declares the masses the stone should end up as. Nothing is cut. Declaring a name again replaces it. |
+| `rough_out` | `to` (a form name, or `reference`), `margin_cm`, `tool`: `point` \| `claw` | Removes stone outside the target, leaving the margin. With `reference`, the target is the volume common to the front and left reference outlines pushed through the block. |
+| `saw` | `view`, `from`, `to` (two points), `discard`: `above` \| `below` \| `left` \| `right` | A straight cut through the whole block perpendicular to the view. |
+| `chisel` | `tool`: `point` \| `claw` \| `flat`, `view`, `path` (points), `depth_cm`, `width_cm` | A stroke along a line on the surface. Each bite travels into the stone along the surface normal at that point. |
+| `rasp` | `view`, `path`, `width_cm`, `passes` | Smooths high spots along the path. |
+| `note` | `stage`, `text` | Updates the notebook: current stage and plan. Survives context rebuilds. |
+| `finish` | `title`, `statement` | Ends the commission. |
+
+**Added in Sprint 3, once the gate has shown what is worth having**
+
+| Tool | What it adds |
+|---|---|
+| `sketch` | The sculptor draws a profile on a block face in charcoal. It is theatre and an overlay for looks. It is not something `rough_out` cuts to, because the research suggests freehand outlines from a language model are imprecise. |
+| `drill` | A hole along the view direction, for deep detail. |
+| `chisel` with `roundel` | Concave channels. |
+| `polish` | Raises finish with no geometry change. It is invisible in clay renders, so it waits for the real material. |
+| `slice` | A cross-section image at a plane. |
+
+`declare_form` plus `rough_out` is the software version of working from a model with callipers: the sculptor says what masses it wants and the hand takes the stone down toward them. Detail still has to be carved by stroke.
+
+The system prompt walks the model through the real order of work (general to specific: rough out, block in, model, refine, polish), tells it stone cannot be replaced, gives it a budget of turns and dollars, and requires a look after every few passes.
+
+### Working from a reference image (optional, hidden)
+
+A sculptor rarely works from nothing; there is a drawing or a small model somewhere out of frame. The software version: before the first cut, an image model produces a **reference sheet** for the commission, and the sculptor carries it in its context for the whole job. The person watching never has to see it or know it exists. It is a setting on the commission, off or on, and the study measures whether it helps.
+
+Because nobody but the model looks at it, the sheet is built for use, not beauty:
+
+- **Layout.** One square image in four quadrants: front, left, back, right. Matte grey clay on a flat black background, even lighting, no perspective, the figure filling each quadrant to the same height. The sculptor model writes the brief for the image model, so the design is still the sculptor's.
+- **Carvable by construction.** The brief asks for a compact single mass on a base: no floating parts, no thin unsupported limbs, nothing a block of stone could not hold.
+- **Two uses.** First, the model simply sees it, which gives it a concrete target instead of an idea. Second, code thresholds the front and left quadrants against the black background, traces their outlines and scales them to the block. `rough_out` can cut to them and every look can report how well the stone's silhouette agrees with them. Outlines lifted from a generated image should be far more accurate than ones a language model draws point by point.
+- **Checks.** Each quadrant must contain one connected shape of sensible size. If not, regenerate once; if it fails again, keep the image for viewing only and skip the outlines. Generated views will not agree with each other perfectly, so outlines are cut with a margin and the sculptor's own looks settle the rest.
+- **Plumbing.** One gateway call to the image model (`generateText` with `responseModalities: ['IMAGE']`, as in `conjure/server/utils/forge.ts`), a few cents per commission. The sheet sits at the start of the context, inside the cached prefix. It is saved with the session so replays and resumes do not regenerate it.
+
+What hiding it changes: no HUD work, and the sheet can be ugly. It appears only in the Sculptor's eye panel behind a debug flag. Whether a finished piece ever discloses that it was carved from a generated reference is a presentation choice for Kyle, listed under Open Questions.
+
+### The agent loop and its seams
+
+```ts
+// shared/agent/types.ts
+// Message is the AI SDK's ModelMessage, passed back to the next turn verbatim (some providers
+// require their own reasoning blocks to be returned unchanged).
+
+interface Brain {
+  // One model turn. Streams text as it arrives; resolves with the tool calls and the messages to append.
+  turn(input: { instructions: string, messages: Message[], signal?: AbortSignal },
+       onText: (delta: string) => void): Promise<{ calls: ToolCall[], append: Message[], usage: Usage, costUsd: number }>
+}
+
+interface Studio {
+  // Executes one tool call against the true stone.
+  run(call: ToolCall): Promise<{ summary: string, numbers?: Record<string, number>, images?: Uint8Array[], strikes: Strike[] }>
+}
+```
+
+- Bench (Sprint 2): `Brain` calls the gateway directly with `generateText`; `Studio` calls the kernel in-process.
+- Browser (Sprint 3): `Brain` posts to `server/api/brain.post.ts`, which calls `streamText` through the gateway with the tool schemas and no `execute` functions and streams text and tool calls back as NDJSON. `Studio` talks to the kernel worker.
+- **Images** go back as a user message that follows the tool result, not inside it; image content in tool results is not something all four providers are known to accept.
+- **Context is append-only between rebuilds.** Every 20 turns the history is rebuilt from scratch as: instructions, the reference sheet if any, the notebook, a one-line record of every pass so far, and one fresh look. Between rebuilds nothing is removed, so the cached prefix stays valid. A resume after a reload uses the same rebuild, which is what restores the conversation.
+- **Guardrails:** a hard cap on turns and on dollars per commission, both shown in the HUD. The model is told its budget and warned as it runs low so it lands the piece.
+
+### Time
+
+The timeline (`app/studio/timeline.ts`) owns a **virtual clock**. The worker holds two copies of the grid. The **true stone** has every strike of a pass applied the instant the pass is issued; the hand, looks and measurements read it, so the model gets its result straight away and can think about its next move while the work is still playing out on screen. The **shown stone** receives the same strikes as the clock reaches them, and only it is meshed. At 0.4 cm the second copy costs about 13 MB. The bench has only the true stone.
+
+- **Elastic pacing.** A model turn takes 10 to 30 seconds; a pass may be 20 strikes or 400. The clock's rate adjusts so the queue of unplayed strikes is neither empty nor long. If the screen falls more than about a minute of work behind, the loop waits before asking for the next turn. The speed control scales all of this.
+- **Looks are staged.** A look is an entry in the queue. When the clock reaches it the hand stops, the camera walks to the requested viewpoints, and the Sculptor's eye panel shows the sheet the model was sent.
+- **Fixed-step replay.** Nothing reads the wall clock, so a replay can be rendered frame by frame at any resolution for export.
+
+### The studio (what makes it look like a film)
+
+The research found no vibe-coded demo with a truly film-like look. What the best-looking projects share is a render pipeline specified by hand, reference code in the agent's context, and a screenshot loop that is known to capture real frames. Sprint 4 is built around those three things. Sources and version checks are in `research_notes.md` Part 2.
+
+- **Renderer.** three.js r187 `WebGPURenderer` from `three/webgpu`, materials in TSL from `three/tsl`. This is a departure from the fleet (Voice World and the desk scene are on `WebGLRenderer`), and three's own docs still call the WebGPU renderer experimental. We take it anyway because the node post-processing stack, the subsurface material and GPU particles only exist on that path. It falls back to WebGL 2 on its own, and Chrome, Safari 26 and current Firefox on macOS all ship WebGPU. Init is async (`await renderer.init()`). `ShaderMaterial`, `onBeforeCompile` and `EffectComposer` do not work on this path, so nothing is copied from Voice World's post pass.
+- **Marble.** `MeshSSSNodeMaterial`. Veining is 3D noise evaluated at the stone's own coordinates (`tsl-textures/marble.js` is the reference to read, not a dependency), so veins run through the block and each cut reveals more of them. Roughness and tool marks come from the finish value. Thin sections (ears, fingers, drapery edges) pick up light from behind: the mesher bakes a per-vertex thickness by marching a short way inward, and feeds the material's thickness nodes. Because thickness depends on stone outside the chunk being remeshed, the set of chunks to rebuild is widened by the march distance.
+- **Atelier.** A wooden banker under a tall window: one large soft key with a visible shaft through dust, a dim cool fill, a dark backdrop that falls away. Environment lighting for reflections.
+- **Debris.** Three scales. Offcuts are real meshes cut from the removed volume, simulated as rigid bodies in Rapier (`@dimforge/rapier3d-compat` 0.21, the version three r187's own helper pins), and they break once on landing. Chips are instanced shards: a few hundred live ones in Rapier, the rest on cheap ballistic paths, all settling into a static pile. Dust is a TSL compute particle system (`instancedArray` plus `renderer.compute()`): a puff per strike, a haze that builds in the light shaft, and a pale film on the floor.
+- **Tools.** A chisel and mallet (and drill, rasp, pad) float and work with no hands. They are built procedurally, animated from strike events, and shake the camera slightly on heavy blows.
+- **Sound.** Synthesised with Web Audio: mallet thud, steel ring pitched by tool and force, chips scattering, slab impacts, rasp. Room tone underneath.
+- **Camera director.** A small state machine choosing among shots: wide orbit, medium on the working area, macro insert with shallow focus, step-back during looks, a cut and brief slow motion when a big piece falls, the reveal. Minimum shot lengths, damped moves, and an occlusion test against the stone. Dragging the canvas takes over; it hands back after a few idle seconds.
+- **Post.** One `RenderPipeline` (the r183 rename of `PostProcessing`) with nodes from `three/addons/tsl/display/`: `ao` (GTAO), `sss` (screen-space contact shadows, despite the name), `dof` focused on the strike point, `bloom`, `godrays` for the window shaft, `film` grain, `traa`, and AgX tone mapping. Screen-space global illumination (`ssgi`) is tried last and kept only if it holds frame rate. The reference to read for how these fit together is `ektogamat/threejs-conference`.
+- **Screenshots that can be trusted.** Headless Chrome can silently capture a black WebGPU canvas. The shoot script has two modes. `--gl` runs headless on software WebGL 2 (`?gl=1` forces that path) and is for checking layout and logic in Sprints 1 to 3. `--gpu` launches a headed Chrome with WebGPU on Kyle's Mac and is the only mode used to judge the look in Sprint 4. Both wait for frames and fail if pixel variance is near zero.
+
+---
+
+## Storyboard
+
+[storyboard.html](storyboard.html) — six frames, with working controls on four of them. The stone drawings are placeholders; the HUD, panels and controls are the commitment.
+
+1. **The commission** — empty state: block on the banker, prompt, example chips, stone and model pickers. Sprint 3.
+2. **Sketching on the block** — charcoal profiles on the faces and pinned to the wall, stage list, subtitle. Sprint 3.
+3. **Roughing out** — the main watching state: stats bar, subtitle, transport (pause, speed, camera mode), notebook panel with tool calls. HUD in Sprint 3; slabs, chips and dust in Sprint 4.
+4. **Stepping back to look** — the Sculptor's eye panel showing the exact contact sheet and numbers the model received. Observer in Sprint 2, panel in Sprint 3.
+5. **Refining and polishing** — macro shot, mixed finishes. Sprint 4.
+6. **The reveal and the replay** — title plaque, scrubber, film export. Sprint 5.
+
+The reference sheet has no frame on purpose: the person watching never sees it.
+
+---
+
+## Sprint Breakdown
+
+### Sprint 1: Stone you can hit — Foundational `[Not Started]`
+**Goal:** A block in the browser that you can carve by hand at 60 fps, backed by a tested kernel.
+**Estimated effort:** 5–7 hours
+
+#### Tasks
+- 1.1 Scaffold the app
+  - As described in the handoff notes. Expand `README.md`; add `AGENTS.md` (shape, commands, rules, including the WebGPU import rules).
+  - Prove the renderer path on day one: a lit cube through `WebGPURenderer` and a one-node `RenderPipeline`, checked in the browser pane and through `npm run shoot -- --gl`.
+- 1.2 Grid and strikes
+  - Files: `shared/sculpt/types.ts`, `grid.ts`, `strike.ts`, `tools.ts`, `rng.ts`, `version.ts`
+  - Block creation, both channels, four tools to start (`saw`, `point`, `flat`, `rasp`), protection clipping, removed-volume accounting.
+- 1.3 Mesher and raycast
+  - Files: `shared/sculpt/mesher.ts`, `raycast.ts`
+  - Padded-chunk surface nets with finish baked per vertex.
+- 1.4 Islands and offcuts
+  - File: `shared/sculpt/islands.ts`
+- 1.5 Kernel worker and stone renderer
+  - Files: `shared/sculpt/protocol.ts`, `app/workers/kernel.worker.ts`, `app/studio/renderer.ts`, `app/studio/stone.ts`, `app/components/StudioScene.client.vue`, `app/pages/index.vue`
+  - Worker owns the grid; the main thread receives chunk geometry as transferables. Plain off-white physical material with roughness from finish, one key light, orbit camera. Veining, subsurface light and everything else about the look is Sprint 4.
+- 1.6 Hand-carving mode
+  - A tool palette (`UButtonGroup`) and click or drag on the stone to strike along the view ray. Stays as a debug mode behind `?hands=1`.
+- 1.7 Tests and shoot script
+  - Files: `tests/grid.test.ts`, `tests/mesher.test.ts`, `tests/islands.test.ts`, `scripts/shoot.mjs`
+
+#### Verification
+- [ ] `npm test` passes: a strike removes the expected volume within 5%; a protected shape is never cut; the mesh of a block with one corner chiselled is watertight across chunk seams; a sawn-off corner is returned as an offcut with the right volume; a thin bridge left standing is not detached.
+- [ ] In the browser, 200 rapid strikes hold 60 fps on Kyle's Mac (frame times logged).
+- [ ] Screenshot: a block with a sawn corner and visibly different rough and smooth patches.
+
+---
+
+### Sprint 2: The sculptor, and the gate `[Not Started]`
+**Goal:** Know whether models can carve recognisable things, with which tools, and whether a reference image helps, before building the theatre.
+**Estimated effort:** 9–12 hours, plus up to $100 of model spend
+
+#### Tasks
+- 2.1 Observer — `shared/sculpt/observer.ts`
+- 2.2 Measurements — `shared/sculpt/measure.ts` (mass, bounding box, stone proud of form, silhouette agreement with an outline)
+- 2.3 The hand — `shared/sculpt/hand.ts`, adding the `claw` tool. Pass → strikes for every core tool, including finding slabs to saw off at the start of a rough-out.
+- 2.4 Tool schemas, prompt and loop — `shared/agent/types.ts`, `toolSchemas.ts`, `prompt.ts`, `context.ts`, `loop.ts`, and `shared/agent/pricing.ts` with the model map
+- 2.5 Reference sheet — `shared/agent/reference.ts` (brief prompt, quadrant split, background threshold, outline tracing, validity checks; pure, works on RGBA) and the image call in `bench/`. Test against a fixture sheet in `tests/fixtures/`.
+- 2.6 The study — `bench/sculpt.ts`, `bench/subjects.ts`, `bench/report.ts`
+  - Every run is capped at 60 turns and $8, and writes its strike log, pass record, final contact sheet, cost and turn count.
+  - **Round A, tool set.** Opus 5.5 on three subjects (chess pawn, loaf-shaped cat, human bust), no reference, two tool sets: **direct** (`saw` and `chisel` only, no forms) and **formed** (everything in the core table). Six runs. If strokes land in the wrong places in both, add a third arm where positions are picked from a lettered dot grid drawn on the look instead of read off rulers.
+  - **Round B, reference.** The better tool set, same model and subjects, with a reference sheet. Three runs, compared against their Round A twins.
+  - **Round C, models.** The best configuration so far on the cat and the bust with Fable 5.1, GPT-6 Sol and Gemini 3.1 Pro. Six runs. (GPT-6 Astra is left out: it has no cached-input price and one run would exceed the cap.)
+  - **Judging.** A judge model sees each final contact sheet, never the reference, and picks what it depicts from a fixed list of twelve labels: the subjects plus distractors. The report also gives the numbers code can measure, and Kyle's eye is the final word.
+  - `bench/report.ts` writes one `report.html` with the runs side by side per round, each with cost, turns and the judge's pick; Round B pairs sit next to the reference sheet that was used.
+- 2.7 Tests — `tests/hand.test.ts` (a rough-out to an ellipsoid leaves the ellipsoid plus margin and nothing else), `tests/loop.test.ts` (a scripted Brain drives a full loop), `tests/reference.test.ts`.
+
+#### Verification
+- [ ] `npm run bench:sculpt -- --subject pawn --model opus` completes and writes a contact sheet.
+- [ ] `report.html` exists and covers all three rounds.
+- [ ] The report answers the reference question plainly: per subject, with and without, the judge's pick, the measured agreement, and the cost difference.
+- [ ] **Gate, with Kyle.** Pass means: for at least one configuration the judge picks correctly for both the cat and the bust, the bust reads as a head and shoulders to a person, and that run cost under $8. Then lock the tool set, the default model and whether the reference is on by default. Simple subjects are deliberately not part of the gate, because declaring a sphere as a form and roughing to it only tests the hand. If the gate fails, the fallback is to lean harder on forms and the reference (more and finer shapes, outlines from all four quadrants) and re-run before any studio work.
+
+---
+
+### Sprint 3: The live studio `[Not Started]`
+**Goal:** Type a commission in the browser and watch it carved live with the storyboard's HUD, on Sprint 1's plain render.
+**Estimated effort:** 7–9 hours
+
+#### Tasks
+- 3.1 Timeline and the second grid
+  - Files: `app/studio/timeline.ts`, worker changes
+  - Virtual clock, true and shown stone, elastic pacing, pause, speed, staged looks.
+- 3.2 Server routes
+  - Files: `server/api/brain.post.ts`, `server/api/reference.post.ts`, `server/utils/gateway.ts`
+- 3.3 Browser loop
+  - Files: `app/composables/useSculptor.ts`, `app/composables/useBrain.ts`
+  - Runs `shared/agent/loop.ts` with the worker as Studio; abort, budget caps, error recovery (a failed turn retries once, then pauses with a toast).
+  - Reference sheet: generated before the first turn when the setting is on. The default comes from the gate and lives in `app/app.config.ts`; `?ref=0` or `?ref=1` overrides it, and `?ref=1` also reveals the sheet in the Sculptor's eye panel. Nothing about it appears in the normal HUD.
+- 3.4 The remaining tools — `sketch`, `drill`, `roundel`, `polish`, `slice`, whichever of them the gate did not rule out.
+- 3.5 HUD
+  - Files: `app/components/hud/CommissionCard.vue`, `StageList.vue`, `StatsBar.vue`, `Subtitle.vue`, `Transport.vue`, `Notebook.vue`, `SculptorsEye.vue`, `PinnedSketches.vue`
+  - The notebook adapts loop events into the AI SDK's UI-message parts so `UChatMessages`, `UChatReasoning` and `UChatTool` render them. If the adapter fights the components, fall back to a plain list of `UCard` rows.
+- 3.6 Sessions and replay-to-a-point
+  - Files: `server/api/sessions/index.post.ts`, `[id].get.ts`, `index.get.ts`, `app/studio/replay.ts`
+  - Strike log, pass record, notebook, costs, settings and reference sheet saved as JSON under `.data/sessions/` as the commission runs. Loading a session replays the log to any chosen pass. This gives resume after a reload, and it gives Sprint 4 fixed stones to tune the look against.
+
+#### Verification
+- [ ] A full commission runs start to finish in the browser with no manual steps.
+- [ ] Screenshots of the HUD for storyboard frames 1 to 4. The HUD matches the frames; the scene is still the plain render.
+- [ ] Reloading mid-commission restores the stone exactly (grid hash matches) and the sculptor carries on; time to replay a 10,000-strike log is measured and written here.
+- [ ] The stats bar's cost matches the gateway's reported spend within 5%.
+
+---
+
+### Sprint 4: Cinema `[Not Started]`
+**Goal:** The same commission looks and sounds like a film.
+**Estimated effort:** 10–14 hours, iterated by screenshot against saved sessions
+
+#### Tasks
+- 4.1 Marble material, veining, finish and subsurface light — `app/studio/materials/marble.ts`, thickness bake in `shared/sculpt/mesher.ts`
+- 4.2 Atelier, lighting and post — `app/studio/atelier.ts`, `post.ts`
+- 4.3 Debris — `app/studio/debris.ts`
+- 4.4 Tools — `app/studio/tools.ts`
+- 4.5 Sound — `app/studio/sound.ts`
+- 4.6 Camera director — `app/studio/director.ts`
+- 4.7 Resolution — try the 0.25 cm grid and keep it if frame time and memory allow.
+- 4.8 Look book — `docs/look/`: five fixed camera presets on three saved stones (early, middle, finished), shot with `npm run shoot -- --gpu` after every tuning pass, the way `workspace-3d` iterates against reference shots.
+
+#### Verification
+- [ ] Storyboard frame 5 reproduced: macro shot with raw, rasped and polished stone in one frame and light through a thin edge.
+- [ ] A slab fall captured as a five-frame sequence: cut, fall, impact, break, settle.
+- [ ] 60 fps during normal carving and no frame over 33 ms during a slab fall on Kyle's Mac; the WebGL 2 fallback renders without errors.
+- [ ] Kyle watches one full commission and signs off on the look.
+
+---
+
+### Sprint 5: Reveal and share `[Not Started]`
+**Goal:** Every commission ends well and leaves something to show people.
+**Estimated effort:** 5–7 hours
+
+#### Tasks
+- 5.1 Reveal sequence: signature on the base, floor sweep, light sweep, title plaque.
+- 5.2 Replay page — `app/pages/replay/[id].vue`: scrubbing on top of Sprint 3's replay-to-a-point. Add periodic grid snapshots only if Sprint 3's measured replay time makes seeking feel slow.
+- 5.3 Film export: fixed-step offline render of a replay to video in the browser with `mediabunny` (`CanvasSource`, one frame added per simulation step), with a time-lapse length option. Nobody has published this recipe against a WebGPU canvas, so spike it first; the fallback is exporting from the WebGL 2 path.
+- 5.4 A second stone preset, black marble, to prove that a medium is one preset. It is a material and a few tool constants, not new physics.
+- 5.5 Gallery and deploy, if Kyle wants it public: replays only, live commissions behind a gate.
+- 5.6 Verification page for the whole plan.
+
+#### Verification
+- [ ] Storyboard frame 6 reproduced; scrubbing to any stage shows the stone as it was.
+- [ ] An exported 60-second film plays in QuickTime with no dropped frames.
+- [ ] A replay page loads and plays with the network tab showing zero model calls.
+
+---
+
+## Risks
+
+| Risk | Why it might happen | What the plan does about it |
+|---|---|---|
+| Models cannot carve anything recognisable | Vision models misjudge subtle 3D differences and place things imprecisely | Sprint 2 exists to find out for under $100. Forms, the reference sheet, code-computed measurements and a margin discipline are the supports; the gate has a stated fallback. |
+| Faces look blocky | 0.4 cm voxels give an eye about ten voxels | Voxel size is a parameter; Sprint 4 tries 0.25 cm. A sparse or two-level grid is the next step and is deferred. |
+| Cost per commission is too high | Hundreds of turns with images | Gateway caching, append-only context, one image per look, hard caps. Rough arithmetic for a 60-turn run: about $3 on Opus 5.5 and $7 on Fable 5.1. The study reports real cost per run so the default model is chosen with the bill in view. |
+| WebGPU rough edges | Newer renderer path, officially experimental | The path is proven on day one of Sprint 1; the WebGL 2 fallback is checked every sprint; the look is only ever judged on a real GPU. |
+| The watch is dull between model turns | Long thinking, short passes | The two-grid design lets the model think while the hand is still working; elastic pacing and staged looks fill the rest. |
+| Saved pieces stop replaying | A change to the hand or the kernel alters what a strike does | The log is strikes, not passes, and carries a kernel version; a mismatch is reported, never silently replayed wrong. |
+| The reference sheet misleads | Generated views disagree with each other, or show a shape stone cannot hold | The brief asks for a compact carvable mass; quadrants are validated; outlines are cut with a margin; the with-and-without round shows whether it earns its place. |
+| "It isn't really sculpting" | `rough_out` does a lot of work per call | Every gram still leaves by an animated strike the model asked for, nothing can be undone, and the study's direct arm shows Kyle the difference so he can choose. |
+
+## Considered and rejected
+
+- **Mesh booleans** (three-bvh-csg): fragile after thousands of cuts and needs watertight inputs every time.
+- **Rendering the stone by ray-marching the grid** instead of meshing: attractive, but it fights three.js shadows, depth of field and physics. Revisit only if triangle counts become a problem.
+- **The model writes code** (the Blender-agent pattern): powerful, but there is nothing to watch, and the point here is the carving.
+- **One tool call per strike:** thousands of turns per piece and worse results; the hand exists to avoid it.
+- **Logging passes instead of strikes:** smaller, but any change to the hand would break every saved piece.
+- **Baking ambient occlusion per vertex:** the post stack's GTAO covers it.
+- **Carving from three-quarter views:** their rulers do not line up with the block's axes, so a coordinate read off one is ambiguous.
+- **Running Sprints 3 and 4 in parallel:** both edit the scene component, the renderer and the timeline, and Sprint 4 needs Sprint 3's saved stones to tune against.
+- **Server-side durable runs** (Inngest or Workflow): needed for spectators and unattended runs, not for watching your own commission. Deferred.
+- **TresJS:** the scene is imperative and worker-driven, and TresJS's WebGPU entry point is weeks old.
+- **Bootstrapping from cosmo:** no auth, database or marketing surface to inherit.
+- **Dropping the second stone preset** (suggested in review): kept, because "marble or other medium" was in the original ask and a preset is cheap.
+
+## Environment / Config Changes
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AI_GATEWAY_API_KEY` | Yes, for commissions and the study | A capped Vercel AI Gateway key for this project. Covers the sculptor, the judge and the image model. |
+
+## What's Deferred / Out of Scope
+- Other media with different physics: clay (additive), wood (grain direction), ice (transparency).
+- Reaching surfaces hidden from all five axis views (deep undercuts), which needs tools that carve from an arbitrary direction.
+- Stone that snaps under load, beyond pieces that are fully detached.
+- A reference supplied by the person ("carve this photo"). It would reuse the reference-sheet path once a photo can be turned into the four-view sheet.
+- Spectators, unattended server-side runs, accounts, payments.
+- Human and model carving the same block together.
+- Analytics. Nothing is public until Sprint 5; if the gallery ships, page views come from Vercel Analytics and nothing custom.
+
+## Open Questions
+1. **Name.** `sculptor` is a working title and the folder name. Candidates if this becomes a product: Non Finito (Michelangelo's unfinished figures emerging from the block), Taille Directe, Banker. A collision check comes before any domain.
+2. **How pure should the carving be?** The plan lets the sculptor declare masses and have the hand rough toward them, and tests that against stroke-only carving in Round A. If you only want stroke-only, the study still runs but the gate gets harder to pass.
+3. **Tools on screen.** Floating chisel and mallet with no hands is the plan. A robot arm would be a striking alternative and roughly doubles Sprint 4's tool work.
+4. **Public or private.** Create the GitHub repo private now, and decide on a public gallery at Sprint 5?
+5. **Disclosing the reference.** If the study says the reference helps and it ships on by default, should a finished piece's page say so, show the sheet as a "sculptor's study" at the reveal, or say nothing? It makes no difference to the build; it only matters once pieces are shown to other people or models are compared publicly.
