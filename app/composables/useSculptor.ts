@@ -12,13 +12,15 @@
 import { toBase64 } from '#shared/agent/context'
 import type { ReferenceRetry } from '#shared/agent/brainRequest'
 import { runCommission } from '#shared/agent/loop'
+import { plannedBrain } from '#shared/agent/planner'
 import { TEXT_MODELS, addUsage } from '#shared/agent/pricing'
 import type { TextModelKey } from '#shared/agent/pricing'
 import type { StrikeLog } from '#shared/agent/studio'
 import { DEFAULT_CONFIG } from '#shared/agent/types'
-import type { Commission, LoopEvent, PassRecord, ReferenceMode, RunConfig, RunEnd, RunResult, RunState, Studio, Usage } from '#shared/agent/types'
+import type { Brain, Commission, LoopEvent, PassRecord, ReferenceMode, RunConfig, RunEnd, RunResult, RunState, Studio, Usage } from '#shared/agent/types'
 import type { HealthResponse, ReferenceResponse, SessionCreate, SessionFile, SessionReferenceSave, SessionSave, SessionSaved, SessionSummary } from '#shared/agent/wire'
 import type { GridInfo } from '#shared/sculpt/types'
+import { VIEWS, isAxisView } from '#shared/sculpt/views'
 import { KERNEL_VERSION } from '#shared/sculpt/version'
 import type { CameraRig } from '~/studio/camera'
 import type { Charcoal } from '~/studio/charcoal'
@@ -53,6 +55,8 @@ export interface StartOptions {
   model?: string
   /** Draw a reference sheet first; the configured default if left out. */
   reference?: boolean
+  /** A second sculptor for the opening turns (plan, form, first rough-out); ?planner= or the configured default if left out, none if unknown. */
+  planner?: string
 }
 
 // idle: the commission card. loading: a saved session is being put back. preparing: block,
@@ -83,12 +87,14 @@ interface Run {
   id: string
   commission: Commission
   model: TextModelKey
+  /** The model that takes the opening turns, when the planning is split. */
+  planner: TextModelKey | null
   /** The commission's own caps; the loop is given what is left of maxUsd after the reference sheet. */
   config: RunConfig
   referenceUsd: number
   /** What turns cost before this page took the session over. */
   priorUsd: number
-  brain: ReturnType<typeof useBrain> | null
+  brain: (Brain & { spend: BrainSpend, dispose: () => void }) | null
   abort: AbortController | null
   /** The loop's state after the last finished turn. */
   state: RunState | null
@@ -110,6 +116,27 @@ const told = (e: unknown) => {
 }
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), c => c.charCodeAt(0))
+
+// Where a close-up's window sits in the block, for the camera's macro shot: the ruler point on
+// the view's two axes, and along the view the nearest surface the close-up measured (or the
+// block's middle when it saw none).
+function macroOf(args: Record<string, unknown> | undefined, numbers: Record<string, number> | undefined, block: { width: number, height: number, depth: number }): { target: [number, number, number], span: number } | undefined {
+  const view = args?.view
+  const center = args?.center as { h?: number, v?: number } | undefined
+  const span = args?.span_cm
+  if (typeof view !== 'string' || !isAxisView(view) || typeof center?.h !== 'number' || typeof center.v !== 'number' || typeof span !== 'number') return undefined
+  const def = VIEWS[view]
+  const target: [number, number, number] = [0, block.height / 2, 0]
+  target[def.h!] = center.h
+  target[def.v!] = center.v
+  const along = def.look.findIndex(c => c !== 0)
+  const axis = (['x', 'y', 'z'] as const)[along]!
+  // The close-up reports the surface's extent along the view axis; the camera looks along
+  // def.look, so the nearest surface is the largest coordinate when it looks down the axis.
+  const near = numbers?.[`surface_${axis}_${def.look[along]! < 0 ? 'max' : 'min'}_cm`]
+  if (typeof near === 'number') target[along] = near
+  return { target, span }
+}
 
 const logGrid = (grid: GridInfo): StrikeLog['grid'] => ({ width: grid.size[0], height: grid.size[1], depth: grid.size[2], voxel: grid.voxel, chunk: grid.chunk })
 
@@ -372,7 +399,8 @@ export function useSculptor() {
     } else if (event.type === 'look') {
       // A slice is a drawing, not a place to stand: the eye shows it and the camera stays where it is.
       const opening = event.auto && event.turn === 0 && timeline?.total === 0
-      timeline?.look({ views: event.tool === 'slice' ? [] : event.views, close: event.tool === 'closeup', look: lookView(event, toUrl), ...(opening ? { linger: OPENING_LINGER } : {}) })
+      const macro = event.tool === 'closeup' || event.tool === 'focus' ? macroOf(event.args, event.numbers, r.config.block) : undefined
+      timeline?.look({ views: event.tool === 'slice' ? [] : event.views, close: event.tool === 'closeup' || event.tool === 'focus', look: lookView(event, toUrl), ...(macro ? { macro } : {}), ...(opening ? { linger: OPENING_LINGER } : {}) })
     } else if (event.type === 'turn_end') {
       saveTurn(r, event.state)
     }
@@ -392,8 +420,8 @@ export function useSculptor() {
     sync()
 
     const reference: ReferenceMode = !r.commission.reference ? 'none' : r.commission.reference.outlines ? 'outlines' : 'view'
-    r.brain ??= useBrain({
-      model: r.model,
+    const brainFor = (model: TextModelKey) => useBrain({
+      model,
       toolSet: r.config.toolSet,
       reference,
       block: r.config.block,
@@ -405,6 +433,26 @@ export function useSculptor() {
         change(v => appendReasoning(v, r.turn, delta))
       }
     })
+    if (!r.brain) {
+      const executor = brainFor(r.model)
+      if (r.planner && r.state === null) {
+        // A split only matters from the first turn; a resumed commission has had its plan.
+        const planner = brainFor(r.planner)
+        const both = plannedBrain({ planner, executor })
+        r.brain = {
+          turn: (input, onText) => both.turn(input, onText),
+          get spend(): BrainSpend {
+            return { turns: planner.spend.turns + executor.spend.turns, usd: planner.spend.usd + executor.spend.usd, unmetered: planner.spend.unmetered + executor.spend.unmetered, slowestBodyMs: Math.max(planner.spend.slowestBodyMs, executor.spend.slowestBodyMs) }
+          },
+          dispose: () => {
+            planner.dispose()
+            executor.dispose()
+          }
+        }
+      } else {
+        r.brain = executor
+      }
+    }
     // Held before each call while the screen is paused or far behind, so the sculptor cannot outrun it.
     const studio: Studio = {
       run: async (call) => {
@@ -505,8 +553,8 @@ export function useSculptor() {
 
   // ---------- starting, stopping ----------
 
-  function newRun(id: string, commission: string, model: TextModelKey, config: RunConfig): Run {
-    return { id, commission: { prompt: commission }, model, config, referenceUsd: 0, priorUsd: 0, brain: null, abort: null, state: null, ended: null, turn: 0, savedStrikes: 0, savedEvents: 0, pending: [], text: '', reasoning: '', chain: Promise.resolve(), startedAt: Date.now() }
+  function newRun(id: string, commission: string, model: TextModelKey, config: RunConfig, planner: TextModelKey | null = null): Run {
+    return { id, commission: { prompt: commission }, model, planner, config, referenceUsd: 0, priorUsd: 0, brain: null, abort: null, state: null, ended: null, turn: 0, savedStrikes: 0, savedEvents: 0, pending: [], text: '', reasoning: '', chain: Promise.resolve(), startedAt: Date.now() }
   }
 
   /** Starts a commission on a fresh block. Resolves once the sculptor has been set to work. */
@@ -517,6 +565,8 @@ export function useSculptor() {
     const commission = options.commission.trim()
     if (!commission) throw new Error('say what to carve')
     const model = pickModel(options.model)
+    const plannerKey = options.planner ?? flag('planner') ?? defaults.planner
+    const planner = plannerKey && (TEXT_MODELS as readonly string[]).includes(plannerKey) && plannerKey !== model ? plannerKey as TextModelKey : null
     const withReference = options.reference ?? wantReference
     const preset = stonePreset(options.stone ?? stoneKey)
     stoneKey = preset.name
@@ -536,7 +586,7 @@ export function useSculptor() {
       const create: SessionCreate = { commission, model, ref: withReference, run: config, grid: logGrid(grid), kernel: KERNEL_VERSION, settings: { speed: view.value.transport.speed } }
       const file = await $fetch<SessionFile>('/api/sessions', { method: 'POST', body: create })
       if (mine !== generation) return
-      const r = newRun(file.id, commission, model, config)
+      const r = newRun(file.id, commission, model, config, planner)
       run = r
       setSession(file.id)
       if (withReference) {

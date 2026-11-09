@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sculpting skill pass</title>
+<style>
+  :root { color-scheme: dark; --bg: #0f1115; --panel: #171a21; --line: #272c36; --text: #e6e9ef; --dim: #8b93a3; --good: #6fd08c; --bad: #f0776c; --warn: #e8b85a; --accent: #7fb4ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1500px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 18px; margin: 40px 0 8px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3 { font-size: 15px; margin: 0; }
+  p { margin: 8px 0; }
+  a { color: var(--accent); }
+  code { font-size: 13px; color: #d7dbe4; background: #0b0d10; padding: 1px 5px; border-radius: 4px; }
+  .dim { color: var(--dim); }
+  .good { color: var(--good); }
+  .bad { color: var(--bad); }
+  .warn { color: var(--warn); }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 500; white-space: nowrap; }
+  .ids td:first-child { white-space: normal; overflow-wrap: anywhere; min-width: 11em; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .caveat { margin: 12px 0; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--warn); background: var(--panel); }
+  .label { display: block; margin: 0 0 4px; font-size: 12px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--dim); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; margin: 12px 0; align-items: start; }
+  .cards.two { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+  .card img { display: block; width: 100%; height: auto; border-radius: 6px; margin: 8px 0; background: #0b0d10; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pair img { margin: 0; }
+  .verdict { font-size: 15px; }
+  ul { margin: 6px 0; padding-left: 20px; }
+  li { margin: 4px 0; }
+  .mono { font-family: ui-monospace, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+</style>
+</head>
+<body>
+<main>
+<h1>Sculpting skill pass: better faces</h1>
+<p class="dim">November 9, 2026. Branch <code>sculptor-skill</code>. Two passes on the bust after Sprint 5, plus a model comparison on the result. Every run id on this page opens in the app as <code>/?replay=&lt;run-id&gt;</code>. Images are rendered from the strike logs at the same camera for every run: a 44 cm front close-up and a 44 cm left close-up centred on the head, and the four three-quarter views.</p>
+
+<h2>Diagnosis</h2>
+<p>The study's busts failed in the face, and the reason was in the tools, not the reference. A form could hold at most twelve convex solids with one blend, so a head was an egg with a nose glued on, and every feature beyond that had to be found by chiselling a 40 cm face from a contact sheet in which it was a few dozen pixels across. The reference sheets were, on inspection, perfectly sculptable busts (below, left): the model simply had no way to carry their interior relief into the stone, since the sheet only ever became two silhouettes.</p>
+<div class="cards">
+  <div class="card"><span class="label">Before: the reference the best Opus bust was given</span><img src="skill_pass/t2-reference.webp" alt=""><p class="dim">A bald mannequin bust, frontal, smooth. Carvable, but it says nothing a silhouette can carry about the eyes, nose or mouth.</p></div>
+  <div class="card"><span class="label">Before: what came out (X-bust-opus-formed-ref-tune-2)</span><img src="skill_pass/t2-face.webp" alt=""><p class="dim">Egg head, pencil neck, features as notches. Kyle's words: "like a little kid sculpted it".</p></div>
+  <div class="card"><span class="label">Before: the study's best (C-bust-sol-formed-ref)</span><img src="skill_pass/sol-face.webp" alt=""><p class="dim">GPT-6 Sol, 59 turns. A head shape with a brow and a mouth line, no eyes, no nose to speak of.</p></div>
+</div>
+<p>Three things were missing, in order of weight. A <strong>relief target</strong>: something for the face that has sockets, a nose with a bridge and wings, lips and a jaw in it, not an outline. A <strong>finishing pass</strong> that takes the stone exactly onto that target, since the roughing-out's last layer leaves 0.3 to 0.6 cm of claw noise, which is the whole depth of a lip. And a <strong>detail mode</strong>: a way to pick one feature, see it at a magnification where a centimetre is tens of pixels, work it with small tools inside that window only, and step back.</p>
+
+<h2>What changed</h2>
+<ul>
+  <li><strong>A head canon</strong> (<code>shared/sculpt/anatomy.ts</code>). <code>declare_form</code> takes <code>kind: head</code>: the model places, sizes (temple to temple, chin to crown, brow to occiput) and poses it (tilt, turn, cock), and it expands to 27 kernel primitives built the way a clay head is built up: cranium, frontal bone, two brow ridges, one face mass whose receding sides are the socket floors, cheekbones, eyes set back under the brow, a cone for the bridge of the nose with a tip and two wings, a muzzle, two lips, chin, jaw, ears. Sockets, the hollow beside the nose and the line of the mouth are the gaps between masses, so the form stays a plain smooth union and the log never holds a kind the kernel does not know: <code>KERNEL_VERSION</code> is still 2 and every old log replays. The canon was tuned offline at zero model spend (five iterations, first and last below). Shapes per form went from 12 to 24; hair, beard, a heavier nose are the model's own shapes on top.</li>
+  <li><strong><code>detail</code></strong>: a windowed finishing pass (<code>window</code> option on <code>roughOut</code> in <code>hand.ts</code>). In a square window of a view, every surface facing that view is cut back to the form with the flat chisel at a 0.1 cm margin, with the kernel's clipping doing the last tenth, so the face that stands there is the form itself. No saw, nothing outside the window moves. The face in every run on this page was finished by it.</li>
+  <li><strong>Detail mode</strong>: <code>focus</code> / <code>unfocus</code>. The sculptor picks a window (6 to 30 cm) in one view and gets it enlarged at once, with the stone's relief read off along the window's two centre lines in numbers (nine samples each). Until it unfocuses, every <code>look</code> is that window; chisel, drill, rasp and polish must be from that view, inside the window and no wider than a fifth of it; <code>rough_out</code> and <code>saw</code> are refused. The HUD's eye shows the window and the camera takes a macro shot of it (<code>Macro</code> on the camera rig, carried on the timeline look). The region sub-loop is the natural unit for a parallel worker later (one on the face, one on the shoulders); nothing parallel was built.</li>
+  <li><strong>Guards</strong> that earlier runs showed were needed: the rasp protects the form last cut to, so smoothing cannot take a declared nose down; and <code>rough_out</code> or <code>detail</code> to a <em>second</em> form while the figure is another is refused, because a pass protects one form and a "torso" declared on its own took a head off (run skill-2 below).</li>
+  <li><strong>Prompt</strong>: how to place and dress a head, the measure of a bust in this block in centimetres (base 6, pit of the neck at 46, shoulders 51 to 57 wide, neck 10 to 14 whose front stays behind the chin, head 38 to 42, crown 3 to 5 under the top, no socle), compose as a sculpture not a mannequin, what the grid can resolve (0.4 cm cells; nothing under a centimetre reads; a feature is 2 cm or more or it stays in the form), finish with <code>detail</code>, fine strokes only in detail mode.</li>
+  <li><strong>Reference brief</strong>: asks for a sculptor's study (simplified planes, a slight turn or tilt, a hair mass or drapery against a smooth face, head at least two fifths of the height, deep-set eyes, a defined jaw, classical shoulders on a low socle). The sheets changed at once (below). Silhouette tracing is unchanged.</li>
+  <li><strong>Fable 5.2</strong> exists on the gateway (<code>anthropic/claude-fable-5.2</code>, $8 in / $40 out per million, cache read $0.20, write $10) and is in the model map, the picker and the bench as <code>fable52</code>.</li>
+  <li><strong>Planner split</strong> (<code>shared/agent/planner.ts</code>, <code>--planner</code> in the bench, <code>?planner=</code> in the app): one model takes the first three turns (plan, sketch, form, first rough-out), another the rest, with the planner's reasoning parts dropped from the history. Built because the bust's remaining failures are design failures. Tried once; off by default (see the comparison).</li>
+</ul>
+<div class="cards two">
+  <div class="card"><span class="label">The canon, first iteration (offline, no model)</span><img src="skill_pass/canon-h1.webp" alt=""><p class="dim">Primitives showing through: a bar for a nose, a visor for a brow, golf-ball eyes, apple cheeks.</p></div>
+  <div class="card"><span class="label">The canon, fifth iteration, as shipped</span><img src="skill_pass/canon-h5.webp" alt=""><p class="dim">One face mass, two brow ridges, a cone nose with wings, a muzzle under it, lips, chin, jaw. Carved exactly to the form by <code>detail</code> and a protected rasp. Stylised, but a head.</p></div>
+</div>
+
+<h2>Before and after: the bust, same camera</h2>
+<div class="cards two">
+  <div class="card"><span class="label">Before: X-bust-opus-formed-ref-tune-2-20261109142712-095 (Opus 5.5, 34 turns, $1.29)</span><div class="pair"><img src="skill_pass/t2-face.webp" alt=""><img src="skill_pass/t2-profile.webp" alt=""></div><img src="skill_pass/t2-round.webp" alt=""></div>
+  <div class="card"><span class="label">After: S-bust-opus-formed-ref-skill-4-20261109205403-2ff (Opus 5.5, 40 turns, $1.89)</span><div class="pair"><img src="skill_pass/c-opus-face.webp" alt=""><img src="skill_pass/c-opus-profile.webp" alt=""></div><img src="skill_pass/c-opus-round.webp" alt=""></div>
+</div>
+<p class="verdict"><strong>Verdict, by eye.</strong> Before: an egg with notches on a post. After: a face with a brow, deep eyes with lids and a drilled pupil each, a nose with a bridge and wings, a closed mouth with corners, a chin and a jaw; a hair mass with a parting and a bun; a head turned ten degrees. A stranger would call it a stylised portrait bust. It is <em>not</em> yet a bust an experienced carver would sign: the eyes are round and cartoon-like, the hair is a helmet, the neck is a long column, the shoulders are low and the chest tapers like a vase. The face is fixed; the composition is the weak part now.</p>
+<div class="cards two">
+  <div class="card"><span class="label">Before: reference the old pipeline drew</span><img src="skill_pass/t2-reference.webp" alt=""></div>
+  <div class="card"><span class="label">After: reference the new brief draws (skill-4, Opus)</span><img src="skill_pass/c-opus-reference.webp" alt=""><p class="dim">The brief now asks for a sculptor's study. Every new sheet came back as a classical bust with a hair mass, a slight turn and a low socle, and traced first time.</p></div>
+</div>
+
+<h2>Detail mode: one feature, before and after, same window</h2>
+<p>Run <span class="mono">S-bust-opus-formed-ref-skill-3-20261109203854-aff</span>, the 22 cm window the sculptor focused on at turn 15 (centre X 0.5, Y 75, front view). Left: the stone after turn 14, as the canon and <code>detail</code> left it. Right: after turns 15 to 20 in detail mode: two roundel strokes per eye for the lids (1 to 1.2 cm wide, 0.4 to 0.5 cm deep), a 1 cm pupil drilled 0.5 cm into each, the mouth line cut at 0.8 cm with its corners drilled. 107 strikes in all.</p>
+<div class="cards two">
+  <div class="card"><span class="label">Before detail mode (after turn 14)</span><img src="skill_pass/r3-eyes-before.webp" alt=""></div>
+  <div class="card"><span class="label">After detail mode (after turn 20)</span><img src="skill_pass/r3-eyes-after.webp" alt=""></div>
+</div>
+<p><strong>What is resolvable.</strong> The grid is 0.4 cm. In a 40 cm head an eye is about 5.5 cm wide (14 cells), a lid line 1 cm (2 to 3 cells), a pupil 1 cm. That is the floor: a 3 cm eye on a 22 cm head would be 7 cells and a lid line one cell, which the mesher shows as noise. The cheapest cure is composition, and the prompt now says so: a head of 38 to 42 cm in this block, not a finer grid. In detail mode a 16 cm window renders at about 48 px per cm, so a cell is 19 px across and the sculptor can see what it is doing; the centre-line relief numbers give it the depth the shading hides.</p>
+
+<h2>Model comparison on the final pipeline</h2>
+<p>One bust each, same prompt, same tools, reference on, Opus default caps ($8, 60 turns; Fable 5.1 capped at $4.50 for budget). Cost includes the reference sheet and the judge. The judge said "bust" for all of them, between 0.93 and 0.98, and is as lenient as before: ignore it and look.</p>
+<div class="scroll"><table class="ids">
+<thead><tr><th>Run</th><th>Model</th><th>Turns</th><th>Passes</th><th>Strikes</th><th>Cost</th><th>Wall</th><th>Focus / detail calls</th><th>Read by eye</th></tr></thead>
+<tbody>
+<tr><td>S-bust-opus-formed-ref-skill-4-20261109205403-2ff</td><td>Opus 5.5</td><td>40</td><td>70</td><td>25,381</td><td>$1.89</td><td>11 min</td><td>3 / 23</td><td><span class="good">Best face</span>: lids, pupils, mouth with corners, nose, jaw. Torso a vase with low shoulders.</td></tr>
+<tr><td>S-bust-fable52-formed-ref-skill-4-20261109205403-775</td><td>Fable 5.2</td><td>25</td><td>100</td><td>33,367</td><td>$4.48</td><td>15 min</td><td>1 / 38</td><td><span class="good">Best composition</span>: real shoulders and chest, head turned, hair in strands to a bun. Face cruder: round staring eyes, stubby nose, chisel marks left on the cheeks.</td></tr>
+<tr><td>S-bust-fable-formed-ref-skill-4-20261109211127-6ea</td><td>Fable 5.1</td><td>32</td><td>76</td><td>21,251</td><td>$3.36</td><td>9 min</td><td>2 / 13</td><td>A long-faced man with eyes, nostrils, mouth and ears that read, but a dented crown and a head on a post over a tall socle.</td></tr>
+<tr><td>S-bust-sol-formed-ref-skill-4-20261109205403-6a5</td><td>GPT-6 Sol</td><td>60</td><td>34</td><td>19,527</td><td>$0.64</td><td>8 min</td><td>2 / 10</td><td>Used all 60 turns, half of them looking. Brow, sockets and nose from the canon; hair a helmet, torso tiered like a lamp.</td></tr>
+<tr><td>S-bust-gemini-formed-ref-skill-4-20261109205403-c87</td><td>Gemini 3.1 Pro</td><td>52</td><td>49</td><td>16,846</td><td>$1.56</td><td>15 min</td><td>2 / 12</td><td><span class="bad">Worst</span>: head placed low (centre Y 62) and wrapped in a hood of hair, features barely cut.</td></tr>
+<tr><td>S-bust-fable52-plans-opus-formed-ref-skill-4-20261109211127-65f</td><td>Fable 5.2 plans, Opus 5.5 carves</td><td>13</td><td>54</td><td>23,593</td><td>$1.37</td><td>6 min</td><td>0 / 32</td><td><span class="bad">Not it</span>: the planner's hair mass sat too far forward and swallowed the brow; the executor finished at turn 13 without detail mode.</td></tr>
+</tbody></table></div>
+<div class="cards">
+  <div class="card"><span class="label">Opus 5.5, $1.89</span><img src="skill_pass/c-opus-face.webp" alt=""><img src="skill_pass/c-opus-round.webp" alt=""></div>
+  <div class="card"><span class="label">Fable 5.2, $4.48</span><img src="skill_pass/c-fable52-face.webp" alt=""><img src="skill_pass/c-fable52-round.webp" alt=""></div>
+  <div class="card"><span class="label">Fable 5.1, $3.36</span><img src="skill_pass/c-fable-face.webp" alt=""><img src="skill_pass/c-fable-round.webp" alt=""></div>
+  <div class="card"><span class="label">GPT-6 Sol, $0.64</span><img src="skill_pass/c-sol-face.webp" alt=""><img src="skill_pass/c-sol-round.webp" alt=""></div>
+  <div class="card"><span class="label">Gemini 3.1 Pro, $1.56</span><img src="skill_pass/c-gemini-face.webp" alt=""><img src="skill_pass/c-gemini-round.webp" alt=""></div>
+  <div class="card"><span class="label">Fable 5.2 plans, Opus carves, $1.37</span><img src="skill_pass/c-planner-face.webp" alt=""><img src="skill_pass/c-planner-round.webp" alt=""></div>
+</div>
+<p><strong>Ranking</strong> (face first, then the whole, then cost): Opus 5.5, Fable 5.2, Fable 5.1, GPT-6 Sol, Gemini 3.1 Pro. Fable 5.2 wins on composition and loses on the face at 2.4 times the price, so <strong>Opus 5.5 stays the default</strong>. One run each is one sample each: the Opus runs on this page vary as much between themselves (skill-1 to skill-4) as the models do between each other.</p>
+
+<h2>The runs that led here, and what did not work</h2>
+<div class="scroll"><table class="ids">
+<thead><tr><th>Run</th><th>What it tried</th><th>Turns</th><th>Cost</th><th>What happened</th></tr></thead>
+<tbody>
+<tr><td>S-bust-opus-formed-ref-skill-1-20261109201733-66b</td><td>Canon head, <code>detail</code>, new reference brief. No detail mode yet.</td><td>25</td><td>$1.45</td><td>First readable face (brow, sockets, nose, mouth line, parted hair). The model shrank the chest to a bulb under a tall socle: head on a post on a box.</td></tr>
+<tr><td>S-bust-opus-formed-ref-skill-2-20261109202848-43f</td><td>Canon tweaks (deeper sockets, flatter ears), neck and shoulder rules in the prompt.</td><td>29</td><td>$1.41</td><td><span class="bad">Lost the head.</span> At turn 14 the model declared a separate "torso" form and cut to it; the pass protects one form, so the head went with the waste. It finished a 20 cm head on a 68 cm piece. This is why cutting to a second form is now refused.</td></tr>
+<tr><td>S-bust-opus-formed-ref-skill-3-20261109203854-aff</td><td>The guard, detail mode (<code>focus</code>), relief numbers in close-ups.</td><td>42</td><td>$2.22</td><td>Used detail mode three times: lids, pupils, mouth corners (the pair above). Torso again small on a 16 cm socle.</td></tr>
+<tr><td>S-bust-opus-formed-ref-skill-4-20261109205403-2ff</td><td>The measure of a bust in centimetres in the prompt.</td><td>40</td><td>$1.89</td><td>Socle gone, chest rises from the base, shoulders present. The "after" above.</td></tr>
+<tr><td>S-pawn-opus-formed-ref-skill-4-20261109211127-032</td><td>Regression check</td><td>8</td><td>$0.61</td><td><span class="good">Clean pawn</span>, judge 0.96, finished in 8 turns.</td></tr>
+<tr><td>S-cat-opus-formed-ref-skill-4-20261109211127-f0d</td><td>Regression check</td><td>14</td><td>$0.76</td><td>A cat sitting up with ears intact and paws marked, better made than the study's cats; but upright rather than the loaf the commission asks for, and the judge said "sitting dog" (0.4). Not a regression in carving; a looser reading of the pose.</td></tr>
+</tbody></table></div>
+<div class="cards">
+  <div class="card"><span class="label">skill-1: head on a post on a box</span><img src="skill_pass/r1-round.webp" alt=""></div>
+  <div class="card"><span class="label">skill-2: the head cut away by a second form</span><img src="skill_pass/r2-round.webp" alt=""></div>
+  <div class="card"><span class="label">Pawn and cat on the final defaults</span><img src="skill_pass/c-pawn-round.webp" alt=""><img src="skill_pass/c-cat-round.webp" alt=""></div>
+</div>
+<p><strong>Did not work.</strong> The planner split (one run, above): a stronger planner did not make a better design, and the handoff lost the executor's appetite for detail work. Kyle's hypothesis that the references were the problem: the old sheets were fine as busts; the new brief gives better ones, but the bust improved because of the canon and the finishing pass, not the sheet. Fine chiselling of a face from a full look: still wrecks it, which is why detail mode confines strokes to a window and the prompt forbids strokes on a face outside it.</p>
+
+<h2>Spend</h2>
+<p>Eleven runs, <strong>$19.77</strong> of the $25 cap (the study ledger went from $21.56 to $41.33). Busts: $1.45, $1.41, $2.22, $1.89 (Opus), $4.48 (Fable 5.2), $3.36 (Fable 5.1), $0.64 (Sol), $1.56 (Gemini), $1.37 (planner). Pawn $0.61, cat $0.76. Canon tuning cost nothing.</p>
+
+<h2>Still weak, and what to do next</h2>
+<ul>
+  <li><strong>Composition is now the bottleneck</strong>: a long neck, low or missing shoulders, a chest that tapers to the base. The honest fix is a second canon, a <code>bust_torso</code> solid (neck, trapezius, shoulders, chest with the classical cut), placed and sized by the model the way the head is, so the design decision left to the model is proportion and pose, where it does well.</li>
+  <li><strong>Every face is a sibling.</strong> The canon has no character knobs beyond its box and what the model lays over it. A few flat parameters on the head (jaw width, nose length, brow weight, age) or two or three canon variants would give variety without giving the model back the job of placing sockets.</li>
+  <li><strong>Eyes.</strong> The canon's eye is an almond set back under the brow; the model then drills a round pupil, which reads as cartoon. A lid groove and an iris disc in the canon, carved by <code>detail</code>, would read better than anything cut by hand at this resolution.</li>
+  <li><strong>Hair</strong> is an ellipsoid helmet. A <code>hair</code> canon (cap, temples, nape, optional bun or parting) is the same trick as the head.</li>
+  <li><strong>Detail mode is not persisted</strong>: focus lives in the Studio, so a reload or a context rebuild drops it. Harmless today; it should ride in the session if the region loop ever runs in a parallel worker.</li>
+  <li><strong>Sampling.</strong> Every verdict here rests on one run per arm. Three busts per model on the final pipeline (about $25 more) would say whether Fable 5.2's composition and Opus's face are real differences or luck.</li>
+</ul>
+</main>
+</body>
+</html>

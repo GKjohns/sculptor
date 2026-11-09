@@ -480,6 +480,42 @@ What the study says:
 - **Skipped by decision:** 5.5 gallery and deploy, and the deploy-only work with it (WebP looks for Vercel's 4.5 MB body limit). Nothing is public.
 - **Known rough edges:** a film opens wherever the camera happened to be, sometimes on the block's shadowed side; at time-lapse speeds the director never takes the macro or slow motion (it refuses them above 12x and 24x); a one-minute film is about 79 MB; export holds the tab (about 70 s per minute of film) and shows the canvas stretched behind the progress card; title and signature fall back to Georgia or Iowan Old Style (no web font is loaded); the light sweep barely shows in stills; nobody has carved a commission in black marble live or listened to anything on speakers; Kyle has not signed off on the look.
 
+
+### Sculpting skill pass: better faces `[Built]` (November 9, 2026)
+**Goal:** Make the sculptor better at sculpting, the bust above all. Kyle's read: the pawn and the cat were good, the bust "looks like a little kid sculpted it"; try a better model where it plans, try Fable 5.2, and make fine-grained detail work on a face possible. Report: `study/skill_pass.html`.
+
+**Diagnosis.** The face failed because the tools could not say one: a form held twelve convex solids under one blend (a head was an egg with a nose), the roughing-out's last layer left 0.3 to 0.6 cm of claw noise (a lip's whole depth), and every finer feature had to be chiselled from a contact sheet where the face was a few dozen pixels wide. The reference sheets were sculptable busts already; the model had no way to carry their relief into the stone.
+
+**What changed** (all in `shared/`, so the bench and the browser share it; `KERNEL_VERSION` stays 2 and every old log replays):
+- `shared/sculpt/anatomy.ts`: a head canon. `declare_form` takes `kind: head` (centre, skull size, tilt/turn/cock) and expands it into 27 kernel primitives built additively (cranium, frontal bone, two brow ridges, a face mass whose sides are the socket floors, cheekbones, eyes, a cone nose with tip and wings, muzzle, lips, chin, jaw, ears), so the log holds only kernel kinds. Tuned offline in five iterations at no spend; `tests/anatomy.test.ts` pins the landmarks. Shapes per form 12 → 24.
+- `detail`: a windowed `roughOut` (`window` in `hand.ts`): flat chisel, 0.1 cm margin, only surfaces facing the view, no saw. The face is finished by it and is then the form itself.
+- Detail mode: `focus` / `unfocus` in the Studio. The window (6 to 30 cm) is shown enlarged with the surface's relief along its centre lines in numbers; while focused every `look` is the window, strokes must be from that view, inside it and under a fifth of its width, `rough_out` and `saw` are refused. The camera takes a macro shot of a close-up or focus (`Macro` in `camera.ts`). Focus is in-memory only.
+- Guards: the rasp protects the form last cut to; cutting to a second form while the figure is another is refused (run skill-2 lost its head that way).
+- Prompt: placing and dressing a head, the measure of a bust in centimetres, compose as a sculpture, what 0.4 cm cells can resolve. Reference brief: a sculptor's study (planes, a slight turn, hair mass, head ≥ two fifths, classical shoulders, low socle); the sheets changed at once.
+- Fable 5.2 (`anthropic/claude-fable-5.2`, $8/$40 per million) added as `fable52`. `shared/agent/planner.ts`: a planner/executor split (`--planner`, `?planner=`), off by default.
+
+**Results.** Before/after at the same camera is on the report page. The face went from an egg with notches to a brow, deep eyes with lids and pupils, a nose with bridge and wings, a closed mouth with corners, chin and jaw, under a parted hair mass, head turned: a stylised portrait bust, not yet a carver's. Composition (long neck, low shoulders, vase chest) is the weak part now. Pawn still clean (8 turns, $0.61); cat better made than the study's but sat upright rather than loafed (judge said dog).
+
+| Run | Model | Turns | Cost | Read |
+|---|---|---|---|---|
+| `S-bust-opus-formed-ref-skill-1-20261109201733-66b` | Opus 5.5 | 25 | $1.45 | first readable face; chest shrunk to a bulb on a socle |
+| `S-bust-opus-formed-ref-skill-2-20261109202848-43f` | Opus 5.5 | 29 | $1.41 | head cut away by a second form (now refused) |
+| `S-bust-opus-formed-ref-skill-3-20261109203854-aff` | Opus 5.5 | 42 | $2.22 | detail mode used for lids, pupils, mouth; tall socle |
+| `S-bust-opus-formed-ref-skill-4-20261109205403-2ff` | Opus 5.5 | 40 | $1.89 | **best face**; the "after" |
+| `S-bust-fable52-formed-ref-skill-4-20261109205403-775` | Fable 5.2 | 25 | $4.48 | best composition, cruder face |
+| `S-bust-fable-formed-ref-skill-4-20261109211127-6ea` | Fable 5.1 | 32 | $3.36 | readable face, head on a post |
+| `S-bust-sol-formed-ref-skill-4-20261109205403-6a5` | GPT-6 Sol | 60 | $0.64 | helmet hair, tiered torso |
+| `S-bust-gemini-formed-ref-skill-4-20261109205403-c87` | Gemini 3.1 Pro | 52 | $1.56 | worst: low head in a hood |
+| `S-bust-fable52-plans-opus-formed-ref-skill-4-20261109211127-65f` | Fable 5.2 plans, Opus carves | 13 | $1.37 | hair swallowed the brow; stopped early |
+| `S-pawn-opus-formed-ref-skill-4-20261109211127-032` | Opus 5.5 | 8 | $0.61 | clean pawn |
+| `S-cat-opus-formed-ref-skill-4-20261109211127-f0d` | Opus 5.5 | 14 | $0.76 | sitting cat, ears intact |
+
+Ranking: Opus 5.5, Fable 5.2, Fable 5.1, Sol, Gemini. Fable 5.2 wins only on composition at 2.4× the cost, so **Opus 5.5 stays the default**; the planner split did not help in its one run and stays off. One run per arm: Opus's own runs vary as much as the models do.
+
+**Spend:** $19.77 of the $25 cap (ledger $21.56 → $41.33). 197 tests, typecheck and lint pass.
+
+**Next:** a `bust_torso` canon (neck, shoulders, chest with the classical cut) so composition stops failing; character knobs or variants on the head so faces are not siblings; a lid groove and iris in the canon instead of drilled pupils; a `hair` canon; persist focus in the session; three runs per model before believing the ranking.
+
 ---
 
 ## Risks

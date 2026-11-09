@@ -465,3 +465,19 @@ test('a slice draws the stone cut by a plane under the rulers of the view it mat
   assert.deepEqual(renderSlice(grid, 'y', 40, { forms: [] }).data, level.data)
   assert.deepEqual(renderSlice(grid, 'y', 40).data, fit.data)
 })
+
+test('a close-up reads the relief along its centre lines: a flat face is flat, a sawn step shows where it is', () => {
+  const grid = createGrid()
+  const flat = renderCloseup(grid, 'front', [0, 50], 20, {})
+  assert.equal(flat.profileH.length, 9)
+  assert.deepEqual(flat.profileH, new Array(9).fill(30))
+  assert.deepEqual(flat.profileV, new Array(9).fill(30))
+  // A saw takes the front 10 cm off the whole block: the front face now reads Z 20 everywhere,
+  // and from the top the vertical (Z) centre line is stone at Y 100 up to Z 20 and air beyond.
+  applyStrike(grid, { kind: 'saw', plane: { point: [0, 50, 20], normal: [0, 0, 1] }, ms: 1 })
+  const sawn = renderCloseup(grid, 'front', [0, 50], 20, {})
+  assert.deepEqual(sawn.profileH, new Array(9).fill(20))
+  const top = renderCloseup(grid, 'top', [0, 0], 60, {})
+  const expected = top.profileV.map((_, k) => -30 + (k + 0.5) / 9 * 60 < 20 ? 100 : NaN)
+  assert.deepEqual(top.profileV, expected)
+})

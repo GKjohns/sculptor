@@ -22,10 +22,13 @@ const messages = computed(() => notebookMessages(props.entries))
 const ICONS: Record<string, string> = {
   look: 'i-lucide-eye',
   closeup: 'i-lucide-zoom-in',
+  focus: 'i-lucide-scan-search',
+  unfocus: 'i-lucide-zoom-out',
   slice: 'i-lucide-layers-2',
   sketch: 'i-lucide-pencil',
   declare_form: 'i-lucide-shapes',
   rough_out: 'i-lucide-hammer',
+  detail: 'i-lucide-brush',
   saw: 'i-lucide-slice',
   chisel: 'i-lucide-pickaxe',
   drill: 'i-lucide-drill',

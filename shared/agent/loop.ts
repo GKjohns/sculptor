@@ -232,12 +232,13 @@ export async function runCommission(opts: RunOptions): Promise<RunResult> {
         // so the count of passes since the last look carries on.
         const tool = parsed.name as LookTool
         const view = tool === 'slice' ? SLICE_VIEW[(parsed.args as SliceArgs).axis] : (parsed.args as CloseupArgs).view
-        const overlay = tool === 'slice' ? 'slice' : (parsed.args as CloseupArgs).overlay
+        const views = done.views ?? [view]
+        const overlay = tool === 'slice' ? 'slice' : tool === 'unfocus' ? 'grid' : (parsed.args as CloseupArgs).overlay
         if (images.length) {
           text += '\nThe image is in the next message.'
           sheets.push({ id: call.id, label: `${describeCall(parsed.name, parsed.args)}.`, images: images.map(toBase64) })
         }
-        emit({ type: 'look', turn, auto: false, views: [view], overlay, images, summary: done.summary, numbers: done.numbers, tool, args: parsed.args })
+        emit({ type: 'look', turn, auto: false, views, overlay, images, summary: done.summary, numbers: done.numbers, tool, args: parsed.args })
       } else if ((PASS_TOOLS as readonly string[]).includes(parsed.name)) {
         const tool = parsed.name as PassTool
         const n = state.passes.length + 1

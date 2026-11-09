@@ -95,6 +95,8 @@ export interface RaspPass {
   path: RulerPoint[]
   width_cm: number
   passes: number
+  // A declared form the rasp may not wear down into: ridges above it go, nothing below it.
+  protect?: string
 }
 
 export interface DrillPass {
@@ -122,10 +124,18 @@ export interface RoughOutPass {
   // gives is written to the log as a `form` entry so a replay clips the same strikes.
   to: string | Form
   margin_cm: number
-  tool: 'point' | 'claw'
+  // The flat is only for a windowed pass.
+  tool: 'point' | 'claw' | 'flat'
   // Roughly how many chisel strikes the pass may take; bites get wider to stay near it.
   max_strikes?: number
+  // The detail pass: work only inside this box (block cm), only on surfaces that face the
+  // viewer standing along `facing` (a unit vector from the stone toward the viewer), with
+  // small bites whose tips reach the margin, so the stone there ends up on the form. No saw
+  // is used and the form is not checked for standing, since nothing outside the window moves.
+  window?: { box: DetailBox, facing: Vec3 }
 }
+
+export interface DetailBox { x0: number, y0: number, z0: number, x1: number, y1: number, z1: number }
 
 // ---------- shared plumbing ----------
 
@@ -517,6 +527,7 @@ export function rasp(grid: Grid, pass: RaspPass): PassResult {
   if (!isAxisView(pass.view)) return refuse(`The rasp works from ${CARVE_VIEWS}, not '${pass.view}'.`)
   if (!validPath(pass.path)) return refuse('The rasp needs a path of at least one ruler point.')
   if (!(pass.width_cm > 0)) return refuse('width_cm must be above zero.')
+  if (pass.protect !== undefined && !grid.forms.has(pass.protect)) return refuse(`No form named '${pass.protect}' has been declared.`)
   const view = pass.view
   const width = clamp(pass.width_cm, 3 * grid.voxel, 14)
   const passes = Math.round(clamp(Number.isFinite(pass.passes) ? pass.passes : 1, 1, 12))
@@ -536,7 +547,7 @@ export function rasp(grid: Grid, pass: RaspPass): PassResult {
         landed++
       }
       const [nx, ny, nz] = hit.normal
-      emit(run, {
+      const strike: CutStrike = {
         kind: 'cut',
         tool: 'rasp',
         at: [r3(hit.point[0]), r3(hit.point[1]), r3(hit.point[2])],
@@ -546,7 +557,9 @@ export function rasp(grid: Grid, pass: RaspPass): PassResult {
         depth: RASP_BITE,
         seed: hashSeed(seed, n, i),
         ms: 160
-      })
+      }
+      if (pass.protect !== undefined) strike.protect = pass.protect
+      emit(run, strike)
       strokes++
     }
   }
@@ -788,16 +801,25 @@ export function standingProud(grid: Grid, form: CompiledForm): Proud {
 }
 
 // The same, also collecting the index of every surface voxel that stands more than `over`.
-function scanSurface(grid: Grid, form: CompiledForm, over: number, high: number[]): Proud {
+function scanSurface(grid: Grid, form: CompiledForm, over: number, high: number[], box?: DetailBox): Proud {
   const { nx, ny, nz, dist, voxel, x0, y0, z0, qPerCm } = grid
   const nxy = nx * ny
   let max = 0
   let sum = 0
   let count = 0
-  for (let z = 1; z < nz - 1; z++) {
-    for (let y = 1; y < ny - 1; y++) {
-      let i = 1 + nx * (y + ny * z)
-      for (let x = 1; x < nx - 1; x++, i++) {
+  // Only the samples inside the box, when one is given.
+  const lo = (v: number, o: number, n: number) => box ? clamp(Math.floor((v - o) / voxel), 1, n - 2) : 1
+  const hi = (v: number, o: number, n: number) => box ? clamp(Math.ceil((v - o) / voxel), 1, n - 2) : n - 2
+  const zA = lo(box?.z0 ?? 0, z0, nz)
+  const zB = hi(box?.z1 ?? 0, z0, nz)
+  const yA = lo(box?.y0 ?? 0, y0, ny)
+  const yB = hi(box?.y1 ?? 0, y0, ny)
+  const xA = lo(box?.x0 ?? 0, x0, nx)
+  const xB = hi(box?.x1 ?? 0, x0, nx)
+  for (let z = zA; z <= zB; z++) {
+    for (let y = yA; y <= yB; y++) {
+      let i = xA + nx * (y + ny * z)
+      for (let x = xA; x <= xB; x++, i++) {
         const d = dist[i]!
         if (d >= 0 || d < -1.5 * Q_PER_VOXEL) continue
         if (dist[i - 1]! < 0 && dist[i + 1]! < 0 && dist[i + nx]! < 0 && dist[i - nxy]! < 0 && dist[i + nxy]! < 0) continue
@@ -1090,7 +1112,8 @@ function stoneUnderBite(
 // down in layers from the outside in, wide bites far from the target and finer ones for the
 // last layer, which leaves a pitted skin just outside the margin.
 export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
-  if (pass.tool !== 'point' && pass.tool !== 'claw') return refuse(`Roughing out is done with the point or the claw, not '${String(pass.tool)}'.`)
+  const window = pass.window
+  if (pass.tool !== 'point' && pass.tool !== 'claw' && !(window && pass.tool === 'flat')) return refuse(`Roughing out is done with the point or the claw, not '${String(pass.tool)}'.`)
   let source: Form
   let name: string
   if (typeof pass.to === 'string') {
@@ -1105,7 +1128,7 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
   }
   if (!source || (!source.silhouette && !(source.shapes && source.shapes.length > 0))) return refuse('The form to rough out to has no shapes.')
   const margin = r3(clamp(Number.isFinite(pass.margin_cm) ? pass.margin_cm : 0, 0, 40))
-  const budget = clamp(Number.isFinite(pass.max_strikes) ? pass.max_strikes! : 1500, 200, 20000)
+  const budget = clamp(Number.isFinite(pass.max_strikes) ? pass.max_strikes! : window ? 2500 : 1500, 200, 20000)
   const spec = toolSpec(pass.tool)
 
   const run = begin(grid)
@@ -1118,7 +1141,15 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
   const phi: Field = (x, y, z) => formDistance(form, x, y, z)
 
   const { voxel, nx, ny } = grid
-  const box: Box = { x0: -grid.size[0] / 2, y0: 0, z0: -grid.size[2] / 2, x1: grid.size[0] / 2, y1: grid.size[1], z1: grid.size[2] / 2 }
+  const block: Box = { x0: -grid.size[0] / 2, y0: 0, z0: -grid.size[2] / 2, x1: grid.size[0] / 2, y1: grid.size[1], z1: grid.size[2] / 2 }
+  const box: Box = window
+    ? {
+        x0: clamp(Math.min(window.box.x0, window.box.x1), block.x0, block.x1), x1: clamp(Math.max(window.box.x0, window.box.x1), block.x0, block.x1),
+        y0: clamp(Math.min(window.box.y0, window.box.y1), block.y0, block.y1), y1: clamp(Math.max(window.box.y0, window.box.y1), block.y0, block.y1),
+        z0: clamp(Math.min(window.box.z0, window.box.z1), block.z0, block.z1), z1: clamp(Math.max(window.box.z0, window.box.z1), block.z0, block.z1)
+      }
+    : block
+  if (window && (box.x1 - box.x0 < 2 * voxel || box.y1 - box.y0 < 2 * voxel || box.z1 - box.z0 < 2 * voxel)) return refuse('The window lies outside the block.')
   const blockCm3 = grid.size[0] * grid.size[1] * grid.size[2]
 
   // Every other voxel sample inside the block, with the target's distance there.
@@ -1163,13 +1194,13 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
     }
   }
   const what = typeof pass.to === 'string' ? `'${pass.to}'` : 'the form'
-  if (coreCount === 0) return refuse(`There is no stone inside ${what}, so roughing out to it would leave nothing. Check the form's position.`)
+  if (coreCount === 0) return refuse(window ? `There is no stone of ${what} inside the window, so there is nothing to bring down to it there.` : `There is no stone inside ${what}, so roughing out to it would leave nothing. Check the form's position.`)
 
   // The island check keeps what is joined to the lowest stone. Everything this pass protects
   // has to be joined to that through protected stone, or it would be cut loose and fall as
   // soon as the waste around it had gone. Flood the protected samples from the bottom.
   let low = 0
-  while (low < grid.ny - 1 && !layerHasStone(grid, low)) low++
+  while (!window && low < grid.ny - 1 && !layerHasStone(grid, low)) low++
   const yLow = grid.y0 + low * voxel
   const stack: number[] = []
   const lxy = lx * ly
@@ -1200,7 +1231,7 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
     if (k > 0 && core[f - lxy] === 1) joined += mark(core, stack, f - lxy)
     if (k < lz - 1 && core[f + lxy] === 1) joined += mark(core, stack, f + lxy)
   }
-  if (joined < coreCount) {
+  if (!window && joined < coreCount) {
     // The lowest sample that was not reached.
     let f = core.indexOf(1)
     for (let g = f; g >= 0; g = core.indexOf(1, g + 1)) {
@@ -1247,7 +1278,7 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
   // Loose stone the island checks dropped, while sawing and then while chiselling.
   let slabLoose = 0
   let looseCm3 = 0
-  while (saws < MAX_SAWS) {
+  while (!window && saws < MAX_SAWS) {
     let best = -1
     let bestCount = 0
     for (let d = 0; d < SAW_DIRECTIONS.length; d++) {
@@ -1297,9 +1328,12 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
   const shank = spec.shank
   // The last layer. Its bites are about as wide as the margin is deep, shallow, and stop a
   // little short of the margin, so tool noise roughens the skin without being clipped flat.
-  const lastDepth = pass.tool === 'point' ? clamp(0.3 * margin, 0.6, 1.1) : clamp(0.25 * margin, 0.5, 1)
-  const lastFloor = (size: number) => 0.05 + (0.25 * spec.noise + 0.9 * spec.teeth) * size
-  let lastSize = clamp(1.3 * margin, 8 * voxel, 6)
+  // A windowed pass bites small and lets the kernel's clipping stop the tips on the margin, so
+  // the stone there ends up on the form itself, not a tool's roughness above it.
+  const lastDepth = window ? 0.6 : pass.tool === 'point' ? clamp(0.3 * margin, 0.6, 1.1) : clamp(0.25 * margin, 0.5, 1)
+  const lastFloor = (size: number) => window ? 0 : 0.05 + (0.25 * spec.noise + 0.9 * spec.teeth) * size
+  let lastSize = window ? 4 * voxel : clamp(1.3 * margin, 8 * voxel, 6)
+  const facing = window?.facing
   const spacing = 0.46
   const lastTrigger = 0.3
 
@@ -1319,6 +1353,8 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
       const y = d[o + 1]!
       const z = d[o + 2]!
       if (isTaken(taken, x, y, z, apart)) continue
+      // Surfaces turned away from the viewer are another window's work.
+      if (facing && d[o + 3]! * facing[0] + d[o + 4]! * facing[1] + d[o + 5]! * facing[2] < -0.2) continue
       const stands = stoneUnderBite(grid, phi, d, o, repair ? 0.5 * radius : radius, reach, enough)
       if (stands <= trigger) continue
       take(taken, x, y, z)
@@ -1402,7 +1438,7 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
   let proud: Proud = { maxCm: 0, meanCm: 0, surfaceVoxels: 0 }
   for (let round = 0; round < 4; round++) {
     const high: number[] = []
-    proud = scanSurface(grid, form, ridge, high)
+    proud = scanSurface(grid, form, ridge, high, window ? box : undefined)
     if (high.length === 0 || round === 3 || tidied >= 0.1 * budget) break
     const ms = blowMs(spec.id === 'point' ? 250 : 220, last.size)
     let blows = 0
@@ -1420,6 +1456,7 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
       const nxn = g[0]! / len
       const nyn = g[1]! / len
       const nzn = g[2]! / len
+      if (facing && nxn * facing[0] + nyn * facing[1] + nzn * facing[2] < -0.2) continue
       // From just above the crumb down to the last layer's level, or a bite's worth of it.
       const depth = clamp(phi(x, y, z) - last.floor, 0.5 * last.depth, 0.6 * MAX_BITE)
       emit(run, {
@@ -1457,14 +1494,16 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
     proudMaxCm: r3(proud.maxCm),
     proudMeanCm: r3(proud.meanCm)
   }
-  let summary = `Roughed out to ${what} with the ${pass.tool} chisel, leaving ${r3(margin)} cm:`
+  let summary = window
+    ? `Brought the stone in the window down to ${what} with the ${pass.tool} chisel, leaving ${r3(margin)} cm:`
+    : `Roughed out to ${what} with the ${pass.tool} chisel, leaving ${r3(margin)} cm:`
   if (saws + chiselStrikes === 0) {
     summary += ' there was nothing left outside the margin to remove.'
   } else {
     if (saws > 0) summary += ` ${saws} saw cut${saws === 1 ? '' : 's'} took ${amount(slabCm3)} off in slabs,`
     summary += ` ${chiselStrikes} chisel strikes took ${amount(chiselCm3)}`
     summary += looseCm3 > 0.5 ? ` and ${amount(looseCm3)} fell away loose.` : '.'
-    summary += ` Outside the margin the stone now stands ${proud.meanCm.toFixed(1)} cm proud on average and ${proud.maxCm.toFixed(1)} cm at most.`
+    summary += ` ${window ? 'In the window the' : 'Outside the margin the'} stone now stands ${proud.meanCm.toFixed(window ? 2 : 1)} cm proud on average and ${proud.maxCm.toFixed(1)} cm at most.`
   }
   const result = done(run, [], summary)
   result.stats = stats

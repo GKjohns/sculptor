@@ -6,6 +6,7 @@ import type { Usage } from './types.ts'
 export const MODELS = {
   opus: 'anthropic/claude-opus-5.5',
   fable: 'anthropic/claude-fable-5.1',
+  fable52: 'anthropic/claude-fable-5.2',
   sol: 'openai/gpt-6-sol',
   gemini: 'google/gemini-3.1-pro-preview',
   sonnet: 'anthropic/claude-sonnet-5.5',
@@ -17,15 +18,16 @@ export type ModelKey = keyof typeof MODELS
 
 export const DEFAULT_SCULPTOR: ModelKey = 'opus'
 // The sculptors a person can choose between, in the order the picker lists them.
-export const SCULPTORS = ['opus', 'sol', 'fable', 'gemini'] as const satisfies readonly ModelKey[]
+export const SCULPTORS = ['opus', 'sol', 'fable52', 'fable', 'gemini'] as const satisfies readonly ModelKey[]
 export type SculptorKey = typeof SCULPTORS[number]
 // Every model that can take a turn through /api/brain: all of them but the image model.
-export const TEXT_MODELS = ['opus', 'fable', 'sol', 'gemini', 'sonnet', 'haiku'] as const satisfies readonly ModelKey[]
+export const TEXT_MODELS = ['opus', 'fable', 'fable52', 'sol', 'gemini', 'sonnet', 'haiku'] as const satisfies readonly ModelKey[]
 export type TextModelKey = typeof TEXT_MODELS[number]
 
 export const MODEL_LABELS: Record<ModelKey, string> = {
   opus: 'Opus 5.5',
   fable: 'Fable 5.1',
+  fable52: 'Fable 5.2',
   sol: 'GPT-6 Sol',
   gemini: 'Gemini 3.1 Pro',
   sonnet: 'Sonnet 5.5',
@@ -49,6 +51,8 @@ export interface Price {
 export const PRICING: Record<string, Price> = {
   'anthropic/claude-opus-5.5': { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 },
   'anthropic/claude-fable-5.1': { input: 10, output: 50, cacheRead: 0.25, cacheWrite: 12.5 },
+  // Gateway /v1/models, checked 2026-11-09.
+  'anthropic/claude-fable-5.2': { input: 8, output: 40, cacheRead: 0.2, cacheWrite: 10 },
   'openai/gpt-6-sol': { input: 2, output: 10, cacheRead: 0.2, cacheWrite: 2.5 },
   'google/gemini-3.1-pro-preview': { input: 2, output: 12, cacheRead: 0.2 },
   'anthropic/claude-sonnet-5.5': { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 },

@@ -1243,7 +1243,14 @@ export interface Closeup {
   // outside the form, and the furthest it has been cut below it, cm.
   proudMax?: number
   belowMax?: number
+  // The surface's coordinate on that axis along the window's horizontal and vertical centre
+  // lines, at PROFILE_SAMPLES evenly spaced points from the ruler's low end to its high end
+  // (left to right as the ruler runs, bottom to top); NaN where the line meets no stone.
+  profileH: number[]
+  profileV: number[]
 }
+
+export const PROFILE_SAMPLES = 9
 
 // One axis view enlarged: a square window `spanCm` across centred on a ruler point, with a
 // one-centimetre grid, so a face or a paw can be read and strokes placed on it. Takes the
@@ -1289,11 +1296,34 @@ export function renderCloseup(grid: Grid, view: AxisView, centre: [number, numbe
       if (-d > below) below = -d
     }
   }
+  // Relief along the two centre lines, read off the plot in ruler order.
+  const tile = tiles[0]!
+  const ruler = tile.ruler!
+  const sample = (px: number, py: number): number => {
+    const x = Math.round(px) - tile.plot.x
+    const y = Math.round(py) - tile.plot.y
+    if (x < 0 || y < 0 || x >= plot.w || y >= plot.h) return NaN
+    const i = y * plot.w + x
+    return plot.hit[i] === 1 ? Math.round(plot.pos[i * 3 + a]! * 10) / 10 : NaN
+  }
+  const profileH: number[] = []
+  const profileV: number[] = []
+  const hMid = tile.plot.x + tile.plot.width / 2
+  const vMid = tile.plot.y + tile.plot.height / 2
+  for (let k = 0; k < PROFILE_SAMPLES; k++) {
+    const t = (k + 0.5) / PROFILE_SAMPLES - 0.5
+    const h = centre[0] + t * spanCm
+    const v = centre[1] + t * spanCm
+    profileH.push(sample(ruler.h0 + h * ruler.hPerCm, vMid))
+    profileV.push(sample(hMid, ruler.v0 + v * ruler.vPerCm))
+  }
   return {
     image: img,
-    tile: tiles[0]!,
+    tile,
     pxPerCm,
     stoneShare: plot.hit.length > 0 ? hits / plot.hit.length : 0,
+    profileH,
+    profileV,
     axis: (['x', 'y', 'z'] as const)[a]!,
     surfaceMin: hits > 0 ? lo : 0,
     surfaceMax: hits > 0 ? hi : 0,
