@@ -113,14 +113,14 @@ export const REFERENCE_BRIEF_INSTRUCTIONS = `Before you touch the stone you may 
 
 The block is ${B.width} cm wide, ${B.depth} cm deep and ${B.height} cm tall, and the piece has to come out of it in one piece. Design something stone can hold:
 - One compact, solid mass that rises from a simple base. The base is part of the piece. Keep it low, about a tenth of the height: height spent on a pedestal is height the subject loses.
-- Nothing floating or separate. No thin unsupported parts: no outstretched arms, free-standing thin legs, raised tails, fingers, strands or wires. Keep limbs against the body and close gaps with stone.
-- No holes through the piece.
+- Nothing floating or separate. Limbs may reach out from the body when they are thick (3 cm or more in the stone) and joined at both ends where they are long: a raised arm to the head or to drapery, a leg to a rock or a tree stump, a horse's tail to the ground. No fingers, strands or wires standing free.
 - Bold, simplified forms that read from their outline. Detail smaller than about 2 cm will not survive, so make the part that matters most as large as the block allows: in a portrait, a head at least a third of the height.
 - It must fit the block's proportions. A piece that stands tall and fills the block uses the stone best.
-- Design it as a sculpture, the way a sculptor would model the study, not as a figurine or a mannequin: simplified planes, a considered pose with a slight turn or tilt rather than a stiff frontal stance, masses that set off one another (a hair mass or drapery against a smooth face, a strong neck into broad shoulders). For a portrait bust: head at least two fifths of the height, deep-set eyes under a clear brow, a nose with a bridge, a closed mouth, a defined jaw and chin, hair or headwear as one mass, a neck that carries the head into shoulders cut off in the classical way, on a low socle.
+- Design it as a sculpture, the way a sculptor would model the study, not as a figurine or a mannequin: simplified planes, masses that set off one another (a hair mass or drapery against a smooth face, a strong neck into broad shoulders). For a portrait bust: head at least two fifths of the height, deep-set eyes under a clear brow, a nose with a bridge, a closed mouth, a defined jaw and chin, hair or headwear as one mass, a neck that carries the head into shoulders cut off in the classical way, on a low socle.
+- Composition and pose, as a Baroque sculptor would choose them: the moment of greatest tension, not the subject standing still (a figure mid-throw or turning to flee, a horse rearing, a bull lowering its head to charge, a sitter turning to speak). A strong diagonal through the whole piece, the shoulders turned against the hips, the head against the shoulders, weight on one leg, a gesture, drapery or hair in movement. A frontal, symmetric, static pose is wrong unless the commission asks for it. Fit it to the block: a figure or group upright, a long animal rearing or set along the diagonal of the base on a rock.
 
 Write three to six plain sentences covering:
-- what the piece is, its pose, and which side is its front
+- what the piece is, the moment and the pose (which leg carries the weight, how the torso turns, what each arm and the head do), and which side is its front
 - its overall proportions: how tall against how wide and how deep, and where it is widest
 - the main masses from the base upward
 - what makes its outline recognisable from the front and from the side
@@ -155,7 +155,7 @@ Rules for every quadrant:
 - Material: plain matte mid-grey clay in one uniform colour. No gloss, no texture, no pattern.
 - Lighting: soft and even from the front. No dramatic shadows. Every part of the model is clearly lighter than the background.
 - Background: flat pure black (#000000) with nothing on it. No floor, no ground line, no cast shadow, no gradient, no glow.
-- The model is one compact solid mass standing on a simple base that is part of it. No floating or separate parts, no thin unsupported limbs or strands, no holes through it: nothing a single block of stone could not hold.
+- The model is one solid mass standing on a simple base that is part of it, the way a marble statue is: no floating or separate parts, no thin strands or wires. Limbs and tails that reach out are thick and joined to the body, the base, a rock, a tree stump or drapery.
 - No text, letters, numbers, labels, arrows, rulers, borders, frames or dividing lines anywhere in the image.`
 }
 

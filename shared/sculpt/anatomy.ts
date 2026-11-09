@@ -122,7 +122,7 @@ export interface PartCut { label: string, tool: 'drill' | 'roundel', size: numbe
 // Eye geometry shared by the parts and the cuts.
 const EYE = { x: 3.15, y: 11.35, z: 6.05, r: 1.25, inner: 1.6, outer: 1.55, upper: 11.95, lower: 10.75 }
 
-function faceParts(k: HeadKnobs): Part[] {
+function faceParts(k: HeadKnobs, coarse = false): Part[] {
   const f = k.female ? 1 : 0
   const old = k.age === 2 ? 1 : 0
   const young = k.age === 0 ? 1 : 0
@@ -167,6 +167,8 @@ function faceParts(k: HeadKnobs): Part[] {
     K(0.2, M('ellipsoid', [7.6, 7.85 - 0.3 * old, -2.3], [0.9, 1.6 + 0.3 * old, 1.4])),
     K(0.15, M('ellipsoid', [7.65, 9.9, -0.45], [0.6, 0.9, 0.6]))
   ]
+  // A small head keeps the ear's shell and drops its rim, lobe and knob, which are under a cell.
+  if (coarse) parts.splice(parts.length - 4, 4)
   if (nose === 'aquiline') parts.push(P('ellipsoid', [0, 10.4, 9.25], [1.5, 1.6, 1.4]))
   // Age: bags under the eyes, a slack under the jaw.
   if (old) parts.push(M('ellipsoid', [EYE.x, 10.1, 5.85], [3.2, 1.2, 2.2]))
@@ -297,12 +299,13 @@ export function headFrame(head: Omit<DeclaredShape, 'kind'>): Frame {
 }
 
 // The canon head placed, sized and posed as declared, its face and hair as the style says.
-export function expandHead(head: Omit<DeclaredShape, 'kind'>): Expanded {
+// coarse: a whole figure's head, small enough that its hair is better said in fewer locks.
+export function expandHead(head: Omit<DeclaredShape, 'kind'>, coarse = false): Expanded {
   const k = headKnobs(head.style)
   const f = headFrame(head)
-  const hair = hairParts(k)
+  const hair = hairParts(k, coarse)
   return {
-    shapes: [...placeParts(f, faceParts(k), CHIN), ...placeParts(f, hair.parts, CHIN)],
+    shapes: [...placeParts(f, faceParts(k, coarse), CHIN), ...placeParts(f, hair.parts, CHIN)],
     cuts: [...placeCuts(f, faceCuts(k), CHIN), ...placeCuts(f, hair.cuts, CHIN)]
   }
 }

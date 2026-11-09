@@ -105,7 +105,7 @@ function cap(proud: number): Part[] {
 // `length` for the first piece (the tip is six tenths of it). With `drill`, the eye of each curl
 // is drilled, as Roman and Baroque carvers drilled theirs. `below` lets the locks come further
 // down than the hairline (long hair).
-function hooks(count: number, width: number, thick: number, proud: number, length: number, hook: number, drill: boolean, below = 0): Hair {
+function hooks(count: number, width: number, thick: number, proud: number, length: number, hook: number, drill: boolean, below = 0, single = false): Hair {
   const parts: Part[] = []
   const cuts: PartCut[] = []
   let n = 0
@@ -119,7 +119,7 @@ function hooks(count: number, width: number, thick: number, proud: number, lengt
     const tipDir = normalize(add(scale(f, Math.cos(hook * DEG)), scale(side, turn * Math.sin(hook * DEG))))
     const c2 = add(add(c1, scale(tipDir, 0.6 * length)), scale(s.n, -0.25 * thick))
     parts.push({ kind: 'capsule', c: scale(add(c0, c1), 0.5), s: [width, length + width, thick], r: eulerFromY(sub(c1, c0), s.n), k: LOCK_K })
-    parts.push({ kind: 'capsule', c: scale(add(c1, c2), 0.5), s: [0.8 * width, 0.6 * length + 0.8 * width, 0.85 * thick], r: eulerFromY(sub(c2, c1), s.n), k: LOCK_K })
+    if (!single) parts.push({ kind: 'capsule', c: scale(add(c1, c2), 0.5), s: [0.8 * width, 0.6 * length + 0.8 * width, 0.85 * thick], r: eulerFromY(sub(c2, c1), s.n), k: LOCK_K })
     if (drill) {
       const eye = add(add(c1, scale(side, -turn * 0.45 * width)), scale(s.n, 0.3 * thick))
       cuts.push({ label: 'curl', tool: 'drill', size: 0.32 * width, depth: 0.6 * thick, points: [eye], dir: scale(s.n, -1) })
@@ -204,33 +204,37 @@ function beard(k: HeadKnobs): Hair {
 }
 
 // The hair the style asks for, and the beard.
-export function hairParts(k: HeadKnobs): Hair {
+// coarse: the head is small (a whole figure's), so fewer, broader locks say the same thing at
+// a third of the solids.
+export function hairParts(k: HeadKnobs, coarse = false): Hair {
+  const c = coarse ? 0.4 : 1
+  const w = coarse ? 1.45 : 1
   let hair: Hair = { parts: [], cuts: [] }
   switch (k.hair) {
     case 'curls': {
-      const h = hooks(84, 3.0, 1.5, 2.3, 2.5, 90, true)
+      const h = hooks(Math.round(84 * c), 3.0 * w, 1.5 * w, 2.3 * w, 2.5 * w, 90, !coarse, 0, coarse)
       hair = { parts: [...cap(0.8), ...h.parts], cuts: h.cuts }
       break
     }
     case 'long': {
-      const h = hooks(70, 3.0, 1.5, 2.2, 3.4, 40, false, 16)
+      const h = hooks(Math.round(70 * c), 3.0 * w, 1.5 * w, 2.2 * w, 3.4 * w, 40, false, 16, coarse)
       hair = { parts: [...cap(0.9), ...h.parts], cuts: h.cuts }
       break
     }
     case 'short': {
-      const h = hooks(110, 2.3, 1.0, 1.7, 1.9, 25, false)
+      const h = hooks(Math.round(110 * c), 2.3 * w, 1.0 * w, 1.7 * w, 1.9 * w, 25, false, 0, coarse)
       hair = { parts: [...cap(0.3), ...h.parts], cuts: h.cuts }
       break
     }
     case 'waves': {
       // Combed forward and down from the crown, as Roman and Baroque portraits wear it.
-      const w = locks(24, 2.6, 1.9, a => [a, 70], a => [a, hairline(a) + 3], 7)
-      hair = { parts: [...cap(0.8), ...w.parts], cuts: w.cuts }
+      const v = locks(24 / c, 2.6 * w, 1.9 * w, a => [a, 70], a => [a, hairline(a) + 3], 7)
+      hair = { parts: [...cap(0.8), ...v.parts], cuts: v.cuts }
       break
     }
     case 'bun': {
       // Drawn back from the hairline over the head into a knot at the back.
-      const back = locks(20, 2.3, 2.0, a => [a, hairline(a) + 2], a => [a * 0.35 + (a < 0 ? -180 : 180) * 0.65, 18], 4)
+      const back = locks(20 / c, 2.3 * w, 2.0 * w, a => [a, hairline(a) + 2], a => [a * 0.35 + (a < 0 ? -180 : 180) * 0.65, 18], 4)
       hair = { parts: [...cap(0.4), ...back.parts, { kind: 'ellipsoid', c: [0, 15.5, -11.6], s: [6.6, 5.8, 4.8], k: LOCK_K }], cuts: back.cuts }
       for (const [r, y] of [[2.6, 16.6], [2.4, 14.4]] as [number, number][]) {
         hair.cuts.push({ label: 'bun', tool: 'roundel', size: 0.6, depth: 0.5, points: [[-r, y, -13.2], [-r / 2, y + 0.4, -13.8], [r / 2, y - 0.4, -13.8], [r, y, -13.2]], dir: null })

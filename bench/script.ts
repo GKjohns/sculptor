@@ -5,6 +5,9 @@
 import type { Brain, BrainTurn, Message, ReferenceMode, ToolSetId } from '../shared/agent/types.ts'
 import { compileForm, formDistance } from '../shared/sculpt/shapes.ts'
 import type { Form, Shape, ShapeKind, Vec3 } from '../shared/sculpt/types.ts'
+import { animalSpec, figureSpec } from '../shared/agent/studio.ts'
+import type { AnimalArgs, FigureArgs } from '../shared/agent/toolSchemas.ts'
+import { expandScene } from '../shared/sculpt/figure.ts'
 import type { SubjectId } from './subjects.ts'
 
 interface Call { name: string, args: Record<string, unknown> }
@@ -14,7 +17,27 @@ const shape = (kind: ShapeKind, c: Vec3, s: Vec3) => ({ kind, center_x: c[0], ce
 
 type FlatShape = ReturnType<typeof shape>
 
+const pose = (f: Partial<FigureArgs>): FigureArgs => ({
+  body: 'man', build: 'athletic', ground_x: 0, ground_y: 6, ground_z: 0, height_cm: 86, facing_deg: 0, legs: 'stand', weight_on: 'both',
+  twist_deg: 0, lean_deg: 0, head_turn_deg: 0, head_tilt_deg: 0, left_arm: 'down', right_arm: 'down', drapery: 'none', support: 'none', style: [], ...f
+})
+const beast = (a: Partial<AnimalArgs>): AnimalArgs => ({
+  species: 'horse', pose: 'stand', ground_x: 0, ground_y: 6, ground_z: 0, length_cm: 44, facing_deg: 0, head_turn_deg: 0, head_raise_deg: 0, tail: 'down', lead: 'left', ...a
+})
+
+// The figure subjects, declared by pose with declare_figure (the base is one of the shapes).
+const SCENES: Partial<Record<SubjectId, { figures: FigureArgs[], animals: AnimalArgs[], blend: number }>> = {
+  david: { figures: [pose({ legs: 'lunge', weight_on: 'left', twist_deg: -38, lean_deg: 8, head_turn_deg: 34, left_arm: 'across', right_arm: 'back', support: 'rock', facing_deg: -20, style: ['curls', 'frown'] })], animals: [], blend: 1.3 },
+  bull: { figures: [], animals: [beast({ species: 'bull', pose: 'charge', length_cm: 48, facing_deg: 45, head_raise_deg: -18, tail: 'raised' })], blend: 1.3 },
+  rider: { figures: [pose({ legs: 'ride', lean_deg: 6, left_arm: 'forward', right_arm: 'raised', height_cm: 52 })], animals: [beast({ pose: 'rear', length_cm: 40, ground_z: -4 })], blend: 1.3 }
+}
+
+const BASE = shape('box', [0, 3, 0], [54, 6, 54])
+
 const FIGURES: Record<SubjectId, { shapes: FlatShape[], blend: number }> = {
+  david: { blend: 1.3, shapes: [BASE] },
+  bull: { blend: 1.3, shapes: [BASE] },
+  rider: { blend: 1.3, shapes: [BASE] },
   pawn: {
     blend: 3,
     shapes: [
@@ -82,7 +105,9 @@ function turnsFor(subject: SubjectId, toolSet: ToolSetId, reference: ReferenceMo
       say: 'Planning the piece and declaring its masses.',
       calls: [
         { name: 'note', args: { stage: 'rough_out', text: `A ${subject}, centred on the block. One form, "figure", of ${figure.shapes.length} overlapping shapes on a plinth. Rough out at 4 cm, look, then tighten.` } },
-        { name: 'declare_form', args: { name: 'figure', shapes: figure.shapes, blend_cm: figure.blend, why: 'Setting out the masses I want the stone to end up as.' } }
+        SCENES[subject]
+          ? { name: 'declare_figure', args: { name: 'figure', figures: SCENES[subject]!.figures, animals: SCENES[subject]!.animals, shapes: figure.shapes, blend_cm: figure.blend, why: 'Setting out the pose: the moment, the diagonal and the support.' } }
+          : { name: 'declare_form', args: { name: 'figure', shapes: figure.shapes, blend_cm: figure.blend, why: 'Setting out the masses I want the stone to end up as.' } }
       ]
     },
     saws,
@@ -140,6 +165,8 @@ export function scriptedBrain(opts: { subject: SubjectId, toolSet: ToolSetId, re
 export function scriptedSheet(subject: SubjectId, quadrant = 192): { width: number, height: number, data: Uint8Array } {
   const figure = FIGURES[subject]
   const shapes: Shape[] = figure.shapes.map(s => ({ kind: s.kind, center: [s.center_x, s.center_y, s.center_z], size: [s.size_x, s.size_y, s.size_z], rotation: [0, 0, 0] }))
+  const scene = SCENES[subject]
+  if (scene) shapes.push(...expandScene({ figures: scene.figures.map(figureSpec), animals: scene.animals.map(animalSpec), shapes: [] }).shapes)
   const form: Form = { shapes, blend: figure.blend }
   const compiled = compileForm(form)
   const size = quadrant * 2

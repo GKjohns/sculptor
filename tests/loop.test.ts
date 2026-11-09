@@ -607,10 +607,15 @@ test('the prompt is tight and follows the tool set and the reference', () => {
   const words = (s: string) => s.split(/\s+/).length
   const full = buildInstructions({ ...base, toolSet: 'formed', reference: 'outlines' })
   const direct = buildInstructions({ ...base, toolSet: 'direct', reference: 'none' })
-  // The head canon, `detail` and detail mode added about 450 words in the skill pass.
-  assert.ok(words(full) < 1950, `${words(full)} words`)
-  assert.ok(words(direct) < 1000, `${words(direct)} words`)
-  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 1800)
+  // The head canon, `detail` and detail mode added about 450 words in the skill pass, and
+  // composition and pose (declare_figure, the torso, style tokens) about 430 in the second.
+  assert.ok(words(full) < 2450, `${words(full)} words`)
+  assert.ok(words(direct) < 1300, `${words(direct)} words`)
+  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 2300)
+  // Pose by default, in both tool sets; the figure canon only where it exists.
+  for (const text of [full, direct]) assert.match(text, /COMPOSITION AND POSE[\s\S]*frontal, symmetric, static pose[\s\S]*is a failure/)
+  assert.match(full, /`declare_figure`/)
+  assert.ok(!direct.includes('declare_figure'), 'declare_figure in the stroke-only prompt')
   // The tool set's own tools are named, and only they are.
   for (const tool of ['closeup', 'slice', 'sketch', 'drill', 'polish', 'protect', 'roundel']) {
     assert.ok(full.includes(`\`${tool}\``) || full.includes(tool), tool)

@@ -74,7 +74,7 @@ export interface Focus { view: AxisView, center: ViewPoint, span: number }
 const r1 = (v: number) => Math.round(v * 10) / 10
 const pt = (p: ViewPoint): RulerPoint => [p.h, p.v]
 
-function figureSpec(f: FigureArgs): FigureSpec {
+export function figureSpec(f: FigureArgs): FigureSpec {
   return {
     body: f.body, build: f.build, ground: [f.ground_x, f.ground_y, f.ground_z], height: f.height_cm, facing: f.facing_deg,
     legs: f.legs, weightOn: f.weight_on, twist: f.twist_deg, lean: f.lean_deg, headTurn: f.head_turn_deg, headTilt: f.head_tilt_deg,
@@ -82,7 +82,7 @@ function figureSpec(f: FigureArgs): FigureSpec {
   }
 }
 
-function animalSpec(n: AnimalArgs): AnimalSpec {
+export function animalSpec(n: AnimalArgs): AnimalSpec {
   return {
     species: n.species, pose: n.pose, ground: [n.ground_x, n.ground_y, n.ground_z], length: n.length_cm, facing: n.facing_deg,
     headTurn: n.head_turn_deg, headRaise: n.head_raise_deg, tail: n.tail, lead: n.lead

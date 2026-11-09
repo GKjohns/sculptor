@@ -192,6 +192,11 @@ function bottom(p: Part): number {
     const r = Math.max(h[0], h[2])
     return Math.abs(m[4]) * Math.max(0, h[1] - r) + r
   }
+  if (p.kind === 'cone') {
+    // The apex, or the lowest point of the base's rim.
+    const rim = Math.sqrt((m[3] * h[0]) ** 2 + (m[5] * h[2]) ** 2)
+    return Math.max(-m[4] * h[1], m[4] * h[1] + rim)
+  }
   return Math.abs(m[3]) * h[0] + Math.abs(m[4]) * h[1] + Math.abs(m[5]) * h[2]
 }
 
@@ -408,10 +413,14 @@ function gesture(g: ArmGesture, s: number): Gesture {
 
 interface Seat { at: V, turn: M, halfWidth: number, pitch: number }
 
+// Cloth is never thinner than this in the stone (2.4 cm), in units of the figure being built.
+let clothFloor = 0
+
 // A length of cloth lying along a path: overlapping flat masses, each widths[i] across and
 // thick through, its thin side facing the way normal() says at that point.
 function cloth(path: V[], widths: number[], thick: number, normal: (p: V) => V): Part[] {
   const out: Part[] = []
+  thick = Math.max(thick, clothFloor)
   for (let i = 0; i + 1 < path.length; i++) {
     const a = path[i]!
     const b = path[i + 1]!
@@ -465,6 +474,7 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
   const riding = f.legs === 'ride' && seat !== undefined
   const lp = legPlan(f, b, side)
   const parts: Part[] = []
+  clothFloor = 2.4 / H
   // Everything below is in units of H until `scale`, in the figure's own frame.
   let P: V = lp.pelvis
   let pelvisTurn = mm(rotZ(lp.tilt), rotX(lp.pitch))
@@ -500,7 +510,7 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
     for (const s of [1, -1]) parts.push(part('ellipsoid', atChest([s * 0.043, chestC + 0.005, b.chestDepth * 0.42 * g]), [0.07 * g, 0.068 * g, 0.068 * g], chestTurn))
   } else {
     // Pectorals: broad flat plates, not mounds.
-    for (const s of [1, -1]) parts.push(part('ellipsoid', atChest([s * 0.046, chestC + 0.026, b.chestDepth * 0.36 * g]), [0.1 * g, 0.068, 0.04 * g], mm(chestTurn, rotZ(-s * 10), rotY(s * 12))))
+    for (const s of [1, -1]) parts.push(part('ellipsoid', atChest([s * 0.047, chestC + 0.03, b.chestDepth * 0.33 * g]), [0.11 * g, 0.058, 0.032 * g], mm(chestTurn, rotZ(-s * 12), rotY(s * 14))))
   }
   const shY = v.shoulder - v.waist
   // The shoulder girdle: a level top from shoulder to shoulder, clavicles in front.
@@ -705,7 +715,7 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
   const cuts: RoughCut[] = []
   if (fullFace) {
     // The head canon itself, with the sitter's tokens: sex and age from the body unless given.
-    const head = expandHead({ center: round3(centre), size: round3(headSize), rotation: round3(eulerOf(hm)), style: headStyle(f) })
+    const head = expandHead({ center: round3(centre), size: round3(headSize), rotation: round3(eulerOf(hm)), style: headStyle(f) }, headH * H < 18)
     placed.shapes.push(...head.shapes)
     // Lines narrower than about a cell and a half cannot be cut at figure scale.
     cuts.push(...head.cuts.filter(c => c.size >= 0.55))
@@ -856,7 +866,8 @@ const SPECIES_DEFS: Record<Species, SpeciesDef> = {
 // relative to middle]; a hind leg's upper segment is raked back by the species' hindRake on top,
 // and its middle segment brought upright again. Legs are lead fore, trailing fore, lead hind,
 // trailing hind. Body pitch is nose up negative.
-interface Gait { fore: [V, V], hind: [V, V], pitch: number, neck: number, head: number }
+// rake: false where the hind legs fold (lie, sit) and are given as they lie.
+interface Gait { fore: [V, V], hind: [V, V], pitch: number, neck: number, head: number, rake?: false }
 const GAITS: Record<AnimalPose, Gait> = {
   stand: { fore: [[4, 0, 0], [-2, 0, 0]], hind: [[0, 22, 0], [-6, 22, 0]], pitch: 0, neck: 0, head: 0 },
   walk: { fore: [[22, -6, 0], [-12, -55, -25]], hind: [[8, 18, 0], [-30, 30, 8]], pitch: 0, neck: -6, head: 0 },
@@ -864,8 +875,8 @@ const GAITS: Record<AnimalPose, Gait> = {
   gallop: { fore: [[62, -12, 0], [26, -100, -30]], hind: [[16, 30, 0], [-52, 28, 12]], pitch: 0, neck: -12, head: -10 },
   rear: { fore: [[62, -125, -15], [44, -115, -10]], hind: [[6, 4, 0], [-4, 10, 0]], pitch: -48, neck: -8, head: -8 },
   charge: { fore: [[34, -6, 0], [-22, -60, -10]], hind: [[-18, 34, 0], [-52, 30, 12]], pitch: 7, neck: -30, head: -14 },
-  lie: { fore: [[88, -170, 0], [92, -172, 0]], hind: [[78, -150, 0], [82, -152, 0]], pitch: 0, neck: 8, head: 0 },
-  sit: { fore: [[-4, 0, 0], [-2, 0, 0]], hind: [[-40, 125, 0], [-38, 122, 0]], pitch: -36, neck: 10, head: 0 }
+  lie: { fore: [[92, -176, 0], [90, -174, 0]], hind: [[88, -178, 0], [86, -176, 0]], pitch: 0, neck: 8, head: 0, rake: false },
+  sit: { fore: [[-4, 0, 0], [-2, 0, 0]], hind: [[-70, 155, 0], [-68, 152, 0]], pitch: -36, neck: 10, head: 0, rake: false }
 }
 // Felines and dogs lie as a sphinx, forelegs out in front.
 const SPHINX: [V, V] = [[88, 0, 4], [90, 0, 4]]
@@ -890,8 +901,9 @@ export function expandAnimal(a: AnimalSpec): { shapes: Shape[], marks: Landmarks
   const lowest: V[] = []
   const legAt = (leg: Leg, s: number, ang: V, hind: boolean): void => {
     const root = bodyAt([s * leg.root[0], leg.root[1], leg.root[2]])
-    const a1 = ang[0] + (hind ? sp.hindRake : 0)
-    const a2 = a1 + ang[1] + (hind ? -sp.hindRake : 0)
+    const rake = hind && gait.rake !== false ? sp.hindRake : 0
+    const a1 = ang[0] + rake
+    const a2 = a1 + ang[1] - rake
     const a3 = a2 + ang[2]
     // Angles are in the world's side plane, whatever the body's pitch: a leg that stands is 0.
     const dir = (deg: number): V => [0, -Math.cos(deg * DEG), Math.sin(deg * DEG)]
@@ -962,7 +974,9 @@ export function expandAnimal(a: AnimalSpec): { shapes: Shape[], marks: Landmarks
     curled: [[0.15, 0.7, -0.8], [0.3, 1, 0.25], [0.45, 0.15, 0.9]]
   }
   // A rearing animal stands on its hind legs and its tail, which reaches the ground.
-  const chain = strut ? [[0, -0.4, -1], [0, -1, -0.3], [0, -1, 0]] as V[] : bends[a.tail] ?? bends.down
+  // Lying or sitting, a hanging tail lies along the ground and curls round instead.
+  const resting = (a.pose === 'lie' || a.pose === 'sit') && a.tail === 'down'
+  const chain = strut ? [[0, -0.4, -1], [0, -1, -0.3], [0, -1, 0]] as V[] : resting ? [[0, -0.7, -0.7], [0.45, -0.08, -0.9], [0.9, 0, -0.1]] as V[] : bends[a.tail] ?? bends.down
   const share = [0.3, 0.38, 0.32]
   let at = tailRoot
   let tailEnd = tailRoot

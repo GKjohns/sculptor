@@ -1,8 +1,9 @@
-// The study's three subjects, worded the way a person would type a commission, and the fixed
-// list of twelve labels the judge chooses from: the subjects plus nine things a carved lump is
-// plausibly mistaken for.
+// The study's subjects, worded the way a person would type a commission, and the fixed list of
+// labels the judge chooses from: the subjects plus things a carved lump is plausibly mistaken
+// for. The figure subjects (david, bull, rider) came with the pose pass: their distractors
+// include the same subject at rest, so a static pose is scored as a miss.
 
-export type SubjectId = 'pawn' | 'cat' | 'bust'
+export type SubjectId = 'pawn' | 'cat' | 'bust' | 'david' | 'bull' | 'rider'
 
 export interface Subject {
   id: SubjectId
@@ -26,8 +27,26 @@ export const SUBJECTS: Record<SubjectId, Subject> = {
     id: 'bust',
     label: 'human head and shoulders (bust)',
     commission: 'A portrait bust of a person: head, neck and shoulders, facing forward, on a plain base.'
+  },
+  david: {
+    id: 'david',
+    label: 'human figure about to throw',
+    commission: 'David a moment before the throw.'
+  },
+  bull: {
+    id: 'bull',
+    label: 'charging bull',
+    commission: 'A charging bull.'
+  },
+  rider: {
+    id: 'rider',
+    label: 'rearing horse with a rider',
+    commission: 'A rearing horse with a rider.'
   }
 }
+
+// The subjects that are posed figures or animals: the pose pass's own.
+export const FIGURE_SUBJECTS: SubjectId[] = ['david', 'bull', 'rider']
 
 export const SUBJECT_IDS = Object.keys(SUBJECTS) as SubjectId[]
 
@@ -38,6 +57,16 @@ export const JUDGE_LABELS: string[] = [
   SUBJECTS.pawn.label,
   SUBJECTS.cat.label,
   SUBJECTS.bust.label,
+  SUBJECTS.david.label,
+  SUBJECTS.bull.label,
+  SUBJECTS.rider.label,
+  // A figure or animal in no particular action is what a timid pose fails into.
+  'human figure standing at rest',
+  'horse standing',
+  'cow standing',
+  'lion',
+  'centaur',
+  'dancer',
   'egg',
   'bowling pin',
   'bottle',
