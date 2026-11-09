@@ -23,6 +23,7 @@ import type { DisplayStone } from '#shared/sculpt/display'
 import { cloneGrid, createGrid, gridInfo, hashGrid, stoneMassKg, stoneVolumeCm3, takeDirty } from '#shared/sculpt/grid'
 import { meshChunk, trackThickness } from '#shared/sculpt/mesher'
 import type { Image } from '#shared/sculpt/observer'
+import { SNAPSHOTS_KEPT } from '#shared/sculpt/protocol'
 import type { FromKernel, ReferenceMessage, RunMessage, StoneId, ToKernel } from '#shared/sculpt/protocol'
 import { raycast } from '#shared/sculpt/raycast'
 import type { Grid, GridOptions, Offcut, Strike } from '#shared/sculpt/types'
@@ -44,6 +45,8 @@ interface Held {
 const SHEET_MAX_SIDE = 1024
 
 const stones = new Map<StoneId, Held>()
+// Copies of a stone kept for scrubbing (see SnapshotMessage), oldest first.
+const snapshots = new Map<string, { stone: StoneId, rev: number, dist: Int8Array, finish: Uint8Array, solidUnits: number, forms: Grid['forms'] }>()
 let options: Partial<GridOptions> | undefined
 let flushQueued = false
 // Every entry the true stone has taken, in order. Once there is a Studio this is its own list.
@@ -184,6 +187,7 @@ function handle(msg: ToKernel) {
         return
       }
       stones.clear()
+      snapshots.clear()
       options = msg.options
       trueLog = []
       studio = null
@@ -249,6 +253,32 @@ function handle(msg: ToKernel) {
     }
     case 'run': {
       void run(msg)
+      return
+    }
+    case 'snapshot': {
+      const held = hold(msg.stone, msg.id)
+      if (!held) return
+      // Whatever a copy was drawing in place of the log's stone goes back first.
+      held.stone.rejoin()
+      const grid = held.stone.grid
+      if (msg.action === 'save') {
+        snapshots.delete(msg.key)
+        snapshots.set(msg.key, { stone: msg.stone, rev: held.rev, dist: grid.dist.slice(), finish: grid.finish.slice(), solidUnits: grid.solidUnits, forms: new Map(grid.forms) })
+        while (snapshots.size > SNAPSHOTS_KEPT) snapshots.delete(snapshots.keys().next().value!)
+      } else {
+        const kept = snapshots.get(msg.key)
+        if (!kept || kept.stone !== msg.stone || kept.dist.length !== grid.dist.length) throw new Error(`no copy of the stone is kept as ${msg.key}`)
+        grid.dist.set(kept.dist)
+        grid.finish.set(kept.finish)
+        grid.solidUnits = kept.solidUnits
+        grid.forms.clear()
+        for (const [name, form] of kept.forms) grid.forms.set(name, form)
+        // Every chunk is remeshed with the next batch that is drawn.
+        grid.dirty.fill(1)
+        held.offcuts = []
+        held.rev = kept.rev
+      }
+      send({ type: 'struck', id: msg.id, stone: msg.stone, rev: held.rev, applied: 0, removedCm3: 0 })
       return
     }
     case 'raycast': {

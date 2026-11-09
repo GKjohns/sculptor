@@ -67,6 +67,10 @@ export class Dust {
   private head = 0
   private emitted = 0
   private clock = 0
+  // The reveal's sweep: film seconds left, its length, and how thick the film was when it began.
+  private sweepLeft = 0
+  private sweepS = 0
+  private sweepFrom = 0
   private u = {
     dt: uniform(0),
     time: uniform(0),
@@ -125,8 +129,21 @@ export class Dust {
     this.u.film.value = Math.min(1, this.u.film.value + cm3 / FILM_FULL_CM3)
   }
 
+  /** The film on the floor lifts and the air clears over `seconds` (the reveal's sweep). */
+  sweep(seconds: number) {
+    this.sweepLeft = this.sweepS = Math.max(0.1, seconds)
+    this.sweepFrom = this.u.film.value
+  }
+
   /** Steps the particles by dt seconds; 0 holds them still (a paused timeline). */
   update(dt: number) {
+    if (this.sweepLeft > 0 && dt > 0) {
+      this.sweepLeft = Math.max(0, this.sweepLeft - dt)
+      const k = this.sweepLeft / this.sweepS
+      this.u.film.value = this.sweepFrom * k * k
+      this.level *= Math.exp(-dt / 2)
+      this.u.haze.value = this.level
+    }
     if (!this.step || dt <= 0) return
     this.clock += dt
     const u = this.u
@@ -153,6 +170,7 @@ export class Dust {
 
   /** A fresh block: the air clears and the floor is swept. */
   reset() {
+    this.sweepLeft = 0
     this.level = 0
     this.u.haze.value = 0
     this.u.film.value = 0

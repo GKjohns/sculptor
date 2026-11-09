@@ -24,12 +24,13 @@ import type { CameraRig } from '~/studio/camera'
 import type { Charcoal } from '~/studio/charcoal'
 import type { Cinema } from '~/studio/cinema'
 import type { KernelClient } from '~/studio/kernel'
+import { stonePreset } from '~/studio/materials/marble'
 import type { StudioRenderer } from '~/studio/renderer'
 import { replayBlocker } from '~/studio/replay'
 import type { Stone } from '~/studio/stone'
 import { Timeline } from '~/studio/timeline'
 import type { TimelineLook, TimelinePass } from '~/studio/timeline'
-import { appendReasoning, applyLoopEvent, beginCommission, emptyView, endLook, landPass, lookView, modelOptions, setPanel, showPass, stageLook } from '~/studio/viewState'
+import { appendReasoning, applyLoopEvent, beginCommission, emptyView, endLook, landPass, lookView, modelLabel, modelOptions, setPanel, showPass, stageLook } from '~/studio/viewState'
 import type { CameraMode, LookView, SculptorView, SidePanel } from '~/studio/viewState'
 
 export interface SculptorStage {
@@ -40,10 +41,14 @@ export interface SculptorStage {
   charcoal?: Charcoal
   /** The film round the stone (debris, tools, sound, director): it follows whichever timeline it is bound to. */
   cinema?: Cinema
+  /** Puts a stone of this medium on the banker ('carrara', 'nero'). */
+  setStone?: (key: string) => Promise<void>
 }
 
 export interface StartOptions {
   commission: string
+  /** The stone's preset ('carrara', 'nero'); the one on the banker if left out. */
+  stone?: string
   /** A sculptor's key; the configured default if left out or unknown. */
   model?: string
   /** Draw a reference sheet first; the configured default if left out. */
@@ -133,10 +138,12 @@ export function useSculptor() {
   }
 
   let health: HealthResponse | null = null
+  // The stone on the banker: the picker's choice, or the medium of the commission last put there.
+  let stoneKey = 'carrara'
   const fresh = (): SculptorView => {
     const models = modelOptions(health?.models ?? [])
     const v = emptyView({ models, model: pickModel(undefined, models.length ? models.map(m => m.key) : TEXT_MODELS), gateway: health?.gateway ?? true, block: DEFAULT_CONFIG.block, ...caps })
-    return { ...v, transport: { ...v.transport, speed: firstSpeed, speeds: v.transport.speeds.includes(firstSpeed) ? v.transport.speeds : [...v.transport.speeds, firstSpeed].sort((a, b) => a - b) } }
+    return { ...v, stone: stoneKey, transport: { ...v.transport, speed: firstSpeed, speeds: v.transport.speeds.includes(firstSpeed) ? v.transport.speeds : [...v.transport.speeds, firstSpeed].sort((a, b) => a - b) } }
   }
 
   const view = shallowRef<SculptorView>(fresh())
@@ -511,16 +518,21 @@ export function useSculptor() {
     if (!commission) throw new Error('say what to carve')
     const model = pickModel(options.model)
     const withReference = options.reference ?? wantReference
+    const preset = stonePreset(options.stone ?? stoneKey)
+    stoneKey = preset.name
     letGo()
     const mine = generation
     status.value = 'preparing'
-    view.value = beginCommission({ ...fresh(), transport: view.value.transport, panel: view.value.panel }, { commission, model, stone: 'carrara' })
+    view.value = beginCommission({ ...fresh(), transport: view.value.transport, panel: view.value.panel }, { commission, model, stone: preset.name })
+    s.cinema?.credit(modelLabel(model))
     try {
+      await s.setStone?.(preset.name)
+      if (mine !== generation) return
       const grid = await s.kernel.init()
       if (mine !== generation) return
       s.stone.reset(grid)
       makeTimeline(s)
-      const config: RunConfig = { ...DEFAULT_CONFIG, toolSet: defaults.toolSet, ...caps }
+      const config: RunConfig = { ...DEFAULT_CONFIG, toolSet: defaults.toolSet, stone: preset.prompt, ...caps }
       const create: SessionCreate = { commission, model, ref: withReference, run: config, grid: logGrid(grid), kernel: KERNEL_VERSION, settings: { speed: view.value.transport.speed } }
       const file = await $fetch<SessionFile>('/api/sessions', { method: 'POST', body: create })
       if (mine !== generation) return
@@ -576,6 +588,14 @@ export function useSculptor() {
   function setCamera(mode: CameraMode) {
     if (stage) stage.camera.mode = mode
     change(v => ({ ...v, transport: { ...v.transport, cameraMode: mode } }))
+  }
+
+  /** The stone picked on the commission card goes on the banker straight away. */
+  async function chooseStone(key: string) {
+    const preset = stonePreset(key)
+    stoneKey = preset.name
+    if (view.value.phase === 'idle') change(v => ({ ...v, stone: preset.name }))
+    await stage?.setStone?.(preset.name)
   }
 
   function openPanel(panel: SidePanel | null) {
@@ -669,6 +689,11 @@ export function useSculptor() {
       if (mine !== generation) return
       const passes = file.state?.passes ?? []
       const accounted = passes.reduce((n, p) => n + p.strikes, 0)
+      const preset = stonePreset(file.config.run.stone)
+      stoneKey = preset.name
+      await s.setStone?.(preset.name)
+      if (mine !== generation) return
+      s.cinema?.credit(modelLabel(file.config.model), new Date(file.finishedAt ?? file.updatedAt))
       const t = await restore(s, log, passes.map(queued))
       if (mine !== generation) return
 
@@ -684,7 +709,7 @@ export function useSculptor() {
       run = r
 
       // The notebook, the stage list and the bill, from the events as they were saved.
-      let v = beginCommission({ ...fresh(), transport: view.value.transport, panel: view.value.panel }, { commission: file.config.commission, model, stone: 'carrara' })
+      let v = beginCommission({ ...fresh(), transport: view.value.transport, panel: view.value.panel }, { commission: file.config.commission, model, stone: preset.name })
       v = { ...v, stats: { ...v.stats, maxTurns: r.config.maxTurns, maxUsd: r.config.maxUsd, costUsd: r.referenceUsd } }
       const finished = file.status === 'done' && file.result !== null
       for (const event of events) {
@@ -810,5 +835,5 @@ export function useSculptor() {
     stage = null
   })
 
-  return { view, status, sessionId, problem, sessions, attach, refreshSessions, start, pause, resume, setSpeed, setCamera, openPanel, abort, reset, release, load, replayTo, timeRestore, state, saved, timeline: () => timeline }
+  return { view, status, sessionId, problem, sessions, attach, refreshSessions, start, pause, resume, setSpeed, setCamera, chooseStone, openPanel, abort, reset, release, load, replayTo, timeRestore, state, saved, timeline: () => timeline }
 }

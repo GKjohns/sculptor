@@ -69,6 +69,13 @@ export class KernelClient {
     return reply
   }
 
+  /** Keeps a copy of a stone under `key`, or puts the stone back to the copy kept there. Resolves with the stone's rev. */
+  async snapshot(key: string, action: 'save' | 'load', stone: StoneId = 'shown'): Promise<StruckReply> {
+    const reply = await this.request({ type: 'snapshot', stone, key, action })
+    if (reply.type !== 'struck') throw new Error(`unexpected reply: ${reply.type}`)
+    return reply
+  }
+
   async raycast(origin: Vec3, dir: Vec3, stone: StoneId = 'shown'): Promise<RayHit | null> {
     const reply = await this.request({ type: 'raycast', stone, origin, dir })
     if (reply.type !== 'rayhit') throw new Error(`unexpected reply: ${reply.type}`)

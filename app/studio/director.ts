@@ -101,6 +101,8 @@ export class Director {
   timeScale = 1
   /** For capture and tests: every clock the director scales is scaled by this as well. */
   bulletTime = 1
+  /** The reveal has begun (true) or been left (false): the piece was watched to its end, or play went on past it. */
+  onReveal: (on: boolean) => void = () => {}
 
   private kind: ShotKind = 'idle'
   private shot: Shot = { target: HOME_TARGET.clone(), azimuth: 0.56, polar: 1.38, distance: 300 }
@@ -115,6 +117,7 @@ export class Director {
   private dice = 1
   private proposal = 0
   private asking = false
+  private asked: Promise<void> | null = null
 
   // The work: where the blows are landing, which way that face looks, how fast it is moving.
   private work = new THREE.Vector3(0, 60, 30)
@@ -206,11 +209,21 @@ export class Director {
     if (done && !this.finished && this.playing && this.hasWork) {
       this.finished = true
       this.go('reveal', false)
+      this.onReveal(true)
     } else if (!done && this.finished) {
       this.finished = false
       this.go('wide', false)
+      this.onReveal(false)
     }
     this.playing = playing
+  }
+
+  /**
+   * Resolves once the shot being asked about (a medium or macro waiting on the worker's raycast)
+   * has been decided. A fixed-step export waits on it, so a cut lands on the same frame every time.
+   */
+  async pending() {
+    while (this.asked) await this.asked
   }
 
   /** The strike the clock is on its way to, every frame. */
@@ -538,7 +551,7 @@ export class Director {
     const distance = kind === 'macro' ? MACRO_CM : this.studio.homeDistance * MEDIUM_REACH
     const target = this.work.clone()
     this.asking = true
-    void (async () => {
+    const asked = this.asked = (async () => {
       let found: Shot | null = null
       for (const [azimuth, tilt] of tries) {
         const candidate: Shot = { target, azimuth, polar: tilt, distance }
@@ -560,7 +573,9 @@ export class Director {
       }
       this.shot = found
       this.go(kind, true)
-    })()
+    })().finally(() => {
+      if (this.asked === asked) this.asked = null
+    })
   }
 
   // Whether the working point can be seen from where a shot puts the camera.

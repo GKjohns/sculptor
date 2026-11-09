@@ -106,6 +106,9 @@ export class StudioRenderer {
   private frameMs = 0
   private last = 0
   private disposed = false
+  // A film export has the frame loop: frames are drawn by step(), at a fixed size.
+  private held = false
+  private heldNow = 0
   private leave = () => {}
   /** Resolves when the studio is disposed (the page left, or a hot reload replaced the scene): for whatever is awaiting frames that will now never come. */
   readonly gone = new Promise<void>(done => this.leave = done)
@@ -208,6 +211,42 @@ export class StudioRenderer {
     for (const object of culled) object.frustumCulled = true
   }
 
+  /**
+   * For a film export: stops the frame loop and draws at `width` x `height` pixels, one frame per
+   * step(dt), until the returned function is called. Nothing in the studio reads the wall clock,
+   * so a step is a frame of film whatever it takes to draw.
+   */
+  hold(width: number, height: number) {
+    if (this.held) throw new Error('the studio is already held')
+    this.held = true
+    this.renderer.setAnimationLoop(null)
+    const ratio = this.renderer.getPixelRatio()
+    this.renderer.setPixelRatio(1)
+    this.renderer.setSize(width, height, false)
+    this.camera.aspect = width / height
+    this.fit(width, height)
+    return () => {
+      if (!this.held || this.disposed) return
+      this.held = false
+      this.renderer.setPixelRatio(ratio)
+      this.resize()
+      this.last = 0
+      this.renderer.setAnimationLoop(now => this.frame(now))
+    }
+  }
+
+  /** Draws one frame `dt` seconds after the last, while held. */
+  step(dt: number) {
+    if (!this.held || !this.post) return
+    this.heldNow += dt * 1000
+    this.draw(dt, this.heldNow)
+  }
+
+  /** The canvas the frames are drawn on. */
+  get canvas(): HTMLCanvasElement {
+    return this.renderer.domElement
+  }
+
   stats(): StudioStats {
     const size = this.renderer.getSize(new THREE.Vector2())
     const { drawCalls, triangles } = this.renderer.info.render
@@ -234,7 +273,11 @@ export class StudioRenderer {
     this.last = now
     this.frameMs = this.frameMs ? this.frameMs * 0.9 + ms * 0.1 : ms
     // Clamped so a backgrounded tab doesn't come back with one huge step.
-    const dt = Math.min(ms, 100) / 1000
+    this.draw(Math.min(ms, 100) / 1000, now)
+  }
+
+  private draw(dt: number, now: number) {
+    if (!this.post) return
     for (const fn of this.frameFns) fn(dt, now)
     this.controls.update()
     // The veins of any stone preset that has turned up since the last frame.
@@ -252,6 +295,7 @@ export class StudioRenderer {
   }
 
   private resize() {
+    if (this.held) return
     const w = Math.max(1, this.host.clientWidth)
     const h = Math.max(1, this.host.clientHeight)
     this.renderer.setSize(w, h, false)

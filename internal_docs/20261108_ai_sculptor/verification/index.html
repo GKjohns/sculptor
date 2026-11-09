@@ -116,14 +116,14 @@
 
   <p>This is the evidence page for the plan in <a href="../implementation_plan.md">implementation_plan.md</a>. For each sprint it gives the plan's verification checklist, what was checked, the result, and the screenshots that back it. Every claim and number here comes from the plan's own record or from what is visible in a captured screenshot. Nothing was re-run to make this page, and where an item has no screenshot the page says so.</p>
 
-  <p><b>What has been built so far.</b> The plan's goal is to type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export. Sprints 1 to 3 cover the first half of that: a tested carving kernel you can hit by hand in the browser, a headless study of whether models can carve at all, and a live studio where a typed commission is carved on screen with the storyboard's HUD. The stone is still the plain Sprint 1 render. The film look, the reveal, scrubbing and export are Sprints 4 and 5 and are not on this page yet.</p>
+  <p><b>What has been built.</b> The plan's goal is to type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export. All five sprints are now built: a tested carving kernel you can hit by hand, a headless study of whether models can carve at all, a live studio with the storyboard's HUD (Sprint 3), the film look (Sprint 4), and the reveal, the replay page with a scrubber, film export and a black marble (Sprint 5). The last section is one pass through the whole product as a user. Two things are still open: Kyle has not signed off on the look, and the gallery and deploy were left out until he decides whether this goes public. Unlike the Sprint 1 to 3 sections, which were written from the plan's record, the Sprint 5 and end-to-end sections were measured for this page.</p>
 
   <ul class="status" aria-label="Sprint status">
     <li><span class="tag done">Done</span><b>Sprint 1: Stone you can hit</b>Local commit <code>6accbac</code>.</li>
     <li><span class="tag done">Done</span><b>Sprint 2: The sculptor, and the gate</b>Gate passed November 9: formed tool set, reference on by default, Opus 5.5 as the default model. Local commit <code>ef1329e</code>.</li>
     <li><span class="tag done">Done</span><b>Sprint 3: The live studio</b>Local commit <code>9a693d4</code>.</li>
-    <li><span class="tag wip">In progress</span><b>Sprint 4: Cinema</b>Not verified yet.</li>
-    <li><span class="tag todo">Not started</span><b>Sprint 5: Reveal and share</b></li>
+    <li><span class="tag wip">Built</span><b>Sprint 4: Cinema</b>Merged as <code>5742f14</code>. Three of four checks pass (frame 5 partly); waiting on Kyle's sign-off on the look.</li>
+    <li><span class="tag done">Built</span><b>Sprint 5: Reveal and share</b>Committed on <code>sprint5-reveal</code> as "Sprint 5: reveal, replay page and film export", not merged. All three checks pass. Gallery and deploy skipped.</li>
   </ul>
 
   <nav class="toc" aria-label="Sections">
@@ -135,7 +135,7 @@
     <a href="#e2e">End-to-end</a>
   </nav>
 
-  <p class="note">How to read the screenshots. A file ending <code>_gpu</code> was shot in headed Chrome on WebGPU, which is the only mode the project uses to judge how anything looks. A file ending <code>_gl</code> was shot headless on software WebGL 2 and is evidence for layout and logic only. The <code>sprint3_hud_frame*</code> files are the mock preview at <code>/hud</code>: the HUD is real, but the stone, banker and light beam behind it are a flat placeholder drawing, not the three.js scene.</p>
+  <p class="note">How to read the screenshots. A file ending <code>_gpu</code>, and every <code>sprint5_</code> and <code>e2e_</code> file, was shot in headed Chrome on WebGPU, which is the only mode the project uses to judge how anything looks. A file ending <code>_gl</code> was shot headless on software WebGL 2 and is evidence for layout and logic only. The <code>sprint3_hud_frame*</code> files are the mock preview at <code>/hud</code>: the HUD is real, but the stone, banker and light beam behind it are a flat placeholder drawing, not the three.js scene.</p>
 </header>
 
 <!-- ============================== SPRINT 1 ============================== -->
@@ -508,47 +508,319 @@
 <!-- SPRINT4:START -->
 <section id="sprint4">
   <h2>Sprint 4: Cinema</h2>
-  <div class="placeholder">
-    <p><span class="tag wip">In progress</span> <b>Not yet built. Nothing in this section has been verified.</b></p>
-    <p><b>Goal.</b> The same commission looks and sounds like a film.</p>
-    <p>The plan's checklist for this sprint, all still open:</p>
-    <ul>
-      <li>Storyboard frame 5 reproduced: a macro shot with raw, rasped and polished stone in one frame and light through a thin edge.</li>
-      <li>A slab fall captured as a five-frame sequence: cut, fall, impact, break, settle.</li>
-      <li>60 fps during normal carving and no frame over 33 ms during a slab fall on Kyle's Mac; the WebGL 2 fallback renders without errors.</li>
-      <li>Kyle watches one full commission and signs off on the look.</li>
-    </ul>
+  <p class="goal"><b>Goal.</b> The same commission looks and sounds like a film.</p>
+  <p class="meta">Status: built and merged into <code>ai-sculptor-build</code> as <code>5742f14</code> (four commits on a <code>sprint4-cinema</code> worktree), November 9, 2026. Waiting on Kyle's sign-off on the look. 185 tests, typecheck and lint pass at the merge. <code>KERNEL_VERSION</code> is still 2, and the three reference replays end on their recorded hashes (cat <code>90ed9085f7a66a4d</code>, pawn <code>aee99ec9b7973290</code>, Sol bust <code>0ab275d2c385097f</code>).</p>
+
+  <h3>Verification checklist</h3>
+  <ol class="checks">
+    <li>
+      <p class="what"><span class="tag wip">Partly</span>Storyboard frame 5 reproduced: a macro shot with raw, rasped and polished stone in one frame and light through a thin edge.</p>
+      <p><span class="lbl">Result.</span> Partly, as the plan records it. <code>sprint4_frame5_macro_gpu</code> has pitted and polished stone in one frame, and <code>sprint4_backlit_thin_edge_gpu</code> has a thin fin glowing with the window behind it. Both are a test stone carved by <code>__sculptor.frame5()</code>, not a commission; the rasped zone is hard to tell from the polished one; and no tool is in frame.</p>
+      <p><span class="lbl">Evidence.</span> The two frame-5 figures below.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>A slab fall captured as a five-frame sequence: cut, fall, impact, break, settle.</p>
+      <p><span class="lbl">Result.</span> Captured as <code>sprint4_slab_1_cut_gpu</code> to <code>sprint4_slab_5_settle_gpu</code>. The plan notes they were shot before the dust and debris fixes; <code>sprint4_fix_impact_dust</code> shows the landing puff after them.</p>
+      <p><span class="lbl">Evidence.</span> The slab sequence below.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>60 fps during normal carving and no frame over 33 ms during a slab fall on Kyle's Mac; the WebGL 2 fallback renders without errors.</p>
+      <p><span class="lbl">Result.</span> Headed Chrome at 120 Hz, film tier at 1.5x: the first slab fall after a fresh load gave 8.33 ms mean and 9.4 ms max; an 8x replay through a rough-out, 8.34 ms mean and 16.6 ms max; 200 hand strikes, 8.33 ms mean and 9.4 ms max. No frame went over 16.7 ms in any of the three. The plan adds that the GPU may have been shared during that measurement, and that a separate run under known shared load gave 12.4 ms mean, p95 16.7 ms and max 25.1 ms for an 8x replay. <code>--gl</code> and headed <code>?gl=1</code> reach ready with a clean console.</p>
+      <p><span class="lbl">Evidence.</span> The frame times have no screenshot; they are the plan's record of <code>__sculptor.timeReplay</code>, <code>burst</code> and the slab-fall meter. <code>sprint4_gl_fallback</code> below shows the WebGL 2 render.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag todo">Open</span>Kyle watches one full commission and signs off on the look.</p>
+      <p><span class="lbl">Result.</span> Not done. Nothing on this page stands in for it.</p>
+    </li>
+  </ol>
+
+  <h3>Screenshots: the look (WebGPU)</h3>
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_before_wide.webp" width="1440" height="900" loading="lazy" alt="Before Sprint 4: a small off-white bust, a head with a crude face on a neck and square shoulders over a thin plinth, floating in the middle of a black frame with no room around it.">
+      <figcaption><b>Before.</b> The tuned Opus bust on Sprint 3's plain render: one off-white material, no room, nothing around the stone. For comparison with the frame beside it.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_wide_finished_bust_gpu.webp" width="1440" height="900" loading="lazy" alt="After: the same bust in veined marble on a wooden banker in a dark wooden room, with chips on the banker top, a mallet beside it, a shaft of window light crossing from the upper right and quarried marble blocks at the lower right.">
+      <figcaption><b>After.</b> The same piece in the atelier: veined marble, the banker with a scatter of chips and the mallet laid down, a shaft of window light, the quarried blocks at the back. The face is still the pitted caricature the study described; the look does not change what was carved.</figcaption>
+    </figure>
   </div>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_frame5_macro_gpu.webp" width="1440" height="900" loading="lazy" alt="A close, low view across a test stone: a smooth pale area on the left, a field of deep honeycomb pits on the right, and a thin upright marble fin standing at the back throwing a shadow across the pits.">
+      <figcaption><b>Checklist item 1, storyboard frame 5 (partly).</b> The frame-5 test stone: smooth worked stone on the left against point-chisel honeycomb on the right, with the thin fin standing behind. Rough against smooth reads; rasped against polished does not, and there is no tool in frame.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_backlit_thin_edge_gpu.webp" width="1440" height="900" loading="lazy" alt="The same thin marble fin seen against the bright window: the fin glows a warm cream, lighter at its edges, with soft veining showing through, above a blurred foreground of pitted stone.">
+      <figcaption><b>Checklist item 1, light through a thin edge.</b> The fin with the window behind it. It glows warm and shows its veins through, which is the thickness bake doing its job on a section about a centimetre thick. Thicker relief such as an ear does not glow this way (see rough edges).</figcaption>
+    </figure>
+  </div>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_director_macro_gpu.webp" width="1400" height="875" loading="lazy" alt="A macro insert: a wooden mallet and a steel chisel bite into the pitted top edge of a marble block, very close, with the background blurred and a quarried block soft at the left.">
+      <figcaption><b>The director's macro insert.</b> Close on the working point with the lens open: the mallet and chisel in the stone, the room out of focus. One of the shots the camera director cuts to while the hand works.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_tools_chisel_mallet_gpu.webp" width="1400" height="875" loading="lazy" alt="Close on a block during roughing: rows of rounded grooves cut across its face, a chisel set into the stone with chips flying off it and the mallet just below, hard shadows on the floor and quarried blocks behind.">
+      <figcaption><b>Tools at work.</b> The floating chisel and mallet in a pass, with chips leaving the cut. The tools have no hands, as the plan chose (Open Question 3).</figcaption>
+    </figure>
+  </div>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_medium_roughing_gpu.webp" width="1440" height="900" loading="lazy" alt="A medium shot of a block part way through roughing out: the top cut into sawn facets, a deep band of point-chisel pits across the middle, the lower block pitted too, with a few chips and the mallet on the banker.">
+      <figcaption><b>A medium shot during a rough-out.</b> Sawn facets at the top and point-chisel pits below. The pits read as a honeycomb at this distance, which the plan lists as a rough edge.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_chip_pile_gpu.webp" width="1400" height="875" loading="lazy" alt="A wide view of the room after work on the bust: chips across the banker top, broken slabs lying on the floor around the banker, the window shaft falling diagonally, and three quarried blocks standing at the right.">
+      <figcaption><b>Debris at rest.</b> Chips on the banker and the broken pieces of earlier slabs lying where they fell. The two blocks at the right are part of the room, not offcuts.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Screenshots: a slab fall, five frames (WebGPU)</h3>
+  <p>Checklist item 2. Shot before the dust and debris fixes listed below.</p>
+  <div class="shots">
+    <figure>
+      <img src="screenshots/sprint4_slab_1_cut_gpu.webp" width="1400" height="875" loading="lazy" alt="A bow saw with two wooden handles cuts across the top of the uncut block.">
+      <figcaption><b>1, cut.</b> The saw in its cut across the top of the block.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_slab_2_fall_gpu.webp" width="1400" height="875" loading="lazy" alt="The sawn slab tips off the left side of the block over the edge of the banker, still in one piece.">
+      <figcaption><b>2, fall.</b> The slab tips off the side of the block, in one piece.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_slab_3_impact_gpu.webp" width="1400" height="875" loading="lazy" alt="The slab strikes the floor beside the banker standing on its end, with a V-shaped crack opening across it.">
+      <figcaption><b>3, impact.</b> It lands on its end beside the banker and a crack opens.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_slab_4_break_gpu.webp" width="1400" height="875" loading="lazy" alt="The slab has broken into three pieces that fall against the banker leg, with small fragments on the floor.">
+      <figcaption><b>4, break.</b> Three pieces, falling against the banker's leg. The break faces are clean planes.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_slab_5_settle_gpu.webp" width="1400" height="875" loading="lazy" alt="The pieces lie flat on the floor in front of the banker; fine dust specks hang in the air above them and the saw rests on top of the block.">
+      <figcaption><b>5, settle.</b> The pieces lie flat on the floor; dust hangs in the air as separate specks, and the saw is still resting on the block (fixed afterwards: see the saw frame below).</figcaption>
+    </figure>
+  </div>
+
+  <h3>Screenshots: fixes after the review, and a live run on the film build</h3>
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_fix_impact_dust.webp" width="1440" height="900" loading="lazy" alt="Replay of the Round B pawn at 1x, pass 1 of 33, strike 2 of 7,730: a slab has broken on the edge of the banker beside the block, a puff of dust rises from it, and another piece lies on the floor at the lower left.">
+      <figcaption><b>Landing puff, after the fix.</b> The Round B pawn replay at strike 2 of 7,730: a slab breaks on the banker's edge and raises a visible puff, with dust of varied size. Compare the specks in frame 5 above.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_fix_saw_put_down.webp" width="1440" height="900" loading="lazy" alt="Replay of the Opus bust at 8x, pass 3 of 56, strike 520 of 13,547: the block with sawn top facets and a pitted middle band; no saw is on the block, and the mallet lies on the banker at the right.">
+      <figcaption><b>The saw put down.</b> The Opus bust at strike 520 of 13,547, between saw cuts: the saw shows only during its cut and is no longer left on the block.</figcaption>
+    </figure>
+  </div>
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_fix_nothing_lodged.webp" width="1440" height="900" loading="lazy" alt="The finished Sol bust replay at Max, pass 51 of 51, strike 9,388 of 9,388, titled The Sitter: a head with a smoothed but crude face on a neck and rounded shoulders, chips on the banker but none resting on the sculpture.">
+      <figcaption><b>Nothing lodged on the sculpture.</b> The Sol bust, "The Sitter", at its end: chips on the banker, none left resting on the shoulders. Debris that lands on the piece is pushed off, then shrinks away.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_gl_fallback.webp" width="1440" height="900" loading="lazy" alt="The finished Opus bust rendered on the WebGL 2 fallback: veined marble on the banker with chips, the mallet beside it and the quarried blocks at the right, with flatter light than the WebGPU frames.">
+      <figcaption><b>Checklist item 3, the WebGL 2 fallback.</b> The plain tier (scene, AgX, vignette, grain) renders the finished bust with veins and the room. It has no depth of field, god rays or AO, and it is evidence that the fallback works, not of the look.</figcaption>
+    </figure>
+  </div>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_live_claw_mallet.webp" width="1440" height="900" loading="lazy" alt="A live commission of a chess pawn at turn 7 of 60: the pawn roughed out with ball, collar and stepped skirt, a claw chisel badge reading roughing out, the mallet in front of the stone, stats showing 4,694 strikes, 657 kg removed, 51 cents of 2 dollars, and pinned front and left sketches.">
+      <figcaption><b>Live, turn 7.</b> "A chess pawn" on Opus 5.5 with a $2 cap: 4,694 strikes, 657 kg removed, $0.51. The claw is at work and the mallet hangs in front of the stone, the floating-mallet rough edge.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_live_rasp.webp" width="1440" height="900" loading="lazy" alt="The same live pawn at turn 11 of 60: a medium shot of the skirt and collar with a Rasp, rough out badge and the subtitle Rasping the back the same way; stats show 7,238 strikes, 709 kg removed and 75 cents of 2 dollars. The stage list still reads Rough out.">
+      <figcaption><b>Live, turn 11, rasping.</b> 7,238 strikes, 709 kg removed, $0.75. The stage list still says "Rough out" while the rasp is working, the undiagnosed stage-list rough edge.</figcaption>
+    </figure>
+  </div>
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint4_live_finished_plaque.webp" width="1440" height="900" loading="lazy" alt="The live pawn finished: a polished ball on a collar above a tapering stem and a bell-shaped rasped skirt, chips on the banker, a plaque reading Pawn, Opus 5.5, Carrara marble, 9 November 2026 with a statement, stats of 10,941 strikes, 720 kg removed, turn 14 of 60 and 93 cents, and a pass stepper at 38 of 38.">
+      <figcaption><b>Live, finished.</b> Turn 14 of 60, $0.93, 10,941 strikes, titled "Pawn": the run the plan records with true and shown hashes both <code>e71e528775456405</code>. This is the session the Sprint 5 replay frames below are made from.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint4_fix_plaque_400px_gl.webp" width="400" height="800" loading="lazy" alt="Narrow 400 px view of the finished pawn on software WebGL 2: icon stats, the pawn on the banker, a pass stepper at 38 of 38, and the Pawn plaque with its whole statement wrapped above an icon toolbar with New commission.">
+      <figcaption><b>The plaque at 400 px.</b> Software WebGL 2, layout only: the statement now wraps in full above the toolbar, which Sprint 3 left cut off.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Results, deviations and known rough edges</h3>
+  <ul>
+    <li><b>Look.</b> Marble with veins baked into a tiled volume read at block coordinates (they run through cuts and offcuts), finish-driven roughness, and light through thin stone from a thickness march toward the key. An atelier with a window shaft. Post is pre-pass, GTAO, scene, god rays, TRAA, depth of field, bloom, AgX, vignette and grain. The film tier renders at 1.5x. WebGL 2 gets scene, AgX, vignette and grain; software GL gets a lean mode with no veins. The tuning log and look book are in <code>docs/look/</code>.</li>
+    <li><b>Grid stays at 0.4 cm.</b> The 0.25 cm trial gave 648k triangles against 242k, 55 MB per grid copy against 13 MB, and a 33 s restore against 10 s.</li>
+    <li><b>Shading pass after an independent review</b> of the first screenshots, whose verdict was that the room read as film and the stone as ribbed plaster: shading normals from the distance field blurred two voxels wide, contact shadows off in the film tier, the key's normal bias at 0.7 cm, wider vein coverage, polish roughness 0.26 to 0.36, warm-neutral shadow tint.</li>
+    <li><b>Motion.</b> Falling offcuts on Rapier that topple, break and settle, chips with a rubble pile, dust, a floating chisel, mallet and saw, synthesised sound with a mute button, and a camera director (wide, medium, macro, saw, fall in slow motion, look, reveal, free) with a 3.5 s minimum between cuts. Caps: 6,000 chips, 24 moving offcut bodies, 28 sound voices.</li>
+    <li><b>First-slab-fall hitch.</b> First-use pipeline compiles cost one 299 ms frame; a prewarm before the scene reports ready brings the worst frame to 9.4 ms.</li>
+    <li><b>Live run on the film build.</b> "A chess pawn" on Opus 5.5, 14 turns, $0.93, hashes equal and the same after a reload; it was interrupted at turn 4 and resumed. No saw cut happened after the resume, so no slab fall had been seen in a live commission at this point, only in replays.</li>
+    <li><b>Sound</b> was confirmed only by an analyser on the master gain (0.117 playing, 0.012 paused, 0.0025 muted). Nobody has listened to it on speakers.</li>
+    <li><b>Rough edges the plan lists:</b> bumpy silhouettes and a faint toothed shadow edge at grazing light (0.4 cm voxels); thin relief such as an ear does not glow; veins faint on brightly lit polished stone; the point-chisel band reads as honeycomb close up; break faces are clean planes; dust still a little dotted; the mallet floats in front of the stone when carried between passes; a sparsely dressed room and a plain bright window; the stage list stayed on "Rough out" for the whole live pawn (not diagnosed); <code>docs/look/*</code> was shot before the saw fix; cut frames would not be bit-exact under a fixed-step export (dealt with in Sprint 5); SSGI never tried; the <code>NERO</code> preset untuned (tuned in Sprint 5).</li>
+  </ul>
 </section>
 <!-- SPRINT4:END -->
 
 <!-- SPRINT5:START -->
 <section id="sprint5">
   <h2>Sprint 5: Reveal and share</h2>
-  <div class="placeholder">
-    <p><span class="tag todo">Not started</span> <b>Not yet built. Nothing in this section has been verified.</b></p>
-    <p><b>Goal.</b> Every commission ends well and leaves something to show people.</p>
-    <p>The plan's checklist for this sprint, all still open:</p>
-    <ul>
-      <li>Storyboard frame 6 reproduced; scrubbing to any stage shows the stone as it was.</li>
-      <li>An exported 60-second film plays in QuickTime with no dropped frames.</li>
-      <li>A replay page loads and plays with the network tab showing zero model calls.</li>
-    </ul>
+  <p class="goal"><b>Goal.</b> Every commission ends well and leaves something to show people.</p>
+  <p class="meta">Status: built on the <code>sprint5-reveal</code> worktree, one local commit, "Sprint 5: reveal, replay page and film export", November 9, 2026. Not merged and not pushed. In scope: the reveal (5.1), the replay page with scrubbing (5.2), film export (5.3) and the black marble preset (5.4). Out of scope by decision: the gallery and deploy (5.5) and anything that only matters for a deploy, such as shrinking looks to fit Vercel's 4.5 MB body limit. Nothing is public.</p>
+
+  <h3>Verification checklist</h3>
+  <ol class="checks">
+    <li>
+      <p class="what"><span class="tag done">Passed</span>Storyboard frame 6 reproduced; scrubbing to any stage shows the stone as it was.</p>
+      <p><span class="lbl">Result.</span> The replay page (<code>/replay/&lt;id&gt;</code>) for the finished pawn session <code>20261109180313-a-chess-pawn-0ee</code> shows the storyboard's frame 6: "Sculptor · replay" top left, the stats strip (10,941 strikes, 720 kg removed, $0.93, 54:09 of carving), the centred title plaque ("Pawn", Opus 5.5 · Carrara marble · 9 November 2026, and the statement), and a transport with play, speed, a scrubber over the whole log and Export film. Scrubbing was checked by seeking that log back and forth and reading the shown stone's grid hash at the end: <code>e71e528775456405</code>, the hash recorded for the live run. Seek times on the pawn: back to the middle 9.6 s before snapshots were added, 2.3 s after; forward to the end from a kept copy 0.36 s; back to strike 3,000 0.73 s; forward to 9,000 0.92 s; back to strike 10, 0.54 s.</p>
+      <p><span class="lbl">Not verified.</span> Scrubbing by dragging with a mouse was exercised once, in the end-to-end run (a click on the track); the seek times come from <code>timeline.seek()</code> called in the page. The storyboard's "4K" toast is not reproduced: films are 1920 × 1080.</p>
+      <p><span class="lbl">Evidence.</span> <code>sprint5_frame6_replay_gpu</code>, <code>sprint5_scrub_1500_gpu</code> and <code>sprint5_scrub_6000_gpu</code> below. The hash and timings have no screenshot; they are the output of <code>npm run shoot -- --gpu --eval</code> on the replay page.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>An exported 60-second film plays in QuickTime with no dropped frames.</p>
+      <p><span class="lbl">Result.</span> <code>sculptor-pawn-60s.mp4</code>, the pawn session as a one-minute time-lapse: H.264 High, 1920 × 1080, 30 fps, 60.0 s, 1,800 frames, 79.2 MB, rendered in 69 s on Kyle's Mac. Read back through AVFoundation (the framework QuickTime Player plays with): playable, 60.0 s, 1920 × 1080, 30 fps, all 1,800 frames decoded, every gap between frames exactly 1/30 s. <code>ffprobe</code> and a full <code>ffmpeg</code> decode agree, with no errors. The carving ends at 52.2 s and the last nine seconds are the reveal with the title plaque set into the picture.</p>
+      <p><span class="lbl">Not verified.</span> Nobody has opened the file in the QuickTime Player app and watched it through; "no dropped frames" is the frame count and timestamps, not a viewing. The film has no sound.</p>
+      <p><span class="lbl">Evidence.</span> <code>sprint5_film_frames</code> (six frames pulled from the file) and <code>sprint5_exporting_gpu</code> (the export in progress) below.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>A replay page loads and plays with the network tab showing zero model calls.</p>
+      <p><span class="lbl">Result.</span> Loading the pawn's replay page and playing it to the end and through the reveal made five <code>/api/</code> requests: <code>GET /api/health</code>, <code>/api/study</code>, <code>/api/sessions/&lt;id&gt;</code>, <code>/strikes</code> and <code>/passes</code>. None to <code>/api/brain</code> or <code>/api/reference</code>. The end-to-end run below repeats this for a fresh session and an export.</p>
+      <p><span class="lbl">Not verified.</span> Counted by Playwright's request log (<code>npm run shoot -- --api</code>), not by looking at the browser's network tab.</p>
+    </li>
+  </ol>
+
+  <h3>Screenshots: the reveal and the replay page (WebGPU)</h3>
+  <figure>
+    <img src="screenshots/sprint5_frame6_replay_gpu.webp" width="1440" height="900" loading="lazy" alt="The replay page at the end of the pawn: the finished pawn on a swept banker in the dark room, a header reading Sculptor, replay, a chess pawn, a stats strip reading 10,941 strikes, 720 kg removed, 93 cents and 54:09, a centred plaque titled Pawn with Opus 5.5, Carrara marble, 9 November 2026 and the statement, and a transport with restart, play, skip, a 120 times speed menu, Pass 38 of 38 rasp, Export film and a full scrubber reading Strike 10,941 of 10,941.">
+    <figcaption><b>Checklist item 1, storyboard frame 6.</b> The pawn's replay page after playing to the end at 120×: header, stats strip, title plaque, and the transport with the scrubber and Export film. The banker has been swept. The canvas stops above the plaque so the plaque does not sit on the piece.</figcaption>
+  </figure>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint5_scrub_1500_gpu.webp" width="1440" height="900" loading="lazy" alt="The replay scrubbed to strike 1,500: the block with its top cut away into a pitted shoulder and a ragged rough-out band, a Rough out badge and the subtitle Sawing and pointing off the big waste outside the pawn's outline, keeping a safe margin. The stats strip reads 1,500 strikes, 438 kg removed and 11:13; the transport reads Pass 3 of 38, rough out, and Strike 1,500 of 10,941.">
+      <figcaption><b>Scrubbed to strike 1,500.</b> Pass 3 of 38: the stone part way through its first rough-out, 438 kg off. The stats, the pass and its subtitle follow the scrubber.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint5_scrub_6000_gpu.webp" width="1440" height="900" loading="lazy" alt="The replay scrubbed to strike 6,000: the pawn's shape is there, ball, collar, stem and a rough stepped skirt, with chips on the banker. The subtitle reads Closing in on the true surface so every ring and the ball come out clean. Stats: 6,000 strikes, 698 kg removed, 39:45. Transport: Pass 8 of 38, rough out, Strike 6,000 of 10,941.">
+      <figcaption><b>Scrubbed to strike 6,000.</b> Pass 8 of 38: the pawn roughed out to its masses, 698 kg off, before the claw, rasp and polish.</figcaption>
+    </figure>
   </div>
+
+  <div class="shots">
+    <figure>
+      <img src="screenshots/sprint5_reveal_1_chips_gpu.webp" width="1440" height="900" loading="lazy" alt="The finished pawn just after the last strike, chips across the banker top, and at the lower right a bright line of chips being pushed across the floor.">
+      <figcaption><b>Reveal, the sweep starting.</b> Chips still lie on the banker; the bright line at the lower right is the broom's edge pushing the floor's chips into the dark.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint5_reveal_2_swept_gpu.webp" width="1440" height="900" loading="lazy" alt="Under a second later: the banker top is bare and the floor clear, the camera a little further round the pawn.">
+      <figcaption><b>Swept.</b> The banker and floor are clear and the camera has begun its turn round the piece.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint5_reveal_3_light_gpu.webp" width="1440" height="900" loading="lazy" alt="The camera further round: the pawn on a clean banker with the quarried blocks behind, the room a touch warmer as the sweeping light passes.">
+      <figcaption><b>The light passing.</b> The sweep light is crossing. In a still it reads only as a slightly warmer, brighter frame; it is easier to see moving.</figcaption>
+    </figure>
+  </div>
+
+  <figure>
+    <img src="screenshots/sprint5_signature_gpu.webp" width="1440" height="900" loading="lazy" alt="Close on the base of the finished pawn: the rasped bell of the skirt above a rounded foot ring, with Opus 5.5 · MMXXVI lettered in dark italic serif across the front of the ring. Chips lie on the banker around it.">
+    <figcaption><b>The signature.</b> "Opus 5.5 · MMXXVI" on the front of the base, cast onto the stone column by column so it follows the curve of the ring. This piece was skipped to the end (<code>?at=end</code>), so it is signed but the floor was not swept. The camera was placed by hand with <code>?cam=free</code>.</figcaption>
+  </figure>
+
+  <h3>Screenshots: film export (WebGPU)</h3>
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint5_exporting_gpu.webp" width="1440" height="900" loading="lazy" alt="The replay page dimmed and blurred behind a card reading Making the film, Frame 90 of 900, 10 percent, with a progress bar and a Cancel button. Behind it the stone is shown stretched, as the canvas is drawing at the film's own size.">
+      <figcaption><b>An export under way.</b> A 30-second film at frame 90 of 900. The page's own frame loop is held while the film is stepped, so the canvas behind the card is drawing the film's 1920 × 1080 frames, stretched to the window.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint5_film_frames.webp" width="1440" height="1215" loading="lazy" alt="Six frames from the exported one-minute pawn film in a grid: a low view of broken slabs on the floor under the banker with the block above, the block roughed into the pawn's masses with chips flying, the pawn taking shape with the mallet beside it, the pawn nearly finished with chips on the banker, close on the skirt with a chisel in it, and the last frame with the title Pawn and Opus 5.5, Carrara marble, 9 November 2026 set low in the picture over a clean banker.">
+      <figcaption><b>Checklist item 2, frames from the one-minute film.</b> At 3, 15, 30, 45, 53 and 60 s. The carving is a time-lapse whose speed is steered so it ends where the reveal begins; the title plaque is set into the last frames.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Screenshots: the black marble (WebGPU)</h3>
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint5_nero_commission_gpu.webp" width="1440" height="900" loading="lazy" alt="The commission card with the stone picker set to Nero Marquina, over an uncarved black block with thin white veins; the lit face reads charcoal grey with pale veins and the side away from the window is near black.">
+      <figcaption><b>Nero Marquina picked.</b> Choosing the stone on the commission card puts it on the banker at once (<code>?stone=nero</code> does the same). The sawn faces of the fresh block read charcoal where the window catches them.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint5_nero_pawn_gpu.webp" width="1440" height="900" loading="lazy" alt="The finished pawn in black marble on the banker: a glossy black ball with a few white veins and a reflected highlight, the collar and stem veined white, the rasped skirt busier with white veining, and a pale signature on the base.">
+      <figcaption><b>The pawn in black.</b> The saved pawn re-skinned with the tuned preset: polished black with thin white veins and a sharp highlight on the ball, the rasped skirt paler and busier, the signature cut pale. No commission has been carved in black marble; this is the same log under the other material.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Results, deviations and known rough edges</h3>
+  <ul>
+    <li><b>The reveal</b> starts when the director reaches its reveal shot, which only happens for a piece watched to its end. On the film's clock: the floor swept over 2.4 s (chips pushed off by a moving edge, offcuts shrunk away, the dust film lifted), a spotlight sweeping once round the piece from 1.0 s for 4.2 s, and the signature fading up from 2.2 s. The signature is the model and the year in Roman numerals, dark on Carrara and pale on Nero, laid on the front of the base by sixteen columns of raycasts. A finished piece that was skipped to gets the signature only. The plaque is the HUD's, as before for live commissions and new on the replay page.</li>
+    <li><b>The replay page</b> is <code>/replay/&lt;id&gt;</code> for a saved commission or a study run; <code>/?replay=&lt;id&gt;</code> still works. A finished live commission has a Replay button in its transport.</li>
+    <li><b>Snapshots were added for scrubbing</b>, which the plan said to do only if seeking felt slow: going back to the middle of the pawn took 9.6 s. The kernel worker now keeps copies of the shown stone (13 MB each, at most ten) every max(800, log ÷ 8) entries as a seek passes them, and a seek back or forward starts from the nearest. A seek still costs one full remesh. Hash unchanged.</li>
+    <li><b>Film export</b> worked on the WebGPU canvas first time; the WebGL 2 fallback the plan held in reserve was not needed and has not been tried. mediabunny 1.65.2, <code>CanvasSource</code>, H.264 at about 10.5 Mbit/s, 30 fps, 1920 × 1080, lengths of 30 s, one minute and two minutes. The studio's frame loop is held and stepped at 1/30 s; before each frame the export waits for the worker's batch, its mesh, any shot the director is still asking the worker about, and the signature's placement. That is how the director's raycast cuts were made to land on a fixed frame without restructuring the director. Batches can still split by worker time, so a strike can move by a frame between two exports: deterministic enough, not bit-exact. Looks are shortened to 0.6 in a film. Each frame is copied to a 2D canvas so the title can be drawn over the reveal. No audio track.</li>
+    <li><b>Black marble</b> is a preset and a picker entry, no new physics: near-black body, few thin white veins (a new <code>veinFineness</code> sharpens the same vein field), less feathering, rough cuts bruised grey, polish to a dark mirror, no light through. A commission records its stone in its run config ("Nero Marquina, a black marble with white veins"), which is also how the sculptor is told, and replays and resumes put the same stone back. No tool constants turned out to need changing.</li>
+    <li><b>Known rough edges:</b> a film opens wherever the camera happened to be, sometimes on the block's shadowed side; at time-lapse speeds the macro and slow-motion shots never come up, because the director refuses them above 12× and 24×; a one-minute film is 79 MB; the export holds the tab (about 70 s for a minute of film) and draws the canvas stretched behind the progress card; the title and signature are set in Georgia or Iowan Old Style because no web font is loaded; the light sweep is hard to see in stills; nobody has carved a commission in black marble live.</li>
+  </ul>
 </section>
 <!-- SPRINT5:END -->
 
 <!-- E2E:START -->
 <section id="e2e">
   <h2>End-to-end run-through</h2>
-  <div class="placeholder">
-    <p><span class="tag todo">Not started</span> <b>Not yet built.</b> This section will hold the golden-path screenshots in order (commission, sketch, carving, looks, reveal, replay, export) once Sprints 4 and 5 are done. Until then, the closest thing to an end-to-end record is the live pawn commission under Sprint 3, which runs from the commission card to a titled piece on the plain render.</p>
+  <p class="goal"><b>What this is.</b> Plan task 5.6: one pass through the whole product as a user, on the Sprint 5 build, in headed Chrome on WebGPU (1440 × 900, sound muted). A script drove the page the way a person would: it typed the commission and pressed Begin, waited, pressed the finished commission's Replay button, clicked the scrubber, and chose Export film, "30-second film". It took a screenshot at each step.</p>
+  <p class="meta">November 9, 2026. "a chess pawn" on the default model (Opus 5.5), Carrara marble, reference on, speed 4×, spending capped at $2 with <code>?usd=2</code>. Session <code>20261109191043-a-chess-pawn-a53</code>. The only live commission run for Sprint 5.</p>
+
+  <h3>Result</h3>
+  <ul>
+    <li><b>Commission.</b> Finished by the sculptor's own call as "Pawn" at turn 24 of 60, 76 passes, 13,326 strikes, $1.23 including the $0.09 reference sheet. No failed turns. 384 s from Begin to the finished piece on screen. True and shown stone hashes equal (<code>7aaa5561dffea4ac</code>). The screen ran at most 48 s behind the model; the longest stretch with nothing to watch was 16 s, at the start.</li>
+    <li><b>Reveal.</b> When the screen caught up, the plaque went up and the floor was swept.</li>
+    <li><b>Replay page.</b> <code>/replay/20261109191043-a-chess-pawn-a53</code> loaded from the Replay button and played. Its <code>/api/</code> requests were health, the study list, the session, its strikes and its passes: no model calls.</li>
+    <li><b>Scrub.</b> A click at 35% of the scrubber put the stone at strike 4,620 of 13,326 (pass 13 of 76, rasp), 677 kg removed.</li>
+    <li><b>Film.</b> <code>sculptor-pawn-30s.mp4</code>, saved by the browser about 50 s after Export film was chosen: H.264 High, 1920 × 1080, 30 fps, 30.0 s, 900 frames, 30.6 MB. AVFoundation reads it as playable and decodes all 900 frames, each exactly 1/30 s apart; <code>ffprobe</code> and a full <code>ffmpeg</code> decode agree.</li>
+  </ul>
+
+  <h3>Not verified</h3>
+  <ul>
+    <li>Nobody has listened to the sound on speakers; the run was muted, and the film has no sound.</li>
+    <li>Kyle has not watched a commission and signed off on the look (Sprint 4's open item). This run is evidence that the product works end to end, not that it looks right.</li>
+    <li>Nobody watched either film in the QuickTime Player app. Playback was checked with AVFoundation, which is what QuickTime Player uses.</li>
+    <li>The run did not open the notebook, pause, change speed or take the camera. Those were checked in Sprints 3 and 4 and not again here.</li>
+    <li>The black marble was not part of this run.</li>
+  </ul>
+
+  <h3>Screenshots, in order (WebGPU)</h3>
+  <figure>
+    <img src="screenshots/e2e_1_commission.webp" width="1440" height="900" loading="lazy" alt="The commission card over the uncarved veined block on the banker, with a chess pawn typed in the prompt, the stone picker on Carrara marble, the model picker on Opus 5.5 and the Begin button lit.">
+    <figcaption><b>1, the commission.</b> "a chess pawn" typed, Carrara marble, Opus 5.5. The next action was pressing Begin.</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshots/e2e_2_carving.webp" width="1440" height="900" loading="lazy" alt="Live carving at turn 3 of 60: the top of the block pointed off into a pitted dome and a ragged waist, chips and dust in the air, slabs on the floor, the stage list on Rough out, pinned front and left sketches, stats of 427 strikes, 348 kg removed, 26 cents of 2 dollars, and the subtitle Taking the big waste off the corners and around the neck, leaving a safe margin.">
+    <figcaption><b>2, live carving with the film look.</b> Turn 3, 427 strikes, 348 kg off, $0.26 of $2: the point chisel roughing out, with chips and dust flying and earlier slabs on the floor.</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshots/e2e_3_look.webp" width="1440" height="900" loading="lazy" alt="A staged look at turn 6: the roughed-out pawn with a Looking badge and the subtitle Stepping back to look from the front, left and front right. The Sculptor's eye panel is open on the right with the reference-outline sheet of four views, the reference views beside them, and numbers including 446 kg remaining, 54.3 percent gone, 5.4 cm proud of form max and 73 percent outline match front and left.">
+    <figcaption><b>3, a staged look.</b> The hand stops and the camera steps back while the Sculptor's eye shows the sheet the model was sent: stone against the reference outlines, 446 kg left, 73% outline match front and left. The eye panel is labelled turn 2 while the stats say turn 6, because the screen was behind the model.</figcaption>
+  </figure>
+  <figure>
+    <img src="screenshots/e2e_4_reveal.webp" width="1440" height="900" loading="lazy" alt="The finished pawn seen from its shadowed side on a swept banker, with the plaque Pawn, Opus 5.5, Carrara marble, 9 November 2026 and the statement, the stats strip at 13,326 strikes, 708 kg removed, turn 24 of 60 and 1 dollar 23 of 2 dollars, a pass stepper at 76 of 76, and a transport with Notebook, Sculptor's eye, Replay and New commission.">
+    <figcaption><b>4, finish and reveal.</b> "Pawn" at turn 24, $1.23, with the plaque up and the banker swept. The camera is on the piece's shadowed side at this moment of its turn, so the pawn reads dark, and the signature is on the far side. The transport now offers Replay.</figcaption>
+  </figure>
+  <div class="even">
+    <figure>
+      <img src="screenshots/e2e_5_replay.webp" width="1440" height="900" loading="lazy" alt="The replay page for the new session nine seconds in: the block being roughed out with the mallet striking and chips flying, header Sculptor, replay, a chess pawn, stats 419 strikes, 344 kg removed, 1 dollar 23 and 3:34, and a transport at 30 times on Pass 4 of 76, rough out, Strike 419 of 13,326.">
+      <figcaption><b>5, the replay page.</b> The new session playing from the start at 30×, strike 419 of 13,326.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/e2e_6_scrub.webp" width="1440" height="900" loading="lazy" alt="The replay scrubbed forward: the pawn in its masses with ball, collar and stepped skirt, chips on the banker, a Rasp badge and the subtitle Working the lower ball smooth, stats 4,620 strikes, 677 kg removed and 29:32, transport paused on Pass 13 of 76, rasp, Strike 4,620 of 13,326.">
+      <figcaption><b>6, scrubbing.</b> One click on the scrubber: the stone as it stood at strike 4,620, pass 13 of 76.</figcaption>
+    </figure>
   </div>
+  <figure>
+    <img src="screenshots/e2e_7_film.webp" width="1440" height="810" loading="lazy" alt="Four frames from the exported 30-second film: the block being roughed out above the banker with slabs on the floor and a saw lying on the banker, the pawn nearly formed with the mallet beside it, the pawn finished with chips on the banker, and the last frame with the title Pawn and Opus 5.5, Carrara marble, 9 November 2026 over a swept banker.">
+    <figcaption><b>7, the exported film.</b> Frames at 5, 15, 23 and 30 s of the 30-second film from this session, pulled from the saved file. The browser handed it over as a download, confirmed above at 900 frames, 30.0 s, 1920 × 1080.</figcaption>
+  </figure>
 </section>
 <!-- E2E:END -->
 
 <footer>
-  <p>Sources: <a href="../implementation_plan.md">implementation_plan.md</a> (verification checklists, results and deviations for Sprints 1 to 3, and the study table), <a href="../study/report.html">study/report.html</a>, and the 33 files in <code>screenshots/</code>. Page written November 9, 2026, covering Sprints 1 to 3 only.</p>
+  <p>Sources: <a href="../implementation_plan.md">implementation_plan.md</a> (verification checklists, results and deviations, and the study table), <a href="../study/report.html">study/report.html</a>, and the files in <code>screenshots/</code>. Sprints 1 to 3 written November 9, 2026 from the plan's record; Sprints 4, 5 and the end-to-end run added the same day, Sprint 4 from the plan's record and Sprint 5 and the end-to-end run from measurements made for this page.</p>
 </footer>
 
 </main>

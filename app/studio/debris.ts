@@ -242,6 +242,10 @@ export class Debris {
   private puffTokens = 6
   private chipsDirty = false
 
+  // The reveal's sweep: film seconds left of it, and its whole length.
+  private sweepLeft = 0
+  private sweepS = 0
+
   private speck: THREE.Mesh | null = null
   private m = new THREE.Matrix4()
   private v = new THREE.Vector3()
@@ -456,6 +460,7 @@ export class Debris {
     this.simulate(dt)
     this.shrink(dt)
     this.fly(dt)
+    this.sweeping(dt)
     if (this.chipsDirty) {
       this.chipsDirty = false
       this.chips.count = Math.max(1, this.used)
@@ -465,8 +470,28 @@ export class Debris {
     this.dust?.update(dt)
   }
 
+  /**
+   * The reveal's sweep, over `seconds` of film time: a broom's edge crosses the floor from the
+   * window side and pushes the chips lying there ahead of it into the dark, the chips on the banker
+   * and every piece at rest shrink away, and the dust film lifts. The floor is bare at the end.
+   */
+  sweep(seconds = 2.4) {
+    this.sweepLeft = this.sweepS = Math.max(0.1, seconds)
+    for (const piece of this.pieces.slice()) if (piece.fixed) this.vanish(piece)
+    this.dust?.sweep(seconds)
+  }
+
+  /** The stone has changed medium: what comes off it from now on is made of the new one. Call it on a clear floor (after reset()). */
+  setMaterials(offcut: THREE.Material, chip: THREE.Material) {
+    this.offcutMaterial = offcut
+    this.chipMaterial = chip
+    this.chips.material = chip
+    if (this.speck) this.speck.material = offcut
+  }
+
   /** A fresh block: the floor is swept, the air clears. */
   reset() {
+    this.sweepLeft = 0
     this.clearVanishing()
     for (const piece of this.pieces) this.discard(piece)
     this.pieces = []
@@ -1067,6 +1092,36 @@ export class Debris {
       v.mesh.geometry.dispose()
       this.vanishing.splice(i, 1)
     }
+  }
+
+  // One step of the sweep (see sweep()).
+  private sweeping(dt: number) {
+    if (this.sweepLeft <= 0) return
+    this.sweepLeft = Math.max(0, this.sweepLeft - dt)
+    if (this.sweepLeft === 0) {
+      this.clearChips()
+      this.chipsDirty = true
+      return
+    }
+    const k = 1 - this.sweepLeft / this.sweepS
+    const eased = k * k * (3 - 2 * k)
+    const edge = -PILE_HALF - 40 + eased * (PILE_HALF * 2 + 120)
+    // What is left goes in the last third, shrinking where it lies.
+    const left = Math.min(1, Math.max(0, (1 - k) / 0.35))
+    const { cp, cq, cs } = this
+    for (let s = 0; s < this.used; s++) {
+      if (this.flying[s] === 1) continue
+      const i = s * 3
+      if (cp[i + 1]! < this.floorY + 6 && cp[i]! < edge) {
+        // Bunched along the edge, a little ragged, as a broom leaves them.
+        cp[i] = edge + ((s * 7919) % 97) / 97 * 9
+      }
+      this.v.set(cp[i]!, cp[i + 1]!, cp[i + 2]!)
+      this.q.set(cq[s * 4]!, cq[s * 4 + 1]!, cq[s * 4 + 2]!, cq[s * 4 + 3]!)
+      this.s.set(cs[i]! * left, cs[i + 1]! * left, cs[i + 2]! * left)
+      this.chips.setMatrixAt(s, this.m.compose(this.v, this.q, this.s))
+    }
+    this.chipsDirty = true
   }
 
   private clearVanishing() {

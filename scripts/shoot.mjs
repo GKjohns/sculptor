@@ -17,6 +17,9 @@
 //   --until "js"  after --eval, waits (two minutes at most) for an expression to turn truthy, e.g. a slab leaving the block
 //   --sequence n [--every ms]  for motion: n pictures that far apart (120 ms if left out), written as
 //             <name>_01_<mode>.png onward before the usual last one; with --webp, as WebP only
+//   --api      lists every /api/ request the page made, at the end (a replay should make no model calls)
+//   --downloads dir  saves whatever the page hands the browser to save (a film export) into dir,
+//             e.g. --eval "__sculptor.film({ seconds: 60 })" --downloads .shots/films
 // Waits for window.__sceneReady plus --frames more frames, writes <out>/<name>_<mode>.png and exits
 // non-zero if the page threw, the backend is not the one asked for, or the capture is flat.
 // Elements marked data-hud are hidden for the flatness check, so a HUD over a black canvas still fails.
@@ -54,6 +57,8 @@ const gesture = args.includes('--gesture')
 const until = opt('--until', '')
 const sequence = Number(opt('--sequence', 0))
 const every = Number(opt('--every', 120))
+const downloads = opt('--downloads', '')
+const apiLog = args.includes('--api')
 // The look book: three stones from saved study runs, early, middle and finished.
 const OPUS_BUST = 'X-bust-opus-formed-ref-tune-2-20261109142712-095'
 const SOL_BUST = 'C-bust-sol-formed-ref-20261109130608-a36'
@@ -157,7 +162,22 @@ const browser = mode === 'gl'
   // Installed Chrome, in a window: the bundled headless shell has no WebGPU adapter worth trusting.
   : await chromium.launch({ headless: false, channel: 'chrome', args: unthrottled ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : [] })
 
-const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: dpr })
+const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: dpr, acceptDownloads: !!downloads })
+const saving = []
+const apiCalls = []
+if (apiLog) {
+  page.on('request', (r) => {
+    const path = new URL(r.url()).pathname
+    if (path.startsWith('/api/')) apiCalls.push(`${r.method()} ${path}`)
+  })
+}
+if (downloads) {
+  mkdirSync(resolve(downloads), { recursive: true })
+  page.on('download', (d) => {
+    const file = resolve(downloads, d.suggestedFilename())
+    saving.push(d.saveAs(file).then(() => console.log(`saved ${file}`)))
+  })
+}
 const pageErrors = []
 page.on('console', (m) => {
   // Headless SwiftShader says this about any WebGL canvas, even an empty one. It is not the page's.
@@ -244,6 +264,8 @@ if (evalCode) {
   }
 }
 
+await Promise.all(saving)
+
 if (until) {
   try {
     await page.waitForFunction(until, null, { timeout: 120000, polling: 'raf' })
@@ -304,6 +326,7 @@ const sd = spread(decodePng(bare))
 if (webp) saveWebp(shot, out.replace(/\.png$/, '.webp'), width * dpr)
 console.log(`${out}\n  ${stats.backend} · ${stats.width}x${stats.height} · ${stats.frames} frames · ${stats.frameMs.toFixed(1)} ms/frame · ${stats.drawCalls} draws · ${stats.triangles} tris · luma spread ${sd.toFixed(1)}`)
 
+if (apiLog) console.log(`api requests (${apiCalls.length}): ${apiCalls.join(', ') || 'none'}`)
 if (sd < MIN_SPREAD) await fail(`the capture is flat (luma spread ${sd.toFixed(2)} < ${MIN_SPREAD}): blank or black canvas`, browser)
 if (pageErrors.length) await fail(`${pageErrors.length} uncaught page error(s)`, browser)
 await browser.close()

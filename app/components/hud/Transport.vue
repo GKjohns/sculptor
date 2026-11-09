@@ -1,10 +1,14 @@
 <script setup lang="ts">
 /**
  * Transport for whatever is playing on the stone. One compact bar that still fits a pane 350 px wide.
- * Given `state` it is the replay's: restart, play or pause, skip to the end, speed, and how far along
- * the log it is. Given `live` it is a commission's: pause, speed, who has the camera, the two side
+ * Given `state` it is the replay's: restart, play or pause, skip to the end, speed, a scrubber over
+ * the whole log (let go and the stone is as it stood there; going back replays from a fresh block),
+ * and film export at a choice of lengths. Given `live` it is a commission's: pause, speed, who has the camera, the two side
  * panels and a way to stop. With `ended` the live bar keeps only the panels and a new commission.
  */
+import { passAt, passStarts } from '#shared/agent/replay'
+import type { ReplayPass } from '#shared/agent/replay'
+import { FILM_LENGTHS } from '~/studio/film'
 import { REPLAY_SPEEDS } from '~/studio/replay'
 import type { ReplaySpeed, ReplayState } from '~/studio/replay'
 import type { CameraMode, SidePanel, TransportView } from '~/studio/viewState'
@@ -17,6 +21,11 @@ const props = defineProps<{
   panel?: SidePanel | null
   canLook?: boolean
   ended?: boolean
+  // A finished commission: it can be watched again on the replay page.
+  replayable?: boolean
+  // The replay's pass record, for the scrubber's labels; and whether a film is being made.
+  passes?: ReplayPass[]
+  filming?: boolean
 }>()
 const emit = defineEmits<{
   toggle: []
@@ -27,6 +36,9 @@ const emit = defineEmits<{
   panel: [panel: SidePanel | null]
   abort: []
   reset: []
+  seek: [to: number]
+  film: [seconds: number]
+  replay: []
 }>()
 
 // The listed speeds, plus whatever ?speed= asked for if it is not one of them.
@@ -50,6 +62,32 @@ const stop = computed({
     if (next !== undefined && next !== props.live?.speed) emit('speed', next)
   }
 })
+// The scrubber follows the stone until it is grabbed; let go and the stone goes there.
+const grabbed = ref<number | null>(null)
+const scrub = computed({
+  get: () => grabbed.value ?? props.state?.applied ?? 0,
+  set: (v: number | undefined) => grabbed.value = v ?? 0
+})
+function letGo() {
+  if (grabbed.value === null) return
+  emit('seek', grabbed.value)
+  grabbed.value = null
+}
+const starts = computed(() => props.passes && props.state ? passStarts(props.passes, props.state.total) : null)
+// The pass at the scrubber's position: the one being dragged over, or the one on the stone.
+const at = computed(() => {
+  const s = props.state
+  if (!s) return null
+  if (grabbed.value === null) return s.passes ? { index: s.pass, pass: props.passes?.[s.pass] } : null
+  const index = starts.value ? passAt(starts.value, Math.max(0, grabbed.value - 1)) : -1
+  return index >= 0 ? { index, pass: props.passes?.[index] } : null
+})
+const films = computed(() => [FILM_LENGTHS.map(seconds => ({
+  label: seconds < 60 ? `${seconds}-second film` : seconds === 60 ? 'One-minute film' : `${seconds / 60}-minute film`,
+  icon: 'i-lucide-clapperboard',
+  onSelect: () => emit('film', seconds)
+}))])
+
 const more = computed(() => [[{ label: 'Stop the commission', icon: 'i-lucide-square', color: 'error' as const, onSelect: () => emit('abort') }]])
 const flip = (which: SidePanel) => emit('panel', props.panel === which ? null : which)
 </script>
@@ -121,6 +159,17 @@ const flip = (which: SidePanel) => emit('panel', props.panel === which ? null : 
       <span class="max-sm:hidden">Sculptor's eye</span>
     </UButton>
     <UButton
+      v-if="ended && replayable"
+      icon="i-lucide-film"
+      color="neutral"
+      variant="ghost"
+      size="sm"
+      aria-label="Replay, scrub and export a film"
+      @click="emit('replay')"
+    >
+      <span class="max-sm:hidden">Replay</span>
+    </UButton>
+    <UButton
       v-if="ended"
       icon="i-lucide-plus"
       color="primary"
@@ -155,6 +204,7 @@ const flip = (which: SidePanel) => emit('panel', props.panel === which ? null : 
         variant="ghost"
         size="sm"
         aria-label="Restart"
+        :disabled="filming"
         @click="emit('restart')"
       />
       <UButton
@@ -163,7 +213,7 @@ const flip = (which: SidePanel) => emit('panel', props.panel === which ? null : 
         variant="soft"
         size="sm"
         :loading="state.busy"
-        :disabled="state.busy"
+        :disabled="state.busy || filming"
         :aria-label="state.playing ? 'Pause' : state.done ? 'Play again' : 'Play'"
         @click="emit('toggle')"
       />
@@ -173,7 +223,7 @@ const flip = (which: SidePanel) => emit('panel', props.panel === which ? null : 
         variant="ghost"
         size="sm"
         aria-label="Skip to the end"
-        :disabled="state.busy || state.done"
+        :disabled="state.busy || state.done || filming"
         @click="emit('end')"
       />
       <USelect
@@ -182,21 +232,45 @@ const flip = (which: SidePanel) => emit('panel', props.panel === which ? null : 
         size="sm"
         aria-label="Speed"
         class="w-20"
+        :disabled="filming"
       />
       <span
-        v-if="state.passes"
-        class="ml-auto text-xs whitespace-nowrap text-muted tabular-nums"
-      >Pass {{ state.pass + 1 }} of {{ state.passes }}</span>
+        v-if="at"
+        class="ml-auto truncate text-xs whitespace-nowrap text-muted tabular-nums"
+      >Pass {{ at.index + 1 }} of {{ state.passes }}<template v-if="at.pass"> · {{ at.pass.tool.replace('_', ' ') }}</template></span>
+      <UDropdownMenu
+        :items="films"
+        :content="{ side: 'top', align: 'end' }"
+        :disabled="filming || state.busy"
+      >
+        <UButton
+          icon="i-lucide-film"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          :class="at ? '' : 'ml-auto'"
+          :loading="filming"
+          :disabled="filming || state.busy"
+          aria-label="Export film"
+        >
+          <span class="max-sm:hidden">Export film</span>
+        </UButton>
+      </UDropdownMenu>
     </div>
-    <UProgress
-      :model-value="state.applied"
-      :max="state.total"
+    <USlider
+      v-model="scrub"
+      :min="0"
+      :max="Math.max(1, state.total)"
+      :step="1"
       size="xs"
-      class="mt-2"
+      class="mt-2.5 mb-1"
+      aria-label="Replay position"
+      :disabled="filming || state.busy"
+      @change="letGo"
     />
     <div class="mt-1.5 flex items-baseline justify-between gap-3 text-xs text-muted">
       <span class="truncate">{{ label }}</span>
-      <span class="whitespace-nowrap tabular-nums">Strike {{ count(state.applied) }} of {{ count(state.total) }}</span>
+      <span class="whitespace-nowrap tabular-nums">Strike {{ count(scrub) }} of {{ count(state.total) }}</span>
     </div>
   </div>
 </template>

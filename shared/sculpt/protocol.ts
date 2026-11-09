@@ -82,7 +82,21 @@ export interface RunMessage {
   call: ToolCall
 }
 
-export type ToKernel = InitMessage | StrikesMessage | RaycastMessage | StatsMessage | ReferenceMessage | RunMessage
+// A copy of a stone kept in the worker under `key` (save), or the stone put back to one (load),
+// so scrubbing back through a long log starts from the nearest copy instead of a fresh block.
+// Answered by 'struck' with nothing applied and the rev the stone now stands at. A full init
+// forgets every copy; the worker keeps the last SNAPSHOTS_KEPT and a load of one it has let go is an error.
+export interface SnapshotMessage {
+  type: 'snapshot'
+  id: number
+  stone: StoneId
+  key: string
+  action: 'save' | 'load'
+}
+
+export const SNAPSHOTS_KEPT = 10
+
+export type ToKernel = InitMessage | StrikesMessage | RaycastMessage | StatsMessage | ReferenceMessage | RunMessage | SnapshotMessage
 
 // Worker to page.
 
