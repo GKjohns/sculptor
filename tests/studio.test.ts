@@ -117,7 +117,94 @@ test('saw, chisel and rasp take {h, v} points and report where they landed', asy
   assert.match(smooth.summary, /Rasp from the top view/)
   assert.ok(smooth.strikes.some(s => s.kind === 'cut' && s.tool === 'rasp'))
 
-  await assert.rejects(studio.run(call('polish', {})), /no tool called "polish"/)
+  await assert.rejects(studio.run(call('glue', {})), /no tool called "glue"/)
+})
+
+test('the Sprint 3 tools: sketch, close-up, slice, roundel, protected strokes, drill and polish', async () => {
+  const studio = fresh(true)
+  const untouched = hashGrid(studio.grid)
+
+  // Charcoal: one log entry, no stone moved, and the Studio keeps the line for its looks.
+  const line = await studio.run(call('sketch', { view: 'front', path: [{ h: -12, v: 30 }, { h: 0, v: 90 }, { h: 12, v: 30 }], why: 'Marking the profile.' }))
+  assert.equal(hashGrid(studio.grid), untouched)
+  assert.deepEqual(line.strikes.map(s => s.kind), ['sketch'])
+  assert.deepEqual(studio.sketches(), line.strikes)
+  assert.ok(line.numbers!.line_on_stone_cm! > 110 && line.numbers!.lines_drawn === 1)
+  assert.match(line.summary, /Charcoal from the front view/)
+  await assert.rejects(studio.run(call('sketch', { view: 'front', path: [{ h: 40, v: 30 }, { h: 50, v: 90 }], why: 'x' })), /does not lie on the stone/)
+  assert.equal(studio.strikes.length, 1)
+  // It shows in a look: the same sheet without it is a different picture.
+  const withLine = await studio.run(call('look', { views: ['front'], overlay: 'grid' }))
+  const bare = createStudio({ grid: studio.grid, encodeImage: encode })
+  const without = await bare.run(call('look', { views: ['front'], overlay: 'grid' }))
+  assert.notDeepEqual(decodePng(withLine.images![0]!).data, decodePng(without.images![0]!).data)
+
+  await studio.run(call('declare_form', FIGURE))
+  await studio.run(call('rough_out', { to: 'figure', margin_cm: 2, tool: 'point', why: 'x' }))
+
+  // A close-up is a look at part of one view: an image, numbers for the window, no strikes.
+  const near = await studio.run(call('closeup', { view: 'front', center: { h: 0, v: 70 }, span_cm: 24, overlay: 'form' }))
+  assert.equal(near.images!.length, 1)
+  assert.equal(near.strikes.length, 0)
+  assert.ok(decodePng(near.images![0]!).width > 600)
+  assert.ok(near.numbers!.window_stone_pct! > 50 && near.numbers!.relief_cm! > 2 && near.numbers!.surface_z_max_cm! > near.numbers!.surface_z_min_cm!)
+  assert.ok('window_proud_max_cm' in near.numbers! && 'window_below_form_max_cm' in near.numbers!)
+  assert.match(near.summary, /Close-up of the front view, 24 cm across, centred on \(0, 70\)/)
+  // With the reference, the same window of the sheet sits beside it.
+  const beside = await studio.run(call('closeup', { view: 'front', center: { h: 0, v: 70 }, span_cm: 24, overlay: 'reference' }))
+  assert.ok(decodePng(beside.images![0]!).width > 1.8 * decodePng(near.images![0]!).width)
+  await assert.rejects(fresh().run(call('closeup', { view: 'front', center: { h: 0, v: 70 }, span_cm: 24, overlay: 'reference' })), /no reference outlines/)
+
+  // A slice: an image and the section's numbers, against the form and the reference.
+  const cut = await studio.run(call('slice', { axis: 'y', at_cm: 45 }))
+  assert.equal(cut.images!.length, 1)
+  assert.equal(cut.strikes.length, 0)
+  // The figure's ellipsoid is 36 cm across at its middle, plus the margin.
+  assert.ok(Math.abs(cut.numbers!.section_x_max_cm! - cut.numbers!.section_x_min_cm! - 41) < 4, JSON.stringify(cut.numbers))
+  assert.ok(Math.abs(cut.numbers!.section_form_area_cm2! - Math.PI * 18 * 18) < 40)
+  assert.ok(cut.numbers!.section_stone_outside_form_cm2! > 100 && 'section_reference_area_cm2' in cut.numbers!)
+  assert.match(cut.summary, /Slice at Y 45, seen from above/)
+  assert.equal((await studio.run(call('slice', { axis: 'y', at_cm: 99 }))).numbers!.section_area_cm2, 0)
+  await assert.rejects(studio.run(call('slice', { axis: 'x', at_cm: 31 })), /the block runs from -30 to 30 on X/)
+
+  // Strokes: a roundel channel, and a stroke that names a form cannot cut into it.
+  const logged = studio.strikes.length
+  const groove = await studio.run(call('chisel', { tool: 'roundel', view: 'front', path: [{ h: -6, v: 60 }, { h: 6, v: 60 }], depth_cm: 1, width_cm: 2, protect: 'none', why: 'A fold.' }))
+  assert.ok(groove.strikes.some(s => s.kind === 'cut' && s.tool === 'roundel'))
+  assert.match(groove.summary, /^Roundel from the front view/)
+  const guarded = await studio.run(call('chisel', { tool: 'point', view: 'front', path: [{ h: -6, v: 50 }, { h: 6, v: 50 }], depth_cm: 6, width_cm: 4, protect: 'figure', why: 'Clearing down to the form.' }))
+  assert.ok(guarded.strikes.filter(s => s.kind === 'cut').every(s => s.kind === 'cut' && s.protect === 'figure'))
+  assert.match(guarded.summary, /'figure'/)
+  assert.equal((await studio.run(call('look', { views: ['front'], overlay: 'form' }))).numbers!.form_overcut_cm3, studio.measure('form').form_overcut_cm3)
+  await assert.rejects(studio.run(call('chisel', { tool: 'flat', view: 'front', path: [{ h: -6, v: 50 }, { h: 6, v: 50 }], depth_cm: 1, width_cm: 2, protect: 'torso', why: 'x' })), /no form named "torso" has been declared; your forms: "figure"\. Pass protect "none"/)
+
+  const hole = await studio.run(call('drill', { view: 'top', at: { h: 0, v: 0 }, diameter_cm: 2, depth_cm: 5, why: 'A socket.' }))
+  assert.ok(hole.strikes.some(s => s.kind === 'cut' && s.tool === 'drill'))
+  assert.ok(Math.abs(hole.numbers!.depth_reached_cm! - 5) < 1 && hole.numbers!.broke_through === 0 && hole.numbers!.removed_cm3! > 5)
+  assert.match(hole.summary, /Drill from the top view at \[0, 0\]: the bit went in at \(x 0\.0, y 8\d\.\d, z 0\.0\)/)
+
+  // Polish: the shape and the mass stay; the finish, and so the numbers, change.
+  await studio.run(call('rasp', { view: 'front', path: [{ h: -8, v: 40 }, { h: 8, v: 40 }], width_cm: 8, passes: 2, why: 'x' }))
+  const mass = stoneMassKg(studio.grid)
+  const dist = studio.grid.dist.slice()
+  const shine = await studio.run(call('polish', { view: 'front', path: [{ h: -8, v: 40 }, { h: 8, v: 40 }], width_cm: 8, passes: 4, why: 'Bringing up the chest.' }))
+  assert.deepEqual(studio.grid.dist, dist)
+  assert.equal(stoneMassKg(studio.grid), mass)
+  assert.equal(shine.numbers!.removed_cm3, 0)
+  assert.ok(shine.numbers!.finish_after! > shine.numbers!.finish_before! + 40 && shine.numbers!.surface_polished_pct! > 0)
+  assert.ok(shine.strikes.every(s => s.kind === 'cut' && s.tool === 'polish'))
+  assert.equal((await studio.run(call('look', { views: ['front'], overlay: 'grid' }))).numbers!.surface_polished_pct, shine.numbers!.surface_polished_pct)
+
+  // Every one of them is in the log, the log replays to the same stone, and a Studio
+  // resumed from it still has the charcoal.
+  assert.ok(studio.strikes.length > logged + 20)
+  const saved = JSON.parse(JSON.stringify(studio.log())) as ReturnType<typeof studio.log>
+  assert.equal(saved.kernel, KERNEL_VERSION)
+  const replayed = replayLog(saved, g => createGrid(g))
+  assert.equal(hashGrid(replayed), hashGrid(studio.grid))
+  const resumed = createStudio({ grid: replayed, encodeImage: encode, resume: saved })
+  assert.deepEqual(resumed.sketches(), JSON.parse(JSON.stringify(studio.sketches())))
+  assert.deepEqual(resumed.forms(), ['figure'])
 })
 
 test('look returns one PNG and numbers, measured against the model\'s own forms only', async () => {

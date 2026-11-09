@@ -6,7 +6,7 @@ import { applyStrike } from './strike.ts'
 import { toolSpec } from './tools.ts'
 import { VIEWS, isAxisView, viewRay } from './views.ts'
 import type { AxisView } from './views.ts'
-import type { CompiledForm, CutStrike, Form, FormStrike, Grid, Offcut, RayHit, SawStrike, Strike, Vec3 } from './types.ts'
+import type { CompiledForm, CutStrike, Form, FormStrike, Grid, Offcut, RayHit, SawStrike, SketchStrike, Strike, Vec3 } from './types.ts'
 
 export { silhouetteForm } from './silhouette.ts'
 export type { BlockSize, Mask } from './silhouette.ts'
@@ -48,8 +48,9 @@ export interface RoughOutStats {
 }
 
 export interface PassResult {
-  // Everything to append to the strike log, in order, ending with a 'detach'. Already
-  // applied to the grid that was passed in. Empty when the pass was refused.
+  // Everything to append to the strike log, in order, ending with a 'detach' (a polish and a
+  // sketch move no stone and have none). Already applied to the grid that was passed in.
+  // Empty when the pass was refused.
   strikes: Strike[]
   removedCm3: number
   hits: PassHit[]
@@ -61,6 +62,12 @@ export interface PassResult {
   // Set when the pass could not be carried out as asked; nothing was cut.
   error?: string
   stats?: RoughOutStats
+  // Drill only: where the bit went in, how deep the hole is, and whether it came out into air.
+  bore?: { entry: Vec3, depthCm: number, through: boolean }
+  // Polish only: the mean finish (0 rough to 255 polished) under the path before and after.
+  sheen?: { before: number, after: number }
+  // Sketch only: how much of the line landed on the stone, cm, and how much fell off it.
+  line?: { drawnCm: number, missedCm: number }
 }
 
 export type Discard = 'above' | 'below' | 'left' | 'right'
@@ -74,11 +81,13 @@ export interface SawPass {
 }
 
 export interface ChiselPass {
-  tool: 'point' | 'claw' | 'flat'
+  tool: 'point' | 'claw' | 'flat' | 'roundel'
   view: string
   path: RulerPoint[]
   depth_cm: number
   width_cm: number
+  // A declared form the stroke may not cut into. Left out, the stroke cuts whatever it meets.
+  protect?: string
 }
 
 export interface RaspPass {
@@ -86,6 +95,25 @@ export interface RaspPass {
   path: RulerPoint[]
   width_cm: number
   passes: number
+}
+
+export interface DrillPass {
+  view: string
+  at: RulerPoint
+  diameter_cm: number
+  depth_cm: number
+}
+
+export interface PolishPass {
+  view: string
+  path: RulerPoint[]
+  width_cm: number
+  passes: number
+}
+
+export interface SketchPass {
+  view: string
+  path: RulerPoint[]
 }
 
 export interface RoughOutPass {
@@ -107,10 +135,12 @@ interface Run {
   removedCm3: number
   offcuts: Offcut[]
   ms: number
+  // Virtual time worked since the last island check.
+  unchecked: number
 }
 
 function begin(grid: Grid): Run {
-  return { grid, strikes: [], removedCm3: 0, offcuts: [], ms: 0 }
+  return { grid, strikes: [], removedCm3: 0, offcuts: [], ms: 0, unchecked: 0 }
 }
 
 function emit(run: Run, strike: Strike): number {
@@ -118,8 +148,21 @@ function emit(run: Run, strike: Strike): number {
   run.strikes.push(strike)
   run.removedCm3 += result.removedCm3
   for (let i = 0; i < result.offcuts.length; i++) run.offcuts.push(result.offcuts[i]!)
-  if (strike.kind === 'cut' || strike.kind === 'saw') run.ms += strike.ms
+  if (strike.kind === 'cut' || strike.kind === 'saw' || strike.kind === 'sketch') run.ms += strike.ms
+  if (strike.kind === 'cut' || strike.kind === 'saw') run.unchecked += strike.ms
+  else if (strike.kind === 'detach') run.unchecked = 0
   return result.removedCm3
+}
+
+// Stone cut free must not hang in the air while the hand works on around it. The island
+// check only runs where the log says so, so a pass puts one in whenever this much virtual
+// time has gone by since the last: a freed piece then falls within about two seconds of
+// work, whatever the length of the pass. Each check costs a few milliseconds on a full block.
+export const DETACH_EVERY_MS = 2000
+
+// Call after a strike. Returns the stone that fell, cm³.
+function dropLoose(run: Run): number {
+  return run.unchecked >= DETACH_EVERY_MS ? emit(run, { kind: 'detach' }) : 0
 }
 
 function done(run: Run, hits: PassHit[], summary: string): PassResult {
@@ -130,6 +173,7 @@ function refuse(message: string): PassResult {
   return { strikes: [], removedCm3: 0, hits: [], offcuts: [], ms: 0, summary: message, error: message }
 }
 
+const cents = (v: number) => Math.round(v * 100) / 100
 const r3 = (v: number) => Math.round(v * 1000) / 1000
 const r5 = (v: number) => Math.round(v * 1e5) / 1e5
 const clamp = (v: number, lo: number, hi: number) => v < lo ? lo : v > hi ? hi : v
@@ -329,8 +373,12 @@ function strokeNormal(grid: Grid, view: AxisView, p: RulerPoint, hit: RayHit, sp
 const CHISELS = {
   point: { bite: 0.7, step: 0.4, ms: 290 },
   claw: { bite: 0.4, step: 0.5, ms: 250 },
-  flat: { bite: 0.3, step: 0.6, ms: 220 }
+  flat: { bite: 0.3, step: 0.6, ms: 220 },
+  roundel: { bite: 1, step: 0.35, ms: 240 }
 } as const
+
+// A roundel channel deeper than this many widths is a slot, which is the drill's work.
+const ROUNDEL_DEEPEST = 1.5
 
 const MAX_LAYERS = 8
 const MAX_PATH_SAMPLES = 160
@@ -381,13 +429,15 @@ function land(grid: Grid, view: AxisView, walk: Walk, spread: number): (Landing 
 // below the surface the stroke started on.
 export function chisel(grid: Grid, pass: ChiselPass): PassResult {
   const kind = CHISELS[pass.tool]
-  if (!kind) return refuse(`The chisel is point, claw or flat, not '${String(pass.tool)}'.`)
+  if (!kind) return refuse(`The chisel is point, claw, flat or roundel, not '${String(pass.tool)}'.`)
   if (!isAxisView(pass.view)) return refuse(`Chisel strokes are placed from ${CARVE_VIEWS}, not '${pass.view}'.`)
   if (!validPath(pass.path)) return refuse('The chisel needs a path of at least one ruler point.')
   if (!(pass.depth_cm > 0) || !(pass.width_cm > 0)) return refuse('depth_cm and width_cm must be above zero.')
+  if (pass.protect !== undefined && !grid.forms.has(pass.protect)) return refuse(`No form named '${pass.protect}' has been declared, so the stroke cannot be kept out of it.`)
   const view = pass.view
-  const width = clamp(pass.width_cm, grid.voxel, 12)
-  const depth = clamp(pass.depth_cm, 0.05, 25)
+  const round = pass.tool === 'roundel'
+  const width = clamp(pass.width_cm, round ? 2 * grid.voxel : grid.voxel, 12)
+  const depth = clamp(pass.depth_cm, 0.05, round ? ROUNDEL_DEEPEST * width : 25)
   const layers = Math.min(MAX_LAYERS, Math.max(1, Math.ceil(depth / (kind.bite * width) - 1e-9)))
   const bite = depth / layers
   const walk = walkPath(pass.path, kind.step * width, MAX_PATH_SAMPLES)
@@ -399,19 +449,27 @@ export function chisel(grid: Grid, pass: ChiselPass): PassResult {
   const ms = blowMs(kind.ms, width)
   const lift = 0.3 * grid.voxel
   let blows = 0
+  // What the blows themselves took; the rest of the pass's total fell away loose.
+  let cut = 0
   for (let layer = 0; layer < layers; layer++) {
     const target = bite * (layer + 1)
     for (let i = 0; i < landings.length; i++) {
       const l = landings[i]
       if (!l) continue
       const [nx, ny, nz] = l.normal
-      // Where the surface is now on this sample's own line: overlapping bites, and the layers
-      // before this one, have already taken some of it down.
-      const from: Vec3 = [l.point[0] + nx * lift, l.point[1] + ny * lift, l.point[2] + nz * lift]
-      const now = raycast(grid, from, [-nx, -ny, -nz], depth + lift + 1)
-      if (!now) continue
-      const sunk = Math.max(0, now.distance - lift)
-      if (sunk > target - 0.15 * bite) continue
+      let sunk = 0
+      if (!round) {
+        // Where the surface is now on this sample's own line: overlapping bites, and the
+        // layers before this one, have already taken some of it down.
+        const from: Vec3 = [l.point[0] + nx * lift, l.point[1] + ny * lift, l.point[2] + nz * lift]
+        const now = raycast(grid, from, [-nx, -ny, -nz], depth + lift + 1)
+        if (!now) continue
+        sunk = Math.max(0, now.distance - lift)
+        if (sunk > target - 0.15 * bite) continue
+      }
+      // The roundel's ball is what shapes its channel, so every bite is the whole tool sunk
+      // from the surface the stroke started on: begun from where its neighbours left off, a
+      // bite would square the channel's walls.
       const strike: CutStrike = {
         kind: 'cut',
         tool: pass.tool,
@@ -423,20 +481,27 @@ export function chisel(grid: Grid, pass: ChiselPass): PassResult {
         ms
       }
       if (pass.tool === 'claw' && l.across) strike.across = l.across
-      emit(run, strike)
+      if (pass.protect !== undefined) strike.protect = pass.protect
+      cut += emit(run, strike)
       blows++
+      dropLoose(run)
     }
   }
-  const cut = run.removedCm3
   emit(run, { kind: 'detach' })
 
-  const name = pass.tool === 'point' ? 'Point chisel' : pass.tool === 'claw' ? 'Claw chisel' : 'Flat chisel'
+  const name = pass.tool === 'point' ? 'Point chisel' : pass.tool === 'claw' ? 'Claw chisel' : pass.tool === 'flat' ? 'Flat chisel' : 'Roundel'
   let summary = `${name} from the ${view} view: ${hitSummary(landings, walk.points)}`
   if (blows > 0) {
     summary += ` ${blows} strike${blows === 1 ? '' : 's'}${layers > 1 ? ` in ${layers} layers` : ''} took ${amount(cut)}, ${r3(depth)} cm deep and ${r3(width)} cm wide.`
     if (run.removedCm3 - cut > 0.5) summary += ` ${amount(run.removedCm3 - cut)} more fell away loose.`
+    if (pass.protect !== undefined) {
+      summary += cut < 0.5
+        ? ` The stone there is already down to '${pass.protect}', which the stroke may not cut into, so almost nothing came off.`
+        : ` Nothing inside '${pass.protect}' was cut.`
+    }
   }
   if (width !== pass.width_cm) summary += ` (Width was limited to ${r3(width)} cm.)`
+  if (round && depth < pass.depth_cm) summary += ` (Depth was limited to ${r3(depth)} cm: a roundel channel is at most ${ROUNDEL_DEEPEST} times as deep as it is wide. Use the drill for a deep hole.)`
   if (walk.truncated) summary += ` The path was too long for one stroke: it stopped after ${r3((walk.points.length - 1) * kind.step * width)} of ${r3(walk.length)} cm.`
   return done(run, hits, summary)
 }
@@ -497,6 +562,217 @@ export function rasp(grid: Grid, pass: RaspPass): PassResult {
   }
   if (walk.truncated) summary += ` The path was too long for one stroke: it stopped after ${r3((walk.points.length - 1) * 0.3 * width)} of ${r3(walk.length)} cm.`
   return done(run, hits, summary)
+}
+
+// ---------- drill ----------
+
+const DRILL_MS = 420
+
+// A hole straight along the view direction from the first surface the point meets: one
+// diameter deeper with every peck. If the bit comes out into open air on the way (the far
+// side of a thin part, a gap already cut), it stops there instead of going on into whatever
+// stands behind.
+export function drill(grid: Grid, pass: DrillPass): PassResult {
+  if (!isAxisView(pass.view)) return refuse(`The drill bores along the view direction from ${CARVE_VIEWS}, not '${pass.view}'.`)
+  if (!isPoint(pass.at)) return refuse('The drill needs one ruler point, at.')
+  if (!(pass.diameter_cm > 0) || !(pass.depth_cm > 0)) return refuse('diameter_cm and depth_cm must be above zero.')
+  const view = pass.view
+  const { voxel } = grid
+  const size = clamp(pass.diameter_cm, 2 * voxel, 8)
+  const asked = clamp(pass.depth_cm, voxel, 40)
+  const ruler: RulerPoint = [pass.at[0], pass.at[1]]
+  const run = begin(grid)
+  const hit = castView(grid, view, ruler)
+  if (!hit) return done(run, [{ ruler, point: null }], `Drill from the ${view} view: the point ${showRuler(ruler)} missed the stone. Nothing was cut.`)
+  const look = VIEWS[view].look
+  const entry = hit.point
+  const along = (t: number): Vec3 => [entry[0] + look[0] * t, entry[1] + look[1] * t, entry[2] + look[2] * t]
+
+  let depth = asked
+  let through = false
+  for (let t = voxel; t <= asked; t += voxel / 2) {
+    const p = along(t)
+    if (sampleDistance(grid, p[0], p[1], p[2]) > 0) {
+      // A little further, so the bit clears the far wall and leaves a clean exit.
+      depth = Math.min(asked, t + 0.25 * size)
+      through = true
+      break
+    }
+  }
+  const pecks = Math.max(1, Math.ceil(depth / size - 1e-9))
+  const peck = depth / pecks
+  const seed = passSeed(`drill:${view}`, [size, asked, ruler[0], ruler[1]])
+  let cut = 0
+  for (let k = 0; k < pecks; k++) {
+    const at = along(k * peck)
+    cut += emit(run, {
+      kind: 'cut',
+      tool: 'drill',
+      at: [r3(at[0]), r3(at[1]), r3(at[2])],
+      dir: [look[0], look[1], look[2]],
+      size: r3(size),
+      depth: r3(peck),
+      seed: hashSeed(seed, k),
+      ms: DRILL_MS
+    })
+    dropLoose(run)
+  }
+  emit(run, { kind: 'detach' })
+
+  // The hole as bored: how far down its own line the stone now starts.
+  const lift = 0.3 * voxel
+  const floor = raycast(grid, along(-lift), look, depth + lift + 2 * voxel)
+  const reached = through || !floor ? depth : clamp(floor.distance - lift, 0, depth + voxel)
+  let summary = `Drill from the ${view} view at ${showRuler(ruler)}: the bit went in at ${show(entry)} and bored a hole ${r3(size)} cm across, ${reached.toFixed(1)} cm deep, taking ${amount(cut)}.`
+  if (through) summary += ` It came out into open air ${reached.toFixed(1)} cm in and stopped there.`
+  else summary += ` The hole ends at ${show(along(reached))}.`
+  if (run.removedCm3 - cut > 0.5) summary += ` ${amount(run.removedCm3 - cut)} more fell away loose.`
+  if (size !== pass.diameter_cm) summary += ` (Diameter was limited to ${r3(size)} cm.)`
+  const result = done(run, [{ ruler, point: entry }], summary)
+  result.bore = { entry, depthCm: r3(reached), through }
+  return result
+}
+
+// ---------- polish ----------
+
+// The share of the way to a full polish one stroke takes the stone under it. Strokes overlap
+// about three deep along a path, so one pass closes rather more than half the gap at the
+// middle of the band and less toward its edges.
+const POLISH_SHARE = 0.25
+
+// The finish of the stone just under each point where the path met it, averaged.
+function finishUnder(grid: Grid, landings: (RayHit | null)[]): number {
+  const { nx, ny, nz, voxel } = grid
+  let sum = 0
+  let count = 0
+  for (const hit of landings) {
+    if (!hit) continue
+    const x = Math.round((hit.point[0] - hit.normal[0] * 0.6 * voxel - grid.x0) / voxel)
+    const y = Math.round((hit.point[1] - hit.normal[1] * 0.6 * voxel - grid.y0) / voxel)
+    const z = Math.round((hit.point[2] - hit.normal[2] * 0.6 * voxel - grid.z0) / voxel)
+    if (x < 0 || y < 0 || z < 0 || x >= nx || y >= ny || z >= nz) continue
+    sum += grid.finish[x + nx * (y + ny * z)]!
+    count++
+  }
+  return count > 0 ? sum / count : 0
+}
+
+// Rubs the surface along the path toward a polish. No stone moves and the shape does not
+// change: only the finish of the skin rises, a little with every pass.
+export function polish(grid: Grid, pass: PolishPass): PassResult {
+  if (!isAxisView(pass.view)) return refuse(`The polish works from ${CARVE_VIEWS}, not '${pass.view}'.`)
+  if (!validPath(pass.path)) return refuse('The polish needs a path of at least one ruler point.')
+  if (!(pass.width_cm > 0)) return refuse('width_cm must be above zero.')
+  const view = pass.view
+  const width = clamp(pass.width_cm, 3 * grid.voxel, 14)
+  const passes = Math.round(clamp(Number.isFinite(pass.passes) ? pass.passes : 1, 1, 8))
+  const walk = walkPath(pass.path, 0.3 * width, MAX_PATH_SAMPLES)
+  const run = begin(grid)
+  const seed = passSeed(`polish:${view}`, [width, passes, ...pass.path.flat()])
+  // The surface does not move, so the path is cast once.
+  const landings = walk.points.map(p => castView(grid, view, p))
+  const hits: PassHit[] = walk.points.map((ruler, i) => ({ ruler, point: landings[i] ? landings[i]!.point : null }))
+  const on = hits.filter(h => h.point !== null)
+  const before = finishUnder(grid, landings)
+  let strokes = 0
+  for (let n = 0; n < passes; n++) {
+    for (let k = 0; k < landings.length; k++) {
+      const i = n % 2 === 0 ? k : landings.length - 1 - k
+      const hit = landings[i]
+      if (!hit) continue
+      emit(run, {
+        kind: 'cut',
+        tool: 'polish',
+        at: [r3(hit.point[0]), r3(hit.point[1]), r3(hit.point[2])],
+        dir: [r5(-hit.normal[0]), r5(-hit.normal[1]), r5(-hit.normal[2])],
+        size: r3(width),
+        depth: POLISH_SHARE,
+        seed: hashSeed(seed, n, i),
+        ms: 150
+      })
+      strokes++
+    }
+  }
+  const after = finishUnder(grid, landings)
+  let summary: string
+  if (on.length === 0) {
+    summary = `Polish from the ${view} view: none of the ${hits.length} points along the path met the stone (first tried ${showRuler(walk.points[0]!)}). Nothing was polished.`
+  } else {
+    summary = `Polish from the ${view} view: ${passes} pass${passes === 1 ? '' : 'es'}, ${strokes} strokes ${r3(width)} cm wide, from ${show(on[0]!.point!)} to ${show(on[on.length - 1]!.point!)}. The finish under the path went from ${Math.round(before)} to ${Math.round(after)} (0 is raw chisel work, 255 a full polish). No stone was removed and the shape is unchanged.`
+    if (on.length < hits.length) summary += ` ${hits.length - on.length} of ${hits.length} points along the path missed the stone.`
+  }
+  if (walk.truncated) summary += ` The path was too long for one stroke: it stopped after ${r3((walk.points.length - 1) * 0.3 * width)} of ${r3(walk.length)} cm.`
+  const result = done(run, hits, summary)
+  result.sheen = { before: Math.round(before), after: Math.round(after) }
+  return result
+}
+
+// ---------- sketch ----------
+
+// Charcoal marks are this far apart along the line, cm.
+const SKETCH_STEP = 1
+const MAX_SKETCH_SAMPLES = 600
+
+// A charcoal line on the stone, drawn from an axis view: the polyline is laid on the first
+// surface it meets, as a row of points for whoever shows the stone to join up. It cuts
+// nothing and no tool reads it; its one log entry is there so a replay draws the same line.
+export function sketch(grid: Grid, pass: SketchPass): PassResult {
+  if (!isAxisView(pass.view)) return refuse(`A sketch is drawn from ${CARVE_VIEWS}, not '${pass.view}'.`)
+  if (!validPath(pass.path) || pass.path.length < 2) return refuse('A sketch needs a line of at least two ruler points.')
+  const view = pass.view
+  const walk = walkPath(pass.path, SKETCH_STEP, MAX_SKETCH_SAMPLES)
+  if (!(walk.length > 0)) return refuse('The sketch line has no length: all its points are the same.')
+  const spacing = walk.length / Math.max(1, walk.points.length - 1)
+  const strokes: Vec3[][] = []
+  const hits: PassHit[] = []
+  let stroke: Vec3[] = []
+  let marks = 0
+  const close = (): void => {
+    // One mark on its own is a dot nobody could see.
+    if (stroke.length > 1) {
+      strokes.push(stroke)
+      marks += stroke.length - 1
+    }
+    stroke = []
+  }
+  for (const ruler of walk.points) {
+    const hit = castView(grid, view, ruler)
+    hits.push({ ruler, point: hit ? hit.point : null })
+    if (!hit) {
+      close()
+      continue
+    }
+    const p: Vec3 = [cents(hit.point[0]), cents(hit.point[1]), cents(hit.point[2])]
+    const last = stroke[stroke.length - 1]
+    // A jump in depth: the line ran off one surface onto another behind it.
+    if (last && (p[0] - last[0]) ** 2 + (p[1] - last[1]) ** 2 + (p[2] - last[2]) ** 2 > 16 * spacing * spacing) close()
+    stroke.push(p)
+  }
+  close()
+  const first = pass.path[0]!
+  const end = pass.path[pass.path.length - 1]!
+  if (strokes.length === 0) return refuse(`The line from ${showRuler(first)} to ${showRuler(end)} in the ${view} view does not lie on the stone, so there was nothing to draw on.`)
+  const drawn = marks * spacing
+  const missed = Math.max(0, walk.length - drawn)
+  const run = begin(grid)
+  const strike: SketchStrike = {
+    kind: 'sketch',
+    view,
+    points: pass.path.map((p): [number, number] => [r3(p[0]), r3(p[1])]),
+    strokes,
+    ms: Math.round(clamp(60 * drawn, 600, 5000))
+  }
+  emit(run, strike)
+  const a = strokes[0]![0]!
+  const lastStroke = strokes[strokes.length - 1]!
+  const b = lastStroke[lastStroke.length - 1]!
+  let summary = `Charcoal from the ${view} view: drew ${drawn.toFixed(0)} cm of line on the stone, from ${show(a)} to ${show(b)}.`
+  if (missed > 1) summary += ` ${missed.toFixed(0)} cm of the line fell off the stone or across an edge and was not drawn.`
+  if (walk.truncated) summary += ` The line was too long: it stopped after ${MAX_SKETCH_SAMPLES - 1} cm.`
+  summary += ' It shows in your looks from now on, fainter where the stone under it has since been cut away. No stone was cut.'
+  const result = done(run, hits, summary)
+  result.line = { drawnCm: cents(drawn), missedCm: cents(missed) }
+  return result
 }
 
 // ---------- rough-out ----------
@@ -968,6 +1244,9 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
   const minSlab = Math.max(MIN_SLAB * blockCm3, 40 * wasteCell)
   let saws = 0
   let slabCm3 = 0
+  // Loose stone the island checks dropped, while sawing and then while chiselling.
+  let slabLoose = 0
+  let looseCm3 = 0
   while (saws < MAX_SAWS) {
     let best = -1
     let bestCount = 0
@@ -994,6 +1273,8 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
       ms: sawMs(bestCount * wasteCell)
     }
     slabCm3 += emit(run, strike)
+    // A slab can take the support from under stone the cut itself did not reach.
+    slabLoose += emit(run, { kind: 'detach' })
     saws++
     const left: number[] = []
     for (let p = 0; p < waste.length; p += 3) {
@@ -1063,6 +1344,7 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
         margin,
         ms
       })
+      looseCm3 += dropLoose(run)
     }
     return count
   }
@@ -1093,7 +1375,6 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
 
   const before = run.removedCm3
   let chiselStrikes = 0
-  let looseCm3 = 0
   for (let l = levels.length - 1; l >= 0; l--) {
     if (l === 0 && chiselStrikes > 0.3 * budget) {
       // The layers above took more than their share: the last one makes do with wider
@@ -1155,12 +1436,14 @@ export function roughOut(grid: Grid, pass: RoughOutPass): PassResult {
       })
       blows++
       tidied++
+      looseCm3 += dropLoose(run)
     }
     if (blows === 0) break
     looseCm3 += emit(run, { kind: 'detach' })
   }
   chiselStrikes += tidied
   const chiselCm3 = run.removedCm3 - before - looseCm3
+  looseCm3 += slabLoose
   const stats: RoughOutStats = {
     protect: name,
     marginCm: margin,

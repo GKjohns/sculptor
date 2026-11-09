@@ -16,11 +16,27 @@ export const MODELS = {
 export type ModelKey = keyof typeof MODELS
 
 export const DEFAULT_SCULPTOR: ModelKey = 'opus'
+// The sculptors a person can choose between, in the order the picker lists them.
+export const SCULPTORS = ['opus', 'sol', 'fable', 'gemini'] as const satisfies readonly ModelKey[]
+export type SculptorKey = typeof SCULPTORS[number]
+// Every model that can take a turn through /api/brain: all of them but the image model.
+export const TEXT_MODELS = ['opus', 'fable', 'sol', 'gemini', 'sonnet', 'haiku'] as const satisfies readonly ModelKey[]
+export type TextModelKey = typeof TEXT_MODELS[number]
+
+export const MODEL_LABELS: Record<ModelKey, string> = {
+  opus: 'Opus 5.5',
+  fable: 'Fable 5.1',
+  sol: 'GPT-6 Sol',
+  gemini: 'Gemini 3.1 Pro',
+  sonnet: 'Sonnet 5.5',
+  haiku: 'Haiku 5.5',
+  image: 'Gemini 3.1 Flash Lite Image'
+}
 // Not one of the sculptors in the study, so no model judges its own work.
 export const JUDGE_MODEL: ModelKey = 'sonnet'
 export const IMAGE_MODEL: ModelKey = 'image'
 
-interface Price {
+export interface Price {
   // USD per 1M tokens.
   input: number
   output: number

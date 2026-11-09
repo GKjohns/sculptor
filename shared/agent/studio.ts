@@ -3,19 +3,19 @@
 // here touches the DOM or Node; PNG encoding is handed in.
 
 import { DENSITY, stoneMassKg } from '../sculpt/grid.ts'
-import { chisel, rasp, roughOut, saw, silhouetteForm } from '../sculpt/hand.ts'
+import { chisel, drill, polish, rasp, roughOut, saw, silhouetteForm, sketch } from '../sculpt/hand.ts'
 import type { PassResult, RulerPoint } from '../sculpt/hand.ts'
-import { measureAll } from '../sculpt/measure.ts'
+import { SLICE_VIEW, measureAll, measureSlice, surfaceFinish } from '../sculpt/measure.ts'
 import type { Mask, SideView } from '../sculpt/measure.ts'
-import { renderContactSheet } from '../sculpt/observer.ts'
+import { renderCloseup, renderContactSheet, renderSlice } from '../sculpt/observer.ts'
 import type { Image, ImageLike, Overlay } from '../sculpt/observer.ts'
 import { compileForm, declareForm, formDistance } from '../sculpt/shapes.ts'
 import { applyStrike } from '../sculpt/strike.ts'
 import { KERNEL_VERSION } from '../sculpt/version.ts'
 import type { ViewId } from '../sculpt/views.ts'
-import type { Form, FormStrike, Grid, Shape, Strike } from '../sculpt/types.ts'
-import { REFERENCE_TARGET } from './toolSchemas.ts'
-import type { ChiselArgs, DeclareFormArgs, LookArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, StudioCall, ViewPoint } from './toolSchemas.ts'
+import type { Form, FormStrike, Grid, Shape, SketchStrike, Strike } from '../sculpt/types.ts'
+import { NO_PROTECT, REFERENCE_TARGET } from './toolSchemas.ts'
+import type { ChiselArgs, CloseupArgs, DeclareFormArgs, DrillArgs, LookArgs, PolishArgs, RaspArgs, RoughOutArgs, SawArgs, ShapeArgs, SketchArgs, SliceArgs, StudioCall, ViewPoint } from './toolSchemas.ts'
 import type { Studio, StudioResult, ToolCall } from './types.ts'
 
 type Sides<T> = Partial<Record<SideView, T>>
@@ -54,6 +54,8 @@ export interface KernelStudio extends Studio {
   log(): StrikeLog
   // The forms the model declared, by name, in the order it first declared them.
   forms(): string[]
+  // The charcoal lines drawn so far, oldest first: the log's own `sketch` entries.
+  sketches(): SketchStrike[]
   // The numbers a look reports, without rendering anything.
   measure(overlay?: Overlay): Record<string, number>
   // A contact sheet outside the conversation (the judge's, the report's).
@@ -133,6 +135,7 @@ export function createStudio(opts: StudioOptions): KernelStudio {
   for (const s of strikes) {
     if (s.kind === 'form' && s.name !== REFERENCE_TARGET && !declared.includes(s.name)) declared.push(s.name)
   }
+  const drawn: SketchStrike[] = strikes.filter(s => s.kind === 'sketch')
   const ref = opts.reference ?? null
   const front = ref?.ok ? ref.masks?.front : undefined
   const left = ref?.ok ? ref.masks?.left : undefined
@@ -148,11 +151,14 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     ...(overlay === 'reference' && outlines ? { outlines: { front: outlines.front, left: outlines.left } } : {})
   })
 
-  const render = (views: ViewId[], overlay: Overlay = 'grid'): Image => renderContactSheet(grid, views, {
+  const lookOptions = (overlay: Overlay) => ({
     overlay,
     forms: declared,
+    sketches: drawn,
     ...(overlay === 'reference' && outlines ? { reference: { tiles, outlines } } : {})
   })
+
+  const render = (views: ViewId[], overlay: Overlay = 'grid'): Image => renderContactSheet(grid, views, lookOptions(overlay))
 
   // Closes a pass: refusals throw (nothing was cut), everything else is logged and described.
   const settle = (pass: PassResult, extra: Record<string, number> = {}): StudioResult => {
@@ -190,6 +196,62 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       numbers: measure(a.overlay),
       images: [png],
       strikes: []
+    }
+  }
+
+  const closeup = async (a: CloseupArgs): Promise<StudioResult> => {
+    if (a.overlay === 'reference' && !outlines) throw new Error('there are no reference outlines in this commission; use the grid overlay')
+    const shot = renderCloseup(grid, a.view, [a.center.h, a.center.v], a.span_cm, lookOptions(a.overlay))
+    const png = await opts.encodeImage(shot.image)
+    const axis = shot.axis.toUpperCase()
+    const numbers: Record<string, number> = { window_stone_pct: r1(100 * shot.stoneShare) }
+    let summary = `Close-up of the ${a.view} view, ${r1(a.span_cm)} cm across, centred on (${r1(a.center.h)}, ${r1(a.center.v)}), with the ${a.overlay} overlay and a grid line every centimetre.`
+    if (shot.stoneShare === 0) {
+      summary += ' There is no stone in that window.'
+    } else {
+      numbers[`surface_${shot.axis}_min_cm`] = r1(shot.surfaceMin)
+      numbers[`surface_${shot.axis}_max_cm`] = r1(shot.surfaceMax)
+      numbers.relief_cm = r1(shot.surfaceMax - shot.surfaceMin)
+      summary += ` The surface in the window lies between ${axis} ${r1(shot.surfaceMin)} and ${axis} ${r1(shot.surfaceMax)}.`
+    }
+    if (shot.proudMax !== undefined && shot.belowMax !== undefined) {
+      numbers.window_proud_max_cm = r1(shot.proudMax)
+      numbers.window_below_form_max_cm = r1(shot.belowMax)
+    }
+    const note = a.overlay === 'form' && declared.length === 0 ? ' No form is declared yet, so the form overlay shows the plain stone.' : LEGEND[a.overlay]
+    return { summary: summary + note, numbers, images: [png], strikes: [] }
+  }
+
+  const slice = async (a: SliceArgs): Promise<StudioResult> => {
+    const [w, h, d] = grid.size
+    const span = a.axis === 'y' ? [0, h] : a.axis === 'x' ? [-w / 2, w / 2] : [-d / 2, d / 2]
+    if (a.at_cm < span[0]! || a.at_cm > span[1]!) throw new Error(`the block runs from ${span[0]} to ${span[1]} on ${a.axis.toUpperCase()}; ${a.at_cm} is outside it`)
+    const both = outlines ? { outlines: { front: outlines.front!, left: outlines.left! } } : {}
+    const numbers = measureSlice(grid, a.axis, a.at_cm, { forms: declared, ...both })
+    const png = await opts.encodeImage(renderSlice(grid, a.axis, a.at_cm, { forms: declared, ...both }))
+    const seen = a.axis === 'y'
+      ? 'from above (X across, Z down the image, the front at the bottom)'
+      : a.axis === 'x' ? 'from the left (Z across with the front on the right, Y up)' : 'from the front (X across, Y up)'
+    let summary = `Slice at ${a.axis.toUpperCase()} ${r1(a.at_cm)}, seen ${seen}, under the ${SLICE_VIEW[a.axis]} view's rulers.`
+    summary += numbers.section_area_cm2 === 0
+      ? ' The plane meets no stone there.'
+      : ` The stone's section there is ${Math.round(numbers.section_area_cm2!)} cm².`
+    if (declared.length > 0) summary += ' Colours: cyan line = your forms in this plane; stone tinted yellow, orange, red = outside the form (still to remove); violet = form with no stone.'
+    if (outlines) summary += ' Pink line = the reference\'s front and left outlines pushed through the block.'
+    return { summary, numbers, images: [png], strikes: [] }
+  }
+
+  const draw = (a: SketchArgs): StudioResult => {
+    const pass = sketch(grid, { view: a.view, path: a.path.map(pt) })
+    if (pass.error) throw new Error(pass.error)
+    for (const s of pass.strikes) {
+      strikes.push(s)
+      if (s.kind === 'sketch') drawn.push(s)
+    }
+    return {
+      summary: pass.summary,
+      numbers: { line_on_stone_cm: r1(pass.line?.drawnCm ?? 0), line_off_stone_cm: r1(pass.line?.missedCm ?? 0), lines_drawn: drawn.length },
+      strikes: pass.strikes
     }
   }
 
@@ -242,6 +304,9 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     const call = raw as StudioCall
     switch (call.name) {
       case 'look': return look(call.args)
+      case 'closeup': return closeup(call.args)
+      case 'slice': return slice(call.args)
+      case 'sketch': return draw(call.args)
       case 'declare_form': return declare(call.args)
       case 'rough_out': return rough(call.args)
       case 'saw': {
@@ -250,8 +315,20 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       }
       case 'chisel': {
         const a: ChiselArgs = call.args
-        const pass = chisel(grid, { tool: a.tool, view: a.view, path: a.path.map(pt), depth_cm: a.depth_cm, width_cm: a.width_cm })
+        const keep = a.protect !== undefined && a.protect !== NO_PROTECT ? a.protect : undefined
+        if (keep !== undefined && !declared.includes(keep)) throw new Error(`no form named "${keep}" has been declared${declared.length ? `; your forms: ${declared.map(n => `"${n}"`).join(', ')}` : ''}. Pass protect "${NO_PROTECT}" to cut without protecting a form`)
+        const pass = chisel(grid, { tool: a.tool, view: a.view, path: a.path.map(pt), depth_cm: a.depth_cm, width_cm: a.width_cm, ...(keep !== undefined ? { protect: keep } : {}) })
         return settle(pass, landed(pass))
+      }
+      case 'drill': {
+        const a: DrillArgs = call.args
+        const pass = drill(grid, { view: a.view, at: pt(a.at), diameter_cm: a.diameter_cm, depth_cm: a.depth_cm })
+        return settle(pass, { ...landed(pass), ...(pass.bore ? { depth_reached_cm: r1(pass.bore.depthCm), broke_through: pass.bore.through ? 1 : 0 } : {}) })
+      }
+      case 'polish': {
+        const a: PolishArgs = call.args
+        const pass = polish(grid, { view: a.view, path: a.path.map(pt), width_cm: a.width_cm, passes: a.passes })
+        return settle(pass, { ...landed(pass), ...(pass.sheen ? { finish_before: pass.sheen.before, finish_after: pass.sheen.after } : {}), surface_polished_pct: r1(100 * surfaceFinish(grid).polished) })
       }
       case 'rasp': {
         const a: RaspArgs = call.args
@@ -273,6 +350,7 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       strikes
     }),
     forms: () => declared.slice(),
+    sketches: () => drawn.slice(),
     measure,
     render
   }

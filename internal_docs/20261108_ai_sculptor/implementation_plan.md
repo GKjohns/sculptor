@@ -1,7 +1,7 @@
 # Sculptor — Implementation Plan
 
 **Created:** November 8, 2026
-**Status:** In Progress — Sprint 1 complete, Sprint 2 next (approved by Kyle November 8, 2026)
+**Status:** In Progress — Sprints 1 to 3 complete (gate passed November 9, 2026); Sprint 4 next
 **Context:** Kyle wants an AI that carves a virtual block of marble the way a sculptor does: it knocks stone off with different tools, walks around the piece, thinks, and goes back in. He wants to watch it happen live and have it look like a film.
 
 **Goal:** Type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export.
@@ -308,7 +308,7 @@ The reference sheet has no frame on purpose: the person watching never sees it.
 
 ---
 
-### Sprint 2: The sculptor, and the gate `[Not Started]`
+### Sprint 2: The sculptor, and the gate `[Complete]`
 **Goal:** Know whether models can carve recognisable things, with which tools, and whether a reference image helps, before building the theatre.
 **Estimated effort:** 9–12 hours, plus up to $100 of model spend
 
@@ -328,14 +328,55 @@ The reference sheet has no frame on purpose: the person watching never sees it.
 - 2.7 Tests — `tests/hand.test.ts` (a rough-out to an ellipsoid leaves the ellipsoid plus margin and nothing else), `tests/loop.test.ts` (a scripted Brain drives a full loop), `tests/reference.test.ts`.
 
 #### Verification
-- [ ] `npm run bench:sculpt -- --subject pawn --model opus` completes and writes a contact sheet.
-- [ ] `report.html` exists and covers all three rounds.
-- [ ] The report answers the reference question plainly: per subject, with and without, the judge's pick, the measured agreement, and the cost difference.
-- [ ] **Gate, with Kyle.** Pass means: for at least one configuration the judge picks correctly for both the cat and the bust, the bust reads as a head and shoulders to a person, and that run cost under $8. Then lock the tool set, the default model and whether the reference is on by default. Simple subjects are deliberately not part of the gate, because declaring a sphere as a form and roughing to it only tests the hand. If the gate fails, the fallback is to lean harder on forms and the reference (more and finer shapes, outlines from all four quadrants) and re-run before any studio work.
+- [x] `npm run bench:sculpt -- --subject pawn --model opus` completes and writes a contact sheet. First real run: Opus 5.5, formed tools, no reference, 11 turns, $0.33, judge picked "chess pawn" at 0.97, strike log replays to the same hash (`verification/screenshots/sprint2_smoke_pawn_opus.webp`).
+- [x] `report.html` exists and covers all three rounds: [study/report.html](study/report.html), 16 runs, $17.88 of the $100 cap.
+- [x] The report answers the reference question plainly: per subject, with and without, the judge's pick, the measured agreement, and the cost difference.
+
+#### Study results (November 9, 2026)
+
+| Round | Subject | Model | Tools | Ref | Turns | Cost | Judge | Person's read (independent reviewer, 1–5) |
+|---|---|---|---|---|---|---|---|---|
+| A | pawn | Opus 5.5 | direct | – | 22 | $2.07 | pawn ✓ 0.90 | 3: pawn silhouette under spiky texture |
+| A | pawn | Opus 5.5 | formed | – | 12 | $0.37 | pawn ✓ 0.97 | 5: clean pawn |
+| A | cat | Opus 5.5 | direct | – | 45 | $2.26 | owl ✗ | 1: barely touched block |
+| A | cat | Opus 5.5 | formed | – | 9 | $0.37 | rabbit ✗ | 2: sitting snowman-cat, not a loaf |
+| A | bust | Opus 5.5 | direct | – | 54 | $2.01 | bottle ✗ | 1: square decanter |
+| A | bust | Opus 5.5 | formed | – | 19 | $0.82 | bust ✓ 0.80 | 2: egg on a box, no neck |
+| B | pawn | Opus 5.5 | formed | on | 14 | $0.72 | pawn ✓ 0.97 | 5: best pawn, waist and stepped base |
+| B | cat | Opus 5.5 | formed | on | 15 | $0.69 | cat ✓ 0.70 | 3: correct loaf on a tall pedestal, ears shattered |
+| B | bust | Opus 5.5 | formed | on | 35 | $1.07 | bust ✓ 0.93 | 3: head with ears on a bulb body, face cratered |
+| C | cat | Fable 5.1 | formed | on | 34 | $2.05 | cat ✓ 0.60 | 2: loaf body, head gouged hollow |
+| C | bust | Fable 5.1 | formed | on | 16 | $1.95 | bust ✓ 0.80 | 3: skull-faced head on a mound |
+| C | cat | GPT-6 Sol | formed | on | 58 | $0.58 | cat ✓ 0.60 | 3: best-made, but round bear ears |
+| C | bust | GPT-6 Sol | formed | on | 59 | $0.54 | bust ✓ 0.96 | 4: mannequin head, neck, shoulders, plinth |
+| C | cat | Gemini 3.1 Pro | formed | on | 15 | $0.73 | cat ✓ 0.80 | 4: unmistakable cartoon cat, pitted |
+| C | bust | Gemini 3.1 Pro | formed | on | 31 | $1.16 | pawn ✗ | 1: pitted totem on a pedestal |
+
+What the study says:
+- **Tool set: formed.** Stroke-only carving never got past roughing on the cat or the bust and cost two to five times as much.
+- **Reference: on.** It turned the cat from a wrong pose into the right one and made the bust fuller, for $0.25–0.35 more per run. Its cost: sculptors copy whatever the sheet draws, including a pedestal that eats half the height.
+- **Model:** GPT-6 Sol made the best bust and the best-made cat, at the lowest cost, by using nearly all 60 turns; it is also the slowest to watch (14–21 minutes). Opus 5.5 is the fastest (3–5 minutes) and good at masses but wrecked faces and ears with fine chiselling. Fable 5.1 cost about $2 a run without doing better. Gemini 3.1 Pro made the most recognisable cat and the worst bust. Native tool calling worked on all four; the JSON-lines fallback was never needed.
+- **The automatic gate criteria pass** for Opus, Fable and Sol with formed tools and a reference (judge correct on both cat and bust, every run under $2.10). The best bust (Sol) reads as a head and shoulders; it is a crude mannequin, not a portrait.
+- **Problems that showed up across runs:** fine chisel work destroys faces more often than it makes them; every run ended by the model's own choice, often very early (Opus stopped a cat at 9 of 60 turns); necks go missing and shoulders come out as bulbs; vertical comb ridges on nearly every surface; pieces left at half the block's height; the automated judge is lenient (0.93 for a bust with a cratered face); and the sculptor's finish statements describe features the stone does not have.
+- [x] **Gate passed, November 9, 2026.** Kyle's decisions: **full (formed) tool set, reference on by default, Opus 5.5 as the default model**, with Fable 5.1, GPT-6 Sol and Gemini 3.1 Pro in the picker. (GPT-6 Sol made the best pieces in the study; Opus was chosen for its 3–5 minute pace. Its two weaknesses — stopping early and wrecking faces with fine chiselling — get one bounded prompt-tuning pass at the start of Sprint 3.) The original criteria, for the record: pass means: for at least one configuration the judge picks correctly for both the cat and the bust, the bust reads as a head and shoulders to a person, and that run cost under $8. Then lock the tool set, the default model and whether the reference is on by default. Simple subjects are deliberately not part of the gate, because declaring a sphere as a form and roughing to it only tests the hand. If the gate fails, the fallback is to lean harder on forms and the reference (more and finer shapes, outlines from all four quadrants) and re-run before any studio work.
+
+#### Results and deviations
+- Code complete, 120 tests. Commands: `npm run bench:sculpt -- --subject cat --model opus --tools formed --ref off`, `npm run bench:study -- --round A|B|C [--tools X] [--ref on|off]`, `npm run bench:report`. Runs land in `.data/study/<run-id>/` (gitignored); the report is written to `study/report.html` in this folder.
+- **Gateway key.** `sculptor-100` was minted with the Vercel CLI on the `gkjohns-projects` team: $100 hard cap, 30-day expiry. The bench also keeps its own study-wide ledger and refuses to start a run that could pass $100.
+- **Kernel version 2.** Added the claw, a per-strike `margin` on protected cuts, and silhouette forms (two outlines pushed through the block, logged as a `form` entry so replays stay exact).
+- **A full rough-out** of the default block is about 15 saw cuts plus 1,400 chisel strikes, computed in about 2 s, leaving stone a mean 0.5–0.7 cm proud of the margin. No protected voxel was removed in any test.
+- **`rough_out` refuses a target that floats** or has a part not joined to the rest, since the island check would otherwise drop the target itself.
+- **The rasp was rewritten.** The first version only lowered convex high spots and could not smooth point-chisel pits. It now levels ridges toward the local pit floor, removal only: five passes take a real rough-out from 0.23 cm to 0.05 cm RMS roughness.
+- **Look overlays.** With `form`, stone proud of the form is tinted yellow through red, overcut is blue, the form outline is cyan. A six-view sheet is about 1234 × 1273 px and renders in about 200 ms.
+- **Reference sheets** scale each view to the same height in block cm (a shared pixel scale would shave the top when generated views differ slightly). Back and right outlines are the mirrored front and left ones.
+- **The judge sees two sheets**: the six-view sheet with rulers and four three-quarter views. Never the reference or the commission.
+- **Loop additions beyond the plan's seams:** a run ends as `stalled` after three turns with no tool call; budget warnings at 75% and 90% and a final-turn notice; invalid arguments come back to the model as an error result; the 90 s deadline and single retry live in the loop, not the Brain.
+- **Cost accounting** charges the larger of the price table and the gateway's own figure. `--max-usd` includes the reference and judge calls.
+- Not yet exercised with real calls: native tool calling on GPT-6 Sol and Gemini 3.1 Pro (Round C), and the JSON-lines fallback.
 
 ---
 
-### Sprint 3: The live studio `[Not Started]`
+### Sprint 3: The live studio `[Complete]`
 **Goal:** Type a commission in the browser and watch it carved live with the storyboard's HUD, on Sprint 1's plain render.
 **Estimated effort:** 7–9 hours
 
@@ -358,10 +399,21 @@ The reference sheet has no frame on purpose: the person watching never sees it.
   - Strike log, pass record, notebook, costs, settings and reference sheet saved as JSON under `.data/sessions/` as the commission runs. Loading a session replays the log to any chosen pass. This gives resume after a reload, and it gives Sprint 4 fixed stones to tune the look against.
 
 #### Verification
-- [ ] A full commission runs start to finish in the browser with no manual steps.
-- [ ] Screenshots of the HUD for storyboard frames 1 to 4. The HUD matches the frames; the scene is still the plain render.
-- [ ] Reloading mid-commission restores the stone exactly (grid hash matches) and the sculptor carries on; time to replay a 10,000-strike log is measured and written here.
-- [ ] The stats bar's cost matches the gateway's reported spend within 5%.
+- [x] A full commission runs start to finish in the browser with no manual steps. "A chess pawn", Opus 5.5, speed 8, WebGPU: 20 turns, $1.09, 293 s, title "Pawn"; true and shown hashes equal; the saved log replays in Node to the same hash. The screen ran at most 20.5 s behind and finished 24 s after the model.
+- [x] Screenshots of the HUD for storyboard frames 1 to 4: `verification/screenshots/sprint3_live_*.webp` (live) and `sprint3_hud_frame*.webp` (mock preview at `/hud`). The scene is still the plain render.
+- [x] Reloading mid-commission restores the stone exactly and the sculptor carries on: "a sleeping cat curled in a loaf" was killed during turn 7, restored from `?session=` to the saved hash, and finished as "Loaf" at turn 49 ($1.58). Replaying a 10,218-strike log takes 5.8 s; a 13,547-entry new-format log takes 9.1 s.
+- [x] The stats bar's cost equals the sum of the server's per-turn cost plus the reference, and the server's priced cost equalled the gateway's own figure on every verified turn.
+
+#### Results and deviations
+- **Watch a finished run:** `/?replay` lists every study run and saved session; `?replay=<id>&speed=1|8|30|120|max`, `&at=end`. **Watch a new one:** type a commission on `/`. **Resume or inspect:** `?session=<id>` and `&pass=<n>`. HUD mock preview: `/hud`.
+- **Opus prompt tuning (one bounded pass, $3.68).** Features are declared as small shapes in the form and roughed to at a fine margin; chisel strokes are for hollows only; a pacing rule and finish checklist; fill the block and keep the plinth low; the statement is written from the last look. Result on the bust: full height, a real neck, square shoulders, and a face with brow, nose, eyes, mouth and intact ears (34 turns, $1.29, judge 0.96), against the study's helmeted head with a cratered face. Still a caricature. Early stopping is improved, not fixed (the cat stopped at 24 turns and 59 cm).
+- **Tools added:** `drill`, `chisel` with `roundel` (and a required `protect` argument), `polish` (looks now report surface finish percentages), `slice`, `sketch`, and — beyond the plan — `closeup`, a zoomed axis view with a 1 cm grid. All 16 study logs still replay to their recorded hashes; kernel version stays 2.
+- **Hanging stone.** Kyle noticed pieces floating in mid-air: the island check only ran at the end of a pass. New passes log a check after every saw cut and every 2 s of carving (longest hang went from 580–911 strikes to 4–5). For older logs, the browser keeps the shown stone log-exact and, only while a piece hangs, meshes a display copy in which it has already fallen; the copy is reconciled at the pass's own check. Running extra checks on the real grid was tried first and rejected: it changed 3–12 voxels by the end of a run.
+- **Two kernel workers, one per stone,** and a third worker for `/api/brain`. In one worker the hand froze playback for up to 2.7 s per rough-out; posting the growing context from the page cost a 67–358 ms frame per turn.
+- **Pacing rule:** playback rate = backlog ÷ drain time, clamped between a floor and 8× the chosen speed and eased over 0.5 s; the loop is held at its next tool call while paused or more than 60 s behind.
+- **Sessions** are files under `.data/sessions/<id>/` with an append-only `strikes.ndjson`. Request bodies to `/api/brain` are capped at 24 MB; a Vercel deploy will need WebP looks to fit its 4.5 MB function limit (Sprint 5).
+- **HUD departures from the storyboard:** no "Sketch" stage (the loop has none), speed stops 1/4/8/20/60 on a slider, the overlay in the eye panel is a badge, scrubber and export wait for Sprint 5.
+- **Known rough edges:** about 27 s of dead air before the first cut (the opening look was lengthened afterwards and not re-measured); a turn in flight at reload is paid for but lost; charcoal sketches are wiped at the next cutting pass, not faded where carved; restored sessions show past looks without images; each of a new log's frequent checks costs a full island check on the shown stone; the model picker shows the short key ("opus") and the Nuxt DevTools pill overlaps the transport in dev.
 
 ---
 

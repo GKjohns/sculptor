@@ -58,9 +58,9 @@ export interface StudioResult {
 }
 
 export interface Studio {
-  // Executes one tool call against the true stone. The loop only sends `look`, `declare_form`,
-  // `rough_out`, `saw`, `chisel` and `rasp`, with `args` already validated against the schema
-  // (cast the call to StudioCall from toolSchemas.ts). `note` and `finish` never arrive here.
+  // Executes one tool call against the true stone. The loop sends the looking tools (LOOK_TOOLS)
+  // and the pass tools (PASS_TOOLS), with `args` already validated against the schema (cast
+  // the call to StudioCall from toolSchemas.ts). `note` and `finish` never arrive here.
   // Throw to refuse a call ("no form named torso"): the message goes back to the model as an
   // error result and the pass is not recorded, so a throw must leave the stone untouched.
   run(call: ToolCall): Promise<StudioResult>
@@ -76,12 +76,17 @@ export type ReferenceMode = 'none' | 'view' | 'outlines'
 export const STAGES = ['rough_out', 'block_in', 'model', 'refine', 'polish'] as const
 export type Stage = typeof STAGES[number]
 
-// Tools whose calls go in the pass record. `declare_form` cuts nothing but is in the record,
-// because after a rebuild it is the only trace of which forms exist.
-export const PASS_TOOLS = ['declare_form', 'rough_out', 'saw', 'chisel', 'rasp'] as const
+// Tools whose calls go in the pass record. `declare_form` and `sketch` cut nothing but are in
+// the record, because after a rebuild it is the only trace of which forms and lines exist.
+export const PASS_TOOLS = ['sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish'] as const
 export type PassTool = typeof PASS_TOOLS[number]
 
-export const TOOL_NAMES = ['look', 'declare_form', 'rough_out', 'saw', 'chisel', 'rasp', 'note', 'finish'] as const
+// Tools that answer with an image. Only `look` shows the whole stone, so only `look` counts
+// as having looked.
+export const LOOK_TOOLS = ['look', 'closeup', 'slice'] as const
+export type LookTool = typeof LOOK_TOOLS[number]
+
+export const TOOL_NAMES = ['look', 'closeup', 'slice', 'sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'] as const
 export type ToolName = typeof TOOL_NAMES[number]
 
 export interface Block {
@@ -180,7 +185,9 @@ export type LoopEvent
     | { type: 'tool_call', turn: number, call: ToolCall, why?: string }
     | { type: 'tool_result', turn: number, call: ToolCall, ok: boolean, summary: string, numbers?: Record<string, number>, strikes: Strike[], strikeCount: number, pass?: PassRecord }
   // auto: the loop's own look for a rebuild, not one the model asked for. turn is then the last turn taken.
-    | { type: 'look', turn: number, auto: boolean, views: string[], overlay: string, images: Uint8Array[], summary: string, numbers?: Record<string, number> }
+  // tool is absent for a plain look. A closeup names its one view; a slice names the axis view
+  // it is drawn as (top, front or left) and has overlay 'slice'. args are the call's own.
+    | { type: 'look', turn: number, auto: boolean, views: string[], overlay: string, images: Uint8Array[], summary: string, numbers?: Record<string, number>, tool?: LookTool, args?: Record<string, unknown> }
     | { type: 'note', turn: number, notebook: Notebook }
   // The context was rebuilt from the notebook and pass record. reason says why.
     | { type: 'rebuild', turn: number, reason: 'start' | 'resume' | 'interval', messages: Message[] }

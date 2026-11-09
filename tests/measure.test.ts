@@ -5,8 +5,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createGrid } from '../shared/sculpt/grid.ts'
+import { polish, rasp } from '../shared/sculpt/hand.ts'
 import {
-  blockToMask, maskCovers, maskToBlock, measureAll, proudOfForm, silhouetteAgreement, stoneBounds, stoneSilhouette
+  blockToMask, maskCovers, maskToBlock, measureAll, measureSlice, proudOfForm, silhouetteAgreement, stoneBounds, stoneSilhouette, surfaceFinish
 } from '../shared/sculpt/measure.ts'
 import type { Mask } from '../shared/sculpt/measure.ts'
 import { compileForm } from '../shared/sculpt/shapes.ts'
@@ -288,4 +289,68 @@ test('measureAll reports forms and outlines only when they exist, rounded', () =
   assert.equal(measureAll(grid, { forms: ['ball', 'nope'] }).form_proud_max_cm, m.form_proud_max_cm)
   // Same stone, same numbers.
   assert.deepEqual(measureAll(grid, { outlines: { left: outline } }), m)
+})
+
+test('the surface is counted by finish, so a polish shows in the numbers', () => {
+  const grid = createGrid({ width: 20, height: 20, depth: 20 })
+  // A fresh block is sawn on every face: neither rough, rasped nor polished.
+  assert.deepEqual(surfaceFinish(grid), { rough: 0, tooled: 1, rasped: 0, polished: 0, mean: 90 })
+  const fresh = measureAll(grid)
+  assert.deepEqual([fresh.surface_rough_pct, fresh.surface_rasped_pct, fresh.surface_polished_pct], [0, 0, 0])
+
+  // Point work on the front, the rasp over the top, polish over half of that.
+  for (let x = -8; x <= 8; x += 2) {
+    for (let y = 2; y <= 18; y += 2) applyStrike(grid, { kind: 'cut', tool: 'point', at: [x, y, 10], dir: [0, 0, -1], size: 3, depth: 1, seed: x * 31 + y, ms: 1 })
+  }
+  for (let z = -8; z <= 8; z += 4) rasp(grid, { view: 'top', path: [[-8, z], [8, z]], width_cm: 5, passes: 1 })
+  const worked = surfaceFinish(grid)
+  // Five faces of 400 cm² can be carved; one is rough and one rasped.
+  assert.ok(Math.abs(worked.rough - 0.2) < 0.05 && Math.abs(worked.rasped - 0.2) < 0.05 && worked.polished === 0, JSON.stringify(worked))
+  for (let z = -8; z <= 0; z += 2) polish(grid, { view: 'top', path: [[-8, z], [8, z]], width_cm: 5, passes: 4 })
+  const shone = surfaceFinish(grid)
+  assert.ok(shone.polished > 0.07 && shone.polished < 0.15 && shone.rasped < worked.rasped && shone.mean > worked.mean, JSON.stringify(shone))
+  assert.ok(Math.abs(shone.rough + shone.tooled + shone.rasped + shone.polished - 1) < 1e-9)
+  assert.equal(shone.rough, worked.rough)
+  const m = measureAll(grid)
+  assert.ok(Math.abs(m.surface_polished_pct! - 100 * shone.polished) < 0.06 && m.surface_rough_pct! > 15)
+})
+
+test('a slice measures the section of the stone, its form and the reference in one plane', () => {
+  const grid = post()
+  // Level, through the post: 10 × 8 cm, where the top view's rulers say it is.
+  const level = measureSlice(grid, 'y', 40)
+  assert.ok(Math.abs(level.section_area_cm2! - 80) < 1.5, `area ${level.section_area_cm2}`)
+  assert.deepEqual([level.section_x_min_cm, level.section_x_max_cm, level.section_z_min_cm, level.section_z_max_cm], [10, 20, 6, 14])
+  // Above the post, and beside it, the plane meets nothing and reports no extent.
+  assert.deepEqual(measureSlice(grid, 'y', 90), { section_area_cm2: 0 })
+  assert.deepEqual(measureSlice(grid, 'x', 0), { section_area_cm2: 0 })
+  // Upright through it: front to back is Z across and Y up, facing the viewer is X across.
+  const profile = measureSlice(grid, 'x', 15)
+  assert.ok(Math.abs(profile.section_area_cm2! - 640) < 8)
+  assert.deepEqual([profile.section_z_min_cm, profile.section_z_max_cm, profile.section_y_min_cm, profile.section_y_max_cm], [6, 14, 0, 80])
+  const facing = measureSlice(grid, 'z', 10)
+  assert.ok(Math.abs(facing.section_area_cm2! - 800) < 8)
+  assert.deepEqual([facing.section_x_min_cm, facing.section_x_max_cm, facing.section_y_min_cm, facing.section_y_max_cm], [10, 20, 0, 80])
+
+  // Against a ball of radius 6 at the post's middle: its section is a disc, the post covers
+  // all of it at the centre plane, and the corners of the post stand outside.
+  applyStrike(grid, { kind: 'form', name: 'ball', shapes: [{ kind: 'ellipsoid', center: [15, 40, 10], size: [12, 12, 12], rotation: [0, 0, 0] }], blend: 0 })
+  const fit = measureSlice(grid, 'y', 40)
+  // The post is 10 × 8 cm, so the 12 cm disc loses a segment on each of its four sides:
+  // about 12.4 cm² front and back, 4.5 cm² left and right.
+  assert.ok(Math.abs(fit.section_form_area_cm2! - Math.PI * 36) < 2, `form ${fit.section_form_area_cm2}`)
+  assert.ok(Math.abs(fit.section_form_without_stone_cm2! - 33.8) < 3, `missing ${fit.section_form_without_stone_cm2}`)
+  assert.ok(Math.abs(fit.section_stone_outside_form_cm2! - (80 - (Math.PI * 36 - fit.section_form_without_stone_cm2!))) < 2)
+  assert.ok(fit.section_proud_max_cm! > 0.2 && fit.section_proud_max_cm! < 1)
+  assert.equal('section_form_area_cm2' in measureSlice(grid, 'y', 40, { forms: [] }), false)
+
+  // The reference is its two outlines pushed through the block: here X > 12 and Z < 10.
+  const outlines = {
+    front: maskWhere(grid, 'front', 150, 250, h => h > 12),
+    left: maskWhere(grid, 'left', 150, 250, h => h < 10)
+  }
+  const ref = measureSlice(grid, 'y', 40, { outlines, forms: [] })
+  assert.ok(Math.abs(ref.section_reference_area_cm2! - 18 * 40) < 12, `reference ${ref.section_reference_area_cm2}`)
+  // Of the post's 80 cm², the part with X 12..20 and Z 6..10 is inside: 32.
+  assert.ok(Math.abs(ref.section_stone_outside_reference_cm2! - 48) < 3, `outside ${ref.section_stone_outside_reference_cm2}`)
 })

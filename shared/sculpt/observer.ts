@@ -1,10 +1,10 @@
 import { Q_MAX } from './grid.ts'
-import { blockToMask } from './measure.ts'
-import type { Mask, SideView } from './measure.ts'
+import { SLICE_VIEW, blockToMask, maskCovers } from './measure.ts'
+import type { Mask, SideView, SliceAxis } from './measure.ts'
 import { sampleDistance } from './raycast.ts'
 import { formDistance } from './shapes.ts'
 import { VIEWS, isAxisView } from './views.ts'
-import type { ViewId } from './views.ts'
+import type { AxisView, ViewId } from './views.ts'
 import type { CompiledForm, Grid, GridInfo, Vec3 } from './types.ts'
 
 // The sculptor's eye: a software renderer over the grid. It returns RGBA and nothing else;
@@ -33,6 +33,10 @@ export interface ReferenceInput {
   outlines?: Partial<Record<SideView, Mask>>
 }
 
+// Charcoal lines to draw on the stone: a `sketch` log entry fits. Each stroke is a run of
+// points on the surface as it stood when the line was drawn, block cm.
+export interface SketchMarks { view: ViewId, strokes: Vec3[][] }
+
 export interface LookOptions {
   overlay?: Overlay
   // Scale of every tile, the same in all of them. 5 gives a six-view sheet of about
@@ -43,6 +47,10 @@ export interface LookOptions {
   // Names of declared forms to draw, as one union. Default: every form on the grid.
   forms?: string[]
   reference?: ReferenceInput
+  // Drawn in every view where the stone they were drawn on is still the surface in sight.
+  // In the view a line was drawn from, the stretches whose stone has since been cut away
+  // stay on as a faint ghost, so a profile outlives the face it was drawn on.
+  sketches?: SketchMarks[]
 }
 
 export interface TileLayout {
@@ -59,6 +67,9 @@ export interface TileLayout {
   // h0 + h * hPerCm across and v0 + v * vPerCm down; the per-cm factors are signed, so
   // hPerCm is negative where the ruler increases to the left.
   ruler?: { hAxis: 'X' | 'Z', vAxis: 'Y' | 'Z', h0: number, hPerCm: number, v0: number, vPerCm: number }
+  // Close-ups only: the world point at the centre of the plot. Elsewhere it is the middle
+  // of the block.
+  origin?: Vec3
 }
 
 export interface SheetLayout {
@@ -85,6 +96,11 @@ const PROUD_FAR: RGB = [214, 44, 44]
 const CUT_NEAR: RGB = [96, 122, 255]
 const CUT_DEEP: RGB = [176, 72, 255]
 const LOST: RGB = [70, 58, 150]
+const CHARCOAL: RGB = [44, 42, 46]
+const GHOST: RGB = [110, 118, 140]
+const SECTION: RGB = [188, 184, 178]
+const SECTION_EDGE: RGB = [92, 88, 84]
+const HULL: RGB = [255, 120, 220]
 
 // Within a voxel of the form counts as on it.
 const ON_FORM_CM = 0.4
@@ -135,6 +151,7 @@ const GLYPHS: Record<string, string> = {
   'Z': '11111 00001 00010 00100 01000 10000 11111',
   '-': '00000 00000 00000 11111 00000 00000 00000',
   '+': '00000 00100 00100 11111 00100 00100 00000',
+  '=': '00000 00000 11111 00000 11111 00000 00000',
   '_': '00000 00000 00000 00000 00000 00000 11111',
   '.': '00000 00000 00000 00000 00000 01100 01100',
   ',': '00000 00000 00000 00000 01100 00100 01000',
@@ -323,10 +340,22 @@ function fitsFace(grid: GridInfo, view: SideView, tile: ImageLike): boolean {
 
 type Token = { text: string } | { swatch: RGB }
 
-function legendTokens(overlay: Overlay, targets: boolean, pxPerCm: number): Token[] {
-  const words = (text: string): Token[] => text.split(' ').map(word => ({ text: word }))
-  const minor = 5 * pxPerCm >= 8 ? 5 : 10
-  const out = words(`RULERS: BLOCK CM. GRID EVERY ${minor} CM.`)
+const words = (text: string): Token[] => text.split(' ').map(word => ({ text: word }))
+
+// Centimetres between grid lines, and between the ones that carry a number.
+function gridStep(pxPerCm: number): number {
+  return pxPerCm >= 12 ? 1 : 5 * pxPerCm >= 8 ? 5 : 10
+}
+
+function labelStep(pxPerCm: number): number {
+  const room = 4 * 6 * fontScale(pxPerCm)
+  for (const step of [1, 2, 5, 10]) if (step * pxPerCm >= room) return step
+  return 20
+}
+
+function legendTokens(overlay: Overlay, targets: boolean, pxPerCm: number, sketched = false): Token[] {
+  const out = words(`RULERS: BLOCK CM. GRID EVERY ${gridStep(pxPerCm)} CM.`)
+  if (sketched) out.push({ swatch: CHARCOAL }, { swatch: GHOST }, ...words('YOUR CHARCOAL LINES / WHERE THEIR STONE IS GONE.'))
   if (overlay === 'form') {
     if (!targets) return [...out, ...words('NO FORM DECLARED.')]
     out.push({ swatch: PROUD_NEAR }, { swatch: PROUD_MID }, { swatch: PROUD_FAR },
@@ -373,6 +402,10 @@ function targetsFor(grid: GridInfo & { forms?: Grid['forms'] }, views: ViewId[],
   if (opts.overlay === 'form') return pickForms(grid.forms, opts.forms).length > 0
   if (opts.overlay === 'reference') return views.some(view => isSide(view) && opts.reference?.outlines?.[view])
   return false
+}
+
+function sketched(opts: LookOptions): boolean {
+  return (opts.sketches?.length ?? 0) > 0
 }
 
 function pickForms(forms: Grid['forms'] | undefined, names: string[] | undefined): CompiledForm[] {
@@ -448,7 +481,7 @@ function arrange(grid: GridInfo, views: ViewId[], opts: LookOptions, pxPerCm: nu
     }
     y += rh + GAP
   }
-  const legend = flowLegend(legendTokens(opts.overlay ?? 'grid', targetsFor(grid, views, opts), pxPerCm), fontScale(pxPerCm), size.w - 2 * GAP)
+  const legend = flowLegend(legendTokens(opts.overlay ?? 'grid', targetsFor(grid, views, opts), pxPerCm, sketched(opts)), fontScale(pxPerCm), size.w - 2 * GAP)
   return { width: size.w, height: size.h + legend.height + GAP, pxPerCm, tiles, legendY: size.h }
 }
 
@@ -584,7 +617,7 @@ function newPlot(w: number, h: number): Plot {
 
 // Axis views: the first-stone table says where each column of samples meets stone, and a
 // pixel only has to walk the last sample or two between its four nearest columns.
-function traceAxis(grid: Grid, view: ViewId, w: number, h: number, pxPerCm: number): Plot {
+function traceAxis(grid: Grid, view: ViewId, w: number, h: number, pxPerCm: number, origin?: Vec3): Plot {
   const def = VIEWS[view]
   const hA = def.h!
   const vA = def.v!
@@ -602,8 +635,8 @@ function traceAxis(grid: Grid, view: ViewId, w: number, h: number, pxPerCm: numb
   const sv = stride[vA]!
   const step = fromHigh ? -stride[a]! : stride[a]!
   const base = fromHigh ? (na - 1) * stride[a]! : 0
-  const ch = 0
-  const cv = vA === 1 ? grid.size[1] / 2 : 0
+  const ch = origin ? origin[hA]! : 0
+  const cv = origin ? origin[vA]! : vA === 1 ? grid.size[1] / 2 : 0
   const rs = def.right[hA]!
   const us = def.up[vA]!
   const l = lights(view)
@@ -808,9 +841,9 @@ function unionDistance(forms: CompiledForm[], x: number, y: number, z: number): 
 // The form's silhouette in a view, one flag per plot pixel. The least distance to the form
 // along each ray is found on a coarse lattice and interpolated; that field is close to the
 // signed distance to the silhouette, so the interpolated edge is smooth.
-function formSilhouette(forms: CompiledForm[], grid: Grid, view: ViewId, w: number, h: number, pxPerCm: number): Uint8Array {
+function formSilhouette(forms: CompiledForm[], grid: Grid, view: ViewId, w: number, h: number, pxPerCm: number, origin?: Vec3): Uint8Array {
   const { right, up, look } = VIEWS[view]
-  const centre: Vec3 = [0, grid.size[1] / 2, 0]
+  const centre: Vec3 = origin ?? [0, grid.size[1] / 2, 0]
   const reach = Math.sqrt(grid.size[0] ** 2 + grid.size[1] ** 2 + grid.size[2] ** 2) / 2
   const cell = 4
   const lw = Math.ceil(w / cell) + 1
@@ -885,17 +918,22 @@ function drawRulers(img: Image, grid: GridInfo, tile: TileLayout, stone?: Uint8A
   const r = tile.ruler!
   const { plot, pxPerCm } = tile
   const f = fontScale(pxPerCm)
-  const minor = 5 * pxPerCm >= 8 ? 5 : 10
-  const labelEvery = 10 * pxPerCm >= 4 * 6 * f ? 10 : 20
+  const minor = gridStep(pxPerCm)
+  const labelEvery = labelStep(pxPerCm)
   const span = (axis: string): [number, number] => axis === 'Y'
     ? [0, grid.size[1]]
     : axis === 'X' ? [-grid.size[0] / 2, grid.size[0] / 2] : [-grid.size[2] / 2, grid.size[2] / 2]
   // The block's own edges are drawn strongest: they show how much has come off.
   const strength = (value: number, lo: number, hi: number): number =>
-    value === lo || value === hi ? 0.5 : value % 10 === 0 ? 0.3 : 0.14
+    value === lo || value === hi
+      ? 0.5
+      : value % 10 === 0 ? 0.3 : minor >= 5 ? 0.14 : value % 5 === 0 ? 0.2 : 0.08
+  // A close-up shows part of the block: lines are drawn only for what is in the plot.
+  const a = pixelToBlock(tile, plot.x, plot.y)
+  const b = pixelToBlock(tile, plot.x + plot.width, plot.y + plot.height)
 
   const [hLo, hHi] = span(r.hAxis)
-  for (let value = Math.ceil(hLo / minor) * minor; value <= hHi; value += minor) {
+  for (let value = Math.ceil(Math.max(hLo, Math.min(a[0], b[0])) / minor) * minor; value <= Math.min(hHi, Math.max(a[0], b[0])); value += minor) {
     const x = Math.min(plot.x + plot.width - 1, Math.max(plot.x, Math.floor(r.h0 + value * r.hPerCm)))
     const alpha = strength(value, hLo, hHi)
     for (let y = plot.y; y < plot.y + plot.height; y++) etch(img, x, y, alpha, stone?.[x - plot.x + (y - plot.y) * plot.width])
@@ -904,7 +942,7 @@ function drawRulers(img: Image, grid: GridInfo, tile: TileLayout, stone?: Uint8A
     drawText(img, x - Math.round(textWidth(text, f) / 2), plot.y + plot.height + 4, text, f, AXIS[r.hAxis]!)
   }
   const [vLo, vHi] = span(r.vAxis)
-  for (let value = Math.ceil(vLo / minor) * minor; value <= vHi; value += minor) {
+  for (let value = Math.ceil(Math.max(vLo, Math.min(a[1], b[1])) / minor) * minor; value <= Math.min(vHi, Math.max(a[1], b[1])); value += minor) {
     const y = Math.min(plot.y + plot.height - 1, Math.max(plot.y, Math.floor(r.v0 + value * r.vPerCm)))
     const alpha = strength(value, vLo, vHi)
     for (let x = plot.x; x < plot.x + plot.width; x++) etch(img, x, y, alpha, stone?.[x - plot.x + (y - plot.y) * plot.width])
@@ -920,19 +958,76 @@ interface Job {
   overlay: Overlay
   forms: CompiledForm[]
   reference?: ReferenceInput
+  sketches?: SketchMarks[]
+}
+
+// Charcoal. A mark shows dark where the stone it was drawn on is still the surface this
+// view sees at that spot. In the view the line was drawn from, the rest of it stays as a
+// pale ghost at the same ruler coordinates.
+function drawSketches(img: Image, grid: Grid, tile: TileLayout, plot: Plot, sketches: SketchMarks[]): void {
+  const { right, up } = VIEWS[tile.view]
+  const { x: px0, y: py0, width: w, height: h } = tile.plot
+  const o = tile.origin ?? [0, grid.size[1] / 2, 0]
+  const k = tile.pxPerCm
+  // 1 dark, 2 ghost: a pixel is inked once however many marks cross it, dark over ghost.
+  const ink = new Uint8Array(w * h)
+  for (const sketch of sketches) {
+    const own = sketch.view === tile.view
+    for (const stroke of sketch.strokes) {
+      for (let n = 1; n < stroke.length; n++) {
+        const p = stroke[n - 1]!
+        const q = stroke[n]!
+        const steps = Math.max(1, Math.ceil(k * Math.sqrt((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2 + (q[2] - p[2]) ** 2)))
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps
+          const x = p[0] + (q[0] - p[0]) * t
+          const y = p[1] + (q[1] - p[1]) * t
+          const z = p[2] + (q[2] - p[2]) * t
+          const u = (x - o[0]) * right[0] + (y - o[1]) * right[1] + (z - o[2]) * right[2]
+          const v = (x - o[0]) * up[0] + (y - o[1]) * up[1] + (z - o[2]) * up[2]
+          const px = Math.floor(w / 2 + u * k)
+          const py = Math.floor(h / 2 - v * k)
+          if (px < 0 || py < 0 || px >= w - 1 || py >= h - 1) continue
+          const i = px + py * w
+          const ex = plot.pos[i * 3]! - x
+          const ey = plot.pos[i * 3 + 1]! - y
+          const ez = plot.pos[i * 3 + 2]! - z
+          const on = plot.hit[i] === 1 && ex * ex + ey * ey + ez * ez < 0.8
+          if (!on && !own) continue
+          const mark = on ? 1 : 2
+          for (let c = 0; c < 4; c++) {
+            const j = i + (c & 1) + (c >> 1) * w
+            if (ink[j] === 0 || mark < ink[j]!) ink[j] = mark
+          }
+        }
+      }
+    }
+  }
+  for (let y = 0; y < h; y++) {
+    let at = (px0 + (py0 + y) * img.width) * 4
+    for (let x = 0; x < w; x++, at += 4) {
+      const mark = ink[x + y * w]!
+      if (mark === 0) continue
+      const colour = mark === 1 ? CHARCOAL : GHOST
+      const alpha = mark === 1 ? 0.85 : 0.6
+      img.data[at] = img.data[at]! + (colour[0] - img.data[at]!) * alpha
+      img.data[at + 1] = img.data[at + 1]! + (colour[1] - img.data[at + 1]!) * alpha
+      img.data[at + 2] = img.data[at + 2]! + (colour[2] - img.data[at + 2]!) * alpha
+    }
+  }
 }
 
 function drawStone(img: Image, grid: Grid, tile: TileLayout, job: Job): Plot {
   const { view, plot: rect, pxPerCm } = tile
   const { width: w, height: h } = rect
-  const plot = isAxisView(view) ? traceAxis(grid, view, w, h, pxPerCm) : traceRays(grid, view, w, h, pxPerCm)
+  const plot = isAxisView(view) ? traceAxis(grid, view, w, h, pxPerCm, tile.origin) : traceRays(grid, view, w, h, pxPerCm)
   depthCues(plot, pxPerCm)
 
   // Where the target expects stone: the form's silhouette, or the reference outline.
   const useForm = job.overlay === 'form' && job.forms.length > 0
   const mask = job.overlay === 'reference' && isSide(view) ? job.reference?.outlines?.[view] : undefined
   const wanted = useForm
-    ? formSilhouette(job.forms, grid, view, w, h, pxPerCm)
+    ? formSilhouette(job.forms, grid, view, w, h, pxPerCm, tile.origin)
     : mask ? maskOnPlot(mask, grid, tile) : null
 
   const { hit, lum, pos } = plot
@@ -985,7 +1080,8 @@ function drawStone(img: Image, grid: Grid, tile: TileLayout, job: Job): Plot {
   }
   if (tile.ruler) drawRulers(img, grid, tile, hit)
   if (wanted !== null) outline(img, rect, wanted, OUTLINE)
-  drawTitle(img, tile, view.toUpperCase())
+  if (job.sketches && job.sketches.length > 0) drawSketches(img, grid, tile, plot, job.sketches)
+  drawTitle(img, tile, tile.origin ? `${view.toUpperCase()} CLOSE-UP` : view.toUpperCase())
   return plot
 }
 
@@ -1011,7 +1107,7 @@ function drawReference(img: Image, grid: Grid, tile: TileLayout, src: ImageLike,
 }
 
 function drawTiles(img: Image, grid: Grid, tiles: TileLayout[], opts: LookOptions): void {
-  const job: Job = { overlay: opts.overlay ?? 'grid', forms: pickForms(grid.forms, opts.forms), reference: opts.reference }
+  const job: Job = { overlay: opts.overlay ?? 'grid', forms: pickForms(grid.forms, opts.forms), reference: opts.reference, sketches: opts.sketches }
   let stone: Plot | null = null
   for (const tile of tiles) {
     if (tile.kind === 'stone') stone = drawStone(img, grid, tile, job)
@@ -1037,10 +1133,257 @@ export function renderContactSheet(grid: Grid, views: ViewId[], opts: LookOption
   drawTiles(img, grid, layout.tiles, opts)
   const f = fontScale(layout.pxPerCm)
   const overlay = opts.overlay ?? 'grid'
-  const legend = flowLegend(legendTokens(overlay, targetsFor(grid, views, opts), layout.pxPerCm), f, layout.width - 2 * GAP)
+  drawLegend(img, legendTokens(overlay, targetsFor(grid, views, opts), layout.pxPerCm, sketched(opts)), f, layout.legendY)
+  return img
+}
+
+function drawLegend(img: Image, tokens: Token[], f: number, top: number): void {
+  const legend = flowLegend(tokens, f, img.width - 2 * GAP)
   for (const { token, x, y } of legend.placed) {
-    if ('swatch' in token) fill(img, GAP + x, layout.legendY + y, 9 * f, 7 * f, token.swatch)
-    else drawText(img, GAP + x, layout.legendY + y, token.text, f, TEXT)
+    if ('swatch' in token) fill(img, GAP + x, top + y, 9 * f, 7 * f, token.swatch)
+    else drawText(img, GAP + x, top + y, token.text, f, TEXT)
   }
+}
+
+function shift(tile: TileLayout, x: number, y: number): TileLayout {
+  tile.x += x
+  tile.y += y
+  tile.plot.x += x
+  tile.plot.y += y
+  if (tile.ruler) {
+    tile.ruler.h0 += x
+    tile.ruler.v0 += y
+  }
+  return tile
+}
+
+// ---------- close-ups ----------
+
+function windowTile(grid: GridInfo, view: AxisView, kind: 'stone' | 'reference', centre: [number, number], spanCm: number, pxPerCm: number): TileLayout {
+  const f = fontScale(pxPerCm)
+  const strip = 7 * f + 8
+  const left = 18 * f + 8
+  const side = Math.round(spanCm * pxPerCm)
+  const def = VIEWS[view]
+  const h = def.h!
+  const v = def.v!
+  const hPerCm = def.right[h] * pxPerCm
+  const vPerCm = -def.up[v] * pxPerCm
+  const origin: Vec3 = [0, grid.size[1] / 2, 0]
+  origin[h] = centre[0]
+  origin[v] = centre[1]
+  return {
+    view,
+    kind,
+    x: 0,
+    y: 0,
+    width: left + side + 10,
+    height: strip + side + strip,
+    plot: { x: left, y: strip, width: side, height: side },
+    pxPerCm,
+    ruler: {
+      hAxis: h === 0 ? 'X' : 'Z',
+      vAxis: v === 1 ? 'Y' : 'Z',
+      h0: left + side / 2 - centre[0] * hPerCm,
+      hPerCm,
+      v0: strip + side / 2 - centre[1] * vPerCm,
+      vPerCm
+    },
+    origin
+  }
+}
+
+// The part of a block-aligned reference tile that a close-up's window covers, under the
+// same rulers, with the stone's outline over it.
+function drawReferenceWindow(img: Image, grid: Grid, tile: TileLayout, src: ImageLike, stone: Plot): void {
+  const { plot } = tile
+  const view = tile.view as SideView
+  fill(img, plot.x, plot.y, plot.width, plot.height, BG_PLOT)
+  for (let y = 0; y < plot.height; y++) {
+    for (let x = 0; x < plot.width; x++) {
+      const [col, row] = blockToMask(grid, view, src.width, src.height, ...pixelToBlock(tile, plot.x + x + 0.5, plot.y + y + 0.5))
+      if (col < 0 || row < 0 || col >= src.width || row >= src.height) continue
+      // The window is an enlargement, so blend the four source pixels round the point.
+      const fx = Math.min(src.width - 1, Math.max(0, col - 0.5))
+      const fy = Math.min(src.height - 1, Math.max(0, row - 0.5))
+      const sx = Math.min(src.width - 2, Math.floor(fx))
+      const sy = Math.min(src.height - 2, Math.floor(fy))
+      const tx = fx - sx
+      const ty = fy - sy
+      const o = (plot.x + x + (plot.y + y) * img.width) * 4
+      for (let c = 0; c < 3; c++) {
+        let sum = 0
+        for (let k = 0; k < 4; k++) {
+          const s = (sx + (k & 1) + (sy + (k >> 1)) * src.width) * 4
+          const alpha = src.data[s + 3]! / 255
+          sum += (src.data[s + c]! * alpha + BG_PLOT[c]! * (1 - alpha)) * ((k & 1) === 1 ? tx : 1 - tx) * (k >> 1 === 1 ? ty : 1 - ty)
+        }
+        img.data[o + c] = sum
+      }
+    }
+  }
+  drawRulers(img, grid, tile)
+  outline(img, plot, stone.hit, STONE_LINE)
+  drawTitle(img, tile, `REF ${tile.view.toUpperCase()} CLOSE-UP`)
+}
+
+export interface Closeup {
+  image: Image
+  // Where the stone's window sits in the image, with its ruler mapping (blockToPixel works).
+  tile: TileLayout
+  pxPerCm: number
+  // Share of the window that shows stone, 0 to 1.
+  stoneShare: number
+  // The block axis the view looks along, and the least and greatest coordinate on it of the
+  // surface in the window, cm: how far the nearest and the deepest stone in sight are apart.
+  axis: 'x' | 'y' | 'z'
+  surfaceMin: number
+  surfaceMax: number
+  // With the form overlay and a form declared: the furthest the surface in the window stands
+  // outside the form, and the furthest it has been cut below it, cm.
+  proudMax?: number
+  belowMax?: number
+}
+
+// One axis view enlarged: a square window `spanCm` across centred on a ruler point, with a
+// one-centimetre grid, so a face or a paw can be read and strokes placed on it. Takes the
+// same overlays and sketches as a look. With the reference overlay the same window of the
+// reference sheet sits beside it (side views with a block-aligned tile only).
+export function renderCloseup(grid: Grid, view: AxisView, centre: [number, number], spanCm: number, opts: LookOptions = {}): Closeup {
+  const pxPerCm = opts.pxPerCm ?? Math.round(100 * Math.min(60, 760 / spanCm)) / 100
+  const overlay = opts.overlay ?? 'grid'
+  const tiles = [shift(windowTile(grid, view, 'stone', centre, spanCm, pxPerCm), GAP, GAP)]
+  const side = isSide(view) ? view : null
+  const ref = overlay === 'reference' && side ? opts.reference?.tiles?.[side] : undefined
+  if (ref && side && fitsFace(grid, side, ref)) tiles.push(shift(windowTile(grid, view, 'reference', centre, spanCm, pxPerCm), tiles[0]!.width + 2 * GAP, GAP))
+  const last = tiles[tiles.length - 1]!
+  const width = last.x + last.width + GAP
+  const f = fontScale(pxPerCm)
+  const targets = overlay === 'form' ? pickForms(grid.forms, opts.forms).length > 0 : overlay === 'reference' && !!side && !!opts.reference?.outlines?.[side]
+  const tokens = legendTokens(overlay, targets, pxPerCm, sketched(opts))
+  const top = last.y + last.height + GAP
+  const img = blank(width, top + flowLegend(tokens, f, width - 2 * GAP).height + GAP, BG)
+  const job: Job = { overlay, forms: pickForms(grid.forms, opts.forms), reference: opts.reference, sketches: opts.sketches }
+  const plot = drawStone(img, grid, tiles[0]!, job)
+  if (tiles.length > 1) drawReferenceWindow(img, grid, tiles[1]!, ref!, plot)
+  drawLegend(img, tokens, f, top)
+
+  const def = VIEWS[view]
+  const a = 3 - def.h! - def.v!
+  let hits = 0
+  let lo = Infinity
+  let hi = -Infinity
+  let proud = 0
+  let below = 0
+  const measure = overlay === 'form' && job.forms.length > 0
+  for (let i = 0; i < plot.hit.length; i++) {
+    if (plot.hit[i] !== 1) continue
+    hits++
+    const c = plot.pos[i * 3 + a]!
+    if (c < lo) lo = c
+    if (c > hi) hi = c
+    // Every ninth pixel is plenty to find the worst of it.
+    if (measure && i % 9 === 0) {
+      const d = unionDistance(job.forms, plot.pos[i * 3]!, plot.pos[i * 3 + 1]!, plot.pos[i * 3 + 2]!)
+      if (d > proud) proud = d
+      if (-d > below) below = -d
+    }
+  }
+  return {
+    image: img,
+    tile: tiles[0]!,
+    pxPerCm,
+    stoneShare: plot.hit.length > 0 ? hits / plot.hit.length : 0,
+    axis: (['x', 'y', 'z'] as const)[a]!,
+    surfaceMin: hits > 0 ? lo : 0,
+    surfaceMax: hits > 0 ? hi : 0,
+    ...(measure ? { proudMax: proud, belowMax: below } : {})
+  }
+}
+
+// ---------- slices ----------
+
+export interface SliceOptions {
+  pxPerCm?: number
+  // Names of declared forms whose section is drawn in the same plane. Default: all of them.
+  forms?: string[]
+  // The reference's front and left outlines; the section of the volume inside both is drawn.
+  outlines?: { front: Mask, left: Mask }
+}
+
+// The stone cut through by the plane <axis> = at (block cm) and seen square on, drawn under
+// the rulers of the axis view it matches (SLICE_VIEW): what a look cannot show, such as how
+// thick a neck really is or how far a nose stands off a face. The declared form's section is
+// drawn in the same plane, with the stone outside it and the form missing stone tinted as in
+// a look; the reference's two outlines pushed through the block give a third line.
+export function renderSlice(grid: Grid, axis: SliceAxis, at: number, opts: SliceOptions = {}): Image {
+  const view = SLICE_VIEW[axis]
+  const pxPerCm = opts.pxPerCm ?? 8
+  const tile = shift(makeTile(grid, view, 'stone', pxPerCm, true), GAP, GAP)
+  const forms = pickForms(grid.forms, opts.forms)
+  const f = fontScale(pxPerCm)
+  const tokens: Token[] = [...words(`RULERS: BLOCK CM. GRID EVERY ${gridStep(pxPerCm)} CM.`), { swatch: SECTION }, ...words('STONE IN THIS PLANE.')]
+  if (forms.length > 0) {
+    tokens.push({ swatch: PROUD_NEAR }, { swatch: PROUD_MID }, { swatch: PROUD_FAR },
+      ...words(`STONE OUTSIDE YOUR FORM BY 1 / ${PROUD_MID_CM} / ${PROUD_FAR_CM}+ CM.`),
+      { swatch: LOST }, ...words('FORM WITH NO STONE.'), { swatch: OUTLINE }, ...words('FORM OUTLINE.'))
+  }
+  if (opts.outlines) tokens.push({ swatch: HULL }, ...words('REFERENCE OUTLINES PUSHED THROUGH THE BLOCK.'))
+  const width = tile.width + 2 * GAP
+  const top = tile.y + tile.height + GAP
+  const img = blank(width, top + flowLegend(tokens, f, width - 2 * GAP).height + GAP, BG)
+
+  const def = VIEWS[view]
+  const hA = def.h!
+  const vA = def.v!
+  const { x: px0, y: py0, width: w, height: h } = tile.plot
+  const stone = new Uint8Array(w * h)
+  const wanted = forms.length > 0 ? new Uint8Array(w * h) : null
+  const hull = opts.outlines ? new Uint8Array(w * h) : null
+  const p = [0, 0, 0]
+  p[3 - hA - vA] = at
+  for (let y = 0; y < h; y++) {
+    let o = (px0 + (py0 + y) * img.width) * 4
+    for (let x = 0; x < w; x++, o += 4) {
+      const i = x + y * w
+      const [bh, bv] = pixelToBlock(tile, px0 + x + 0.5, py0 + y + 0.5)
+      p[hA] = bh
+      p[vA] = bv
+      const solid = sampleDistance(grid, p[0]!, p[1]!, p[2]!) < 0
+      if (solid) stone[i] = 1
+      let r: number = solid ? SECTION[0] : BG_PLOT[0]
+      let g: number = solid ? SECTION[1] : BG_PLOT[1]
+      let b: number = solid ? SECTION[2] : BG_PLOT[2]
+      if (wanted !== null) {
+        const d = unionDistance(forms, p[0]!, p[1]!, p[2]!)
+        if (d < 0) wanted[i] = 1
+        if (solid && d > ON_FORM_CM) {
+          const t = d - ON_FORM_CM
+          const from = t < PROUD_MID_CM ? PROUD_NEAR : PROUD_MID
+          const to = t < PROUD_MID_CM ? PROUD_MID : PROUD_FAR
+          const mix = t < PROUD_MID_CM ? t / PROUD_MID_CM : Math.min(1, (t - PROUD_MID_CM) / (PROUD_FAR_CM - PROUD_MID_CM))
+          r += (from[0] + (to[0] - from[0]) * mix - r) * 0.65
+          g += (from[1] + (to[1] - from[1]) * mix - g) * 0.65
+          b += (from[2] + (to[2] - from[2]) * mix - b) * 0.65
+        } else if (!solid && d < -ON_FORM_CM) {
+          r = LOST[0]
+          g = LOST[1]
+          b = LOST[2]
+        }
+      }
+      if (hull !== null && maskCovers(opts.outlines!.front, grid, 'front', p[0]!, p[1]!, p[2]!)
+        && maskCovers(opts.outlines!.left, grid, 'left', p[0]!, p[1]!, p[2]!)) hull[i] = 1
+      img.data[o] = r
+      img.data[o + 1] = g
+      img.data[o + 2] = b
+    }
+  }
+  drawRulers(img, grid, tile, stone)
+  outline(img, tile.plot, stone, SECTION_EDGE)
+  if (hull !== null) outline(img, tile.plot, hull, HULL)
+  if (wanted !== null) outline(img, tile.plot, wanted, OUTLINE)
+  const seen = axis === 'y' ? 'FROM ABOVE' : axis === 'z' ? 'FROM THE FRONT' : 'FROM THE LEFT'
+  drawTitle(img, tile, `SLICE AT ${axis.toUpperCase()}=${Math.round(at * 10) / 10} SEEN ${seen}`)
+  drawLegend(img, tokens, f, top)
   return img
 }

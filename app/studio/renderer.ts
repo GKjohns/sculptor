@@ -33,6 +33,15 @@ const BACKDROP = 0x0b0a09
 // The default block is 60 x 100 x 60 cm standing on the origin; the camera orbits its middle.
 const TARGET = new THREE.Vector3(0, 50, 0)
 const CAMERA_HOME = new THREE.Vector3(128, 96, 204)
+// CAMERA_HOME frames the block's height. In a pane narrower than that leaves room for, the width is
+// what has to fit: half the block's plan diagonal, the widest it gets from any orbit angle, with a
+// tenth to spare. Its nearest corner can stand half the block's height in front of the target.
+const HOME_DISTANCE = CAMERA_HOME.distanceTo(TARGET)
+const BLOCK_REACH = Math.hypot(30, 30) * 1.1
+const BLOCK_NEAR = 50
+// Backing off for width leaves height to spare. This share of it goes under the stone, where the
+// HUD's subtitle and transport sit, by sliding the picture up.
+const SPARE_BELOW = 0.8
 
 export class StudioRenderer {
   readonly scene = new THREE.Scene()
@@ -47,6 +56,7 @@ export class StudioRenderer {
   private resizer: ResizeObserver
   private frameFns = new Set<FrameFn>()
   private waiters: { at: number, done: () => void }[] = []
+  private fitDistance = HOME_DISTANCE
   private frames = 0
   private frameMs = 0
   private last = 0
@@ -82,7 +92,6 @@ export class StudioRenderer {
     this.controls.target.copy(TARGET)
     this.controls.enableDamping = true
     this.controls.minDistance = 40
-    this.controls.maxDistance = 600
     this.controls.update()
 
     this.resizer = new ResizeObserver(() => this.resize())
@@ -97,6 +106,11 @@ export class StudioRenderer {
     // One node for now. Sprint 4 chains ao, dof, bloom and the rest onto this pass in post.ts.
     this.pipeline = new THREE.RenderPipeline(this.renderer, pass(this.scene, this.camera))
     this.renderer.setAnimationLoop(now => this.frame(now))
+  }
+
+  /** How far from its target the camera frames the whole block in the pane as it is now. */
+  get homeDistance() {
+    return this.fitDistance
   }
 
   get backend(): StudioStats['backend'] {
@@ -156,6 +170,22 @@ export class StudioRenderer {
     const h = Math.max(1, this.host.clientHeight)
     this.renderer.setSize(w, h, false)
     this.camera.aspect = w / h
-    this.camera.updateProjectionMatrix()
+    this.fit(w, h)
+  }
+
+  // Keeps the whole block in frame at any aspect ratio. The camera moves along its own line of
+  // sight by the ratio between the old fit and the new, so the orbit angle and whatever zoom the
+  // viewer has dialled in carry over a resize.
+  private fit(w: number, h: number) {
+    const halfWidth = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.aspect
+    const fit = Math.max(HOME_DISTANCE, BLOCK_REACH / halfWidth + BLOCK_NEAR)
+    const { target } = this.controls
+    this.camera.position.sub(target).multiplyScalar(fit / this.fitDistance).add(target)
+    this.controls.maxDistance = fit * 2.5
+    this.fitDistance = fit
+    // The stone is 1 - HOME_DISTANCE / fit shorter on screen than the home framing would have it.
+    const lift = (1 - HOME_DISTANCE / fit) * (h / 2) * (SPARE_BELOW - 0.5) * 2
+    // Also updates the projection for the new aspect.
+    this.camera.setViewOffset(w, h, 0, Math.round(lift), w, h)
   }
 }

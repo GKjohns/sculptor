@@ -2,12 +2,16 @@
 // Units are centimetres, block-local: origin at the centre of the block's base,
 // +Y up, +Z toward a viewer standing in front, +X to that viewer's right.
 
+import type { AxisView } from './views.ts'
+
 export type Vec3 = [number, number, number]
 
 export type ToolId = 'saw' | 'point' | 'claw' | 'flat' | 'roundel' | 'drill' | 'rasp' | 'polish'
 
 // at: contact point on the surface (cm). dir: unit vector the tool travels into the stone.
 // ms: virtual duration, used by the timeline.
+// The polish moves no stone: size is the pad's width and depth is the share (0 to 1) of the
+// way to a full polish that one stroke takes the surface under it.
 export interface CutStrike {
   kind: 'cut'
   tool: ToolId
@@ -45,7 +49,21 @@ export interface FormStrike extends Form {
   name: string
 }
 
-export type Strike = CutStrike | SawStrike | DetachStrike | FormStrike
+// A charcoal line drawn on the stone from an axis view. It is theatre and an aid to the eye:
+// the kernel does nothing with it (no stone moves, the grid and its hash are untouched), but
+// it rides in the log so a replay draws it at the same moment.
+export interface SketchStrike {
+  kind: 'sketch'
+  view: AxisView
+  // The line as it was asked for, in the view's ruler coordinates: [horizontal, vertical] cm.
+  points: [number, number][]
+  // Where the charcoal landed: runs of points about a centimetre apart on the surface as it
+  // stood, block cm. A run ends where the line left the stone or jumped to a surface behind.
+  strokes: Vec3[][]
+  ms: number
+}
+
+export type Strike = CutStrike | SawStrike | DetachStrike | FormStrike | SketchStrike
 
 export interface Offcut {
   positions: Float32Array
@@ -55,7 +73,8 @@ export interface Offcut {
   cm3: number
 }
 
-// offcuts is non-empty only for 'saw' and 'detach'. A 'form' entry returns an empty result.
+// offcuts is non-empty only for 'saw' and 'detach'. A 'form' or 'sketch' entry returns an
+// empty result.
 export interface StrikeResult {
   dirtyChunks: number[]
   removedCm3: number

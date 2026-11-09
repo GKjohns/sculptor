@@ -8,7 +8,7 @@ import { newMeter, parseJsonLines, reportedCost, settleCost } from '../bench/bra
 import { shuffledLabels } from '../bench/judge.ts'
 import { Ledger } from '../bench/ledger.ts'
 import { shrink } from '../bench/reference.ts'
-import { JUDGE_LABELS, SUBJECTS } from '../bench/subjects.ts'
+import { JUDGE_LABELS, SUBJECTS, tidySentence } from '../bench/subjects.ts'
 import { imageMediaType } from '../shared/agent/context.ts'
 import { costUsd } from '../shared/agent/pricing.ts'
 
@@ -113,4 +113,12 @@ test('small things: flags, image types and the shrink', () => {
   assert.deepEqual([small.width, small.height], [100, 50])
   assert.ok(small.data.every(v => v === 200))
   assert.equal(shrink(big, 400), big)
+})
+
+test('a judge sentence loses stray JSON closers and nothing else', () => {
+  assert.equal(tidySentence('No ears or face that would suggest an animal or bust.}'), 'No ears or face that would suggest an animal or bust.')
+  assert.equal(tidySentence('Reads as a pawn."}\n'), 'Reads as a pawn.')
+  assert.equal(tidySentence('It has the profile of a "pawn"'), 'It has the profile of a "pawn"')
+  assert.equal(tidySentence('Stepped base {two tiers} and a collar [narrow]'), 'Stepped base {two tiers} and a collar [narrow]')
+  assert.equal(tidySentence('  Plain sentence.  '), 'Plain sentence.')
 })

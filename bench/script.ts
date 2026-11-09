@@ -61,9 +61,9 @@ function turnsFor(subject: SubjectId, toolSet: ToolSetId, reference: ReferenceMo
   const strokes: Turn = {
     say: 'Strokes across the front, then one that misses on purpose.',
     calls: [
-      { name: 'chisel', args: { tool: 'point', view: 'front', path: [{ h: -8, v: 30 }, { h: 8, v: 30 }], depth_cm: 2, width_cm: 4, why: 'Opening a groove low on the front with the point.' } },
-      { name: 'chisel', args: { tool: 'flat', view: 'top', path: [{ h: -5, v: 0 }, { h: 5, v: 0 }], depth_cm: 0.6, width_cm: 3, why: 'Flattening the crown a little.' } },
-      { name: 'chisel', args: { tool: 'claw', view: 'left', path: [{ h: -29.5, v: 99.5 }, { h: -29, v: 99 }], depth_cm: 1, width_cm: 2, why: 'Trying the far corner, which should already be gone.' } }
+      { name: 'chisel', args: { tool: 'point', view: 'front', path: [{ h: -8, v: 30 }, { h: 8, v: 30 }], depth_cm: 2, width_cm: 4, protect: 'none', why: 'Opening a groove low on the front with the point.' } },
+      { name: 'chisel', args: { tool: 'flat', view: 'top', path: [{ h: -5, v: 0 }, { h: 5, v: 0 }], depth_cm: 0.6, width_cm: 3, protect: 'none', why: 'Flattening the crown a little.' } },
+      { name: 'chisel', args: { tool: 'claw', view: 'left', path: [{ h: -29.5, v: 99.5 }, { h: -29, v: 99 }], depth_cm: 1, width_cm: 2, protect: 'none', why: 'Trying the far corner, which should already be gone.' } }
     ]
   }
   if (toolSet === 'direct') {
@@ -102,7 +102,7 @@ function turnsFor(subject: SubjectId, toolSet: ToolSetId, reference: ReferenceMo
         { name: 'rasp', args: { view: 'front', path: [{ h: -6, v: 78 }, { h: 6, v: 78 }, { h: 6, v: 70 }], width_cm: 6, passes: 2, why: 'Rasping the front of the head smooth.' } }
       ]
     },
-    { say: 'A call with a bad argument.', calls: [{ name: 'chisel', args: { tool: 'spoon', view: 'front', path: [{ h: 0, v: 50 }, { h: 4, v: 50 }], depth_cm: 1, width_cm: 2, why: 'Using a tool that does not exist.' } }] },
+    { say: 'A call with a bad argument.', calls: [{ name: 'chisel', args: { tool: 'spoon', view: 'front', path: [{ h: 0, v: 50 }, { h: 4, v: 50 }], depth_cm: 1, width_cm: 2, protect: 'none', why: 'Using a tool that does not exist.' } }] },
     { say: 'A last look.', calls: [{ name: 'look', args: { views: ['front', 'right', 'back', 'left'], overlay: viaReference ? 'reference' : 'form' } }] },
     {
       say: 'Done.',

@@ -6,7 +6,8 @@ import type { CutStrike, ToolId } from './types.ts'
 //   plane   one cut through the whole stone (the saw; issued as a 'saw' strike)
 //   bite    removes a tool-shaped solid of revolution driven in along the strike direction
 //   abrade  wears down high spots inside a pad, never deeper than the surface around them
-export type ToolMode = 'plane' | 'bite' | 'abrade'
+//   burnish raises the finish of the surface inside a pad and moves no stone
+export type ToolMode = 'plane' | 'bite' | 'abrade' | 'burnish'
 
 // One row per tool. A bite's solid is a short shank of diameter `size` behind the contact
 // point, tapering over `depth` to a flat tip of diameter `size * tip`.
@@ -27,20 +28,27 @@ export interface ToolSpec {
   // fractions of size. 0 teeth is a plain edge.
   teeth: number
   pitch: number
+  // A rounded end in place of the taper and flat tip: the bite is a straight shank closed by
+  // a ball, and a row of them along a stroke leaves a concave channel.
+  round?: boolean
 }
 
-// roundel, drill and polish join as rows here (with a new mode where they need one).
-export const TOOLS: Partial<Record<ToolId, ToolSpec>> = {
+export const TOOLS: Record<ToolId, ToolSpec> = {
   saw: { id: 'saw', mode: 'plane', finish: FINISH.sawn, tip: 1, shank: 0, noise: 0, grain: 1, teeth: 0, pitch: 1 },
   point: { id: 'point', mode: 'bite', finish: FINISH.point, tip: 0.1, shank: 0.5, noise: 0.12, grain: 0.4, teeth: 0, pitch: 1 },
   claw: { id: 'claw', mode: 'bite', finish: FINISH.claw, tip: 0.7, shank: 0.5, noise: 0.04, grain: 0.5, teeth: 0.06, pitch: 0.25 },
   flat: { id: 'flat', mode: 'bite', finish: FINISH.flat, tip: 0.8, shank: 0.5, noise: 0.03, grain: 0.5, teeth: 0, pitch: 1 },
-  rasp: { id: 'rasp', mode: 'abrade', finish: FINISH.rasp, tip: 1, shank: 0, noise: 0, grain: 1, teeth: 0, pitch: 1 }
+  roundel: { id: 'roundel', mode: 'bite', finish: FINISH.roundel, tip: 1, shank: 0.5, noise: 0.02, grain: 0.5, teeth: 0, pitch: 1, round: true },
+  // A straight bore: the bit is a plug as wide at its tip as at its mouth.
+  drill: { id: 'drill', mode: 'bite', finish: FINISH.drill, tip: 1, shank: 0.5, noise: 0.05, grain: 0.5, teeth: 0, pitch: 1 },
+  rasp: { id: 'rasp', mode: 'abrade', finish: FINISH.rasp, tip: 1, shank: 0, noise: 0, grain: 1, teeth: 0, pitch: 1 },
+  polish: { id: 'polish', mode: 'burnish', finish: FINISH.polished, tip: 1, shank: 0, noise: 0, grain: 1, teeth: 0, pitch: 1 }
 }
 
 export function toolSpec(id: ToolId): ToolSpec {
   const spec = TOOLS[id]
-  if (!spec) throw new Error(`no such tool yet: ${id}`)
+  // A log may name anything.
+  if (!spec) throw new Error(`no such tool: ${String(id)}`)
   return spec
 }
 
@@ -78,6 +86,14 @@ export interface PreparedTool {
   // Beyond this distance from the tool's surface the stored value is clamped whatever the
   // noise and teeth say, so both are skipped. Also the padding of the strike's bounding box.
   reach: number
+  // Rounded tools: the ball that closes the end, as its radius and where its centre sits along
+  // the strike direction from the contact point, and how far along the straight side runs
+  // before the ball takes over. A cut shallower than half its width is a cap of a wider ball,
+  // so the channel is still as wide as asked.
+  round: boolean
+  ballRadius: number
+  ballAt: number
+  sideEnd: number
 }
 
 export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): PreparedTool {
@@ -115,6 +131,9 @@ export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): P
       }
     }
   }
+  const depth = Math.max(strike.depth, voxel / 8)
+  const radius = size / 2
+  const ballRadius = depth < radius ? (radius * radius + depth * depth) / (2 * depth) : radius
   return {
     ax: strike.at[0],
     ay: strike.at[1],
@@ -122,9 +141,9 @@ export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): P
     dx: nx,
     dy: ny,
     dz: nz,
-    radius: size / 2,
+    radius,
     tipRadius: size / 2 * spec.tip,
-    depth: Math.max(strike.depth, voxel / 8),
+    depth,
     back: spec.shank * size,
     amp,
     freq: 1 / feature,
@@ -135,7 +154,11 @@ export function prepareTool(spec: ToolSpec, strike: CutStrike, voxel: number): P
     teeth,
     // Grooves narrower than three voxels would alias on the grid.
     teethFreq: 1 / Math.max(spec.pitch * size, 3 * voxel),
-    reach: BAND_VOXELS * voxel + amp + teeth
+    reach: BAND_VOXELS * voxel + amp + teeth,
+    round: spec.round === true,
+    ballRadius,
+    ballAt: depth - ballRadius,
+    sideEnd: Math.max(0, depth - ballRadius)
   }
 }
 
@@ -174,6 +197,35 @@ function profileDistance(r: number, w: number, t: PreparedTool): number {
   return inside ? -d : d
 }
 
+// The same for a rounded tool: a back cap, a straight side, and the arc of the ball from the
+// end of the side round to the axis.
+function roundDistance(r: number, w: number, t: PreparedTool): number {
+  const R = t.radius
+  const back = t.back
+  const end = t.sideEnd
+  // Back cap.
+  let dr = r > R ? r - R : 0
+  let dw = w + back
+  let best = dr * dr + dw * dw
+  // Side.
+  dr = r - R
+  dw = w < -back ? w + back : w > end ? w - end : 0
+  let d2 = dr * dr + dw * dw
+  if (d2 < best) best = d2
+  // Ball. Outside the arc's own sweep its nearest point is where it meets the side, which
+  // the side has already counted.
+  const vw = w - t.ballAt
+  const d2c = r * r + vw * vw
+  const len = Math.sqrt(d2c)
+  if (vw * t.ballRadius >= (end - t.ballAt) * len) {
+    d2 = (len - t.ballRadius) * (len - t.ballRadius)
+    if (d2 < best) best = d2
+  }
+  const d = Math.sqrt(best)
+  const inside = w > -back && (w <= end ? r < R : d2c < t.ballRadius * t.ballRadius)
+  return inside ? -d : d
+}
+
 // Distance from a world point to the tool solid, cm, negative inside it, roughened by the
 // strike's seeded noise.
 export function toolDistance(t: PreparedTool, x: number, y: number, z: number): number {
@@ -182,7 +234,8 @@ export function toolDistance(t: PreparedTool, x: number, y: number, z: number): 
   const pz = z - t.az
   const w = px * t.dx + py * t.dy + pz * t.dz
   const r2 = px * px + py * py + pz * pz - w * w
-  let d = profileDistance(r2 > 0 ? Math.sqrt(r2) : 0, w, t)
+  const r = r2 > 0 ? Math.sqrt(r2) : 0
+  let d = t.round ? roundDistance(r, w, t) : profileDistance(r, w, t)
   if (t.amp > 0 && d < t.reach && d > -t.reach) {
     d -= t.amp * valueNoise3(px * t.freq, py * t.freq, pz * t.freq, t.seed)
   }

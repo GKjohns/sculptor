@@ -48,3 +48,19 @@ export const JUDGE_LABELS: string[] = [
   'sitting dog',
   'rabbit'
 ]
+
+// A judge model now and then lets a piece of its JSON wrapper slip inside the string it is
+// writing ("...or bust.}"). The answer still parses, so the stray bracket or quote arrives as
+// part of the sentence. Closers with no opener to match are dropped from the end.
+export function tidySentence(text: string): string {
+  let out = text.trim()
+  const count = (ch: string) => out.split(ch).length - 1
+  for (;;) {
+    const last = out[out.length - 1]
+    const stray = (last === '}' && count('}') > count('{'))
+      || (last === ']' && count(']') > count('['))
+      || (last === '"' && count('"') % 2 === 1)
+    if (!stray) return out
+    out = out.slice(0, -1).trimEnd()
+  }
+}

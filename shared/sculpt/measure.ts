@@ -1,4 +1,5 @@
 import { OCC, OCC_FULL, stoneMassKg, stoneVolumeCm3, unitsToCm3 } from './grid.ts'
+import { sampleDistance } from './raycast.ts'
 import { formDistance } from './shapes.ts'
 import { VIEWS } from './views.ts'
 import type { AxisView } from './views.ts'
@@ -359,6 +360,157 @@ export function proudOfForm(grid: Grid, form: CompiledForm | CompiledForm[]): Fo
   }
 }
 
+export interface SurfaceFinish {
+  // Shares of the carvable surface (not the base), 0 to 1, by the finish its last tool left.
+  // rough: point, drill and claw work. tooled: sawn faces, the flat chisel, the roundel.
+  // rasped: the rasp, and polish that has only begun. polished: POLISHED_FROM and above.
+  rough: number
+  tooled: number
+  rasped: number
+  polished: number
+  // Mean finish over the same surface, 0 to 255.
+  mean: number
+}
+
+export const ROUGH_BELOW = 80
+export const RASPED_FROM = 150
+export const POLISHED_FROM = 230
+
+// How the surface is finished. A look renders every finish as the same matte clay, so this
+// is the only way the sculptor can tell rasped stone from raw, or see that a polish took.
+export function surfaceFinish(grid: Grid): SurfaceFinish {
+  const { nx, ny, nz, dist, finish } = grid
+  const sy = nx
+  const sz = nx * ny
+  let rough = 0
+  let tooled = 0
+  let rasped = 0
+  let polished = 0
+  let sum = 0
+  for (let k = 1; k < nz - 1; k++) {
+    for (let j = 1; j < ny - 1; j++) {
+      let p = 1 + nx * (j + ny * k)
+      for (let i = 1; i < nx - 1; i++, p++) {
+        const q = dist[p]!
+        if (q >= 0 || q < -64) continue
+        if (!(dist[p - 1]! >= 0 || dist[p + 1]! >= 0 || dist[p + sy]! >= 0 || dist[p - sz]! >= 0
+          || dist[p + sz]! >= 0 || (j !== grid.baseY && dist[p - sy]! >= 0))) continue
+        const f = finish[p]!
+        sum += f
+        if (f < ROUGH_BELOW) rough++
+        else if (f < RASPED_FROM) tooled++
+        else if (f < POLISHED_FROM) rasped++
+        else polished++
+      }
+    }
+  }
+  const count = rough + tooled + rasped + polished
+  if (count === 0) return { rough: 0, tooled: 0, rasped: 0, polished: 0, mean: 0 }
+  return { rough: rough / count, tooled: tooled / count, rasped: rasped / count, polished: polished / count, mean: sum / count }
+}
+
+export type SliceAxis = 'x' | 'y' | 'z'
+
+// The axis view a cross-section is drawn as, so its rulers run the same way as that view's:
+// a level slice as `top` (X across, Z down the image, the front at the bottom), a slice
+// facing the viewer as `front` (X across, Y up), a slice through the piece from front to back
+// as `left` (Z across with the front on the right, Y up).
+export const SLICE_VIEW: Record<SliceAxis, AxisView> = { x: 'left', y: 'top', z: 'front' }
+
+export interface SliceOptions {
+  // Names of declared forms to compare the section with, as one union. Default: all of them.
+  forms?: string[]
+  // The reference's front and left outlines. The volume inside both, pushed through the
+  // block, is what the section is compared with.
+  outlines?: { front: Mask, left: Mask }
+}
+
+// Numbers for the stone's cross-section in the plane <axis> = at (block cm): its area, its
+// extent along the two rulers of SLICE_VIEW[axis], and how it sits against the declared forms
+// and the reference in that same plane. Sampled every half voxel.
+export function measureSlice(grid: Grid, axis: SliceAxis, at: number, opts: SliceOptions = {}): Record<string, number> {
+  const def = VIEWS[SLICE_VIEW[axis]]
+  const h = def.h!
+  const v = def.v!
+  const a = 3 - h - v
+  const step = grid.voxel / 2
+  const lo = [-grid.size[0] / 2, 0, -grid.size[2] / 2]
+  const forms: CompiledForm[] = []
+  for (const name of opts.forms ?? grid.forms.keys()) {
+    const form = grid.forms.get(name)
+    if (form) forms.push(form)
+  }
+  const nh = Math.round(grid.size[h] / step)
+  const nv = Math.round(grid.size[v] / step)
+  const p = [0, 0, 0]
+  p[a] = at
+  let stone = 0
+  let hMin = Infinity
+  let hMax = -Infinity
+  let vMin = Infinity
+  let vMax = -Infinity
+  let formArea = 0
+  let outside = 0
+  let missing = 0
+  let proud = 0
+  let refArea = 0
+  let outsideRef = 0
+  for (let iv = 0; iv < nv; iv++) {
+    p[v] = lo[v]! + (iv + 0.5) * step
+    for (let ih = 0; ih < nh; ih++) {
+      p[h] = lo[h]! + (ih + 0.5) * step
+      const d = sampleDistance(grid, p[0]!, p[1]!, p[2]!)
+      const solid = d < 0
+      if (solid) {
+        stone++
+        // The surface is as far beyond an edge sample as that sample is deep.
+        const edge = Math.min(step, -d)
+        if (p[h]! - edge < hMin) hMin = p[h]! - edge
+        if (p[h]! + edge > hMax) hMax = p[h]! + edge
+        if (p[v]! - edge < vMin) vMin = p[v]! - edge
+        if (p[v]! + edge > vMax) vMax = p[v]! + edge
+      }
+      if (forms.length > 0) {
+        const f = unionDistance(forms, p[0]!, p[1]!, p[2]!)
+        if (f < 0) {
+          formArea++
+          if (!solid) missing++
+        } else if (solid) {
+          outside++
+          if (f > proud) proud = f
+        }
+      }
+      if (opts.outlines) {
+        const inside = maskCovers(opts.outlines.front, grid, 'front', p[0]!, p[1]!, p[2]!)
+          && maskCovers(opts.outlines.left, grid, 'left', p[0]!, p[1]!, p[2]!)
+        if (inside) refArea++
+        else if (solid) outsideRef++
+      }
+    }
+  }
+  const cell = step * step
+  const H = 'xyz'[h]!
+  const V = 'xyz'[v]!
+  const out: Record<string, number> = { section_area_cm2: round(stone * cell, 1) }
+  if (stone > 0) {
+    out[`section_${H}_min_cm`] = round(hMin, 1)
+    out[`section_${H}_max_cm`] = round(hMax, 1)
+    out[`section_${V}_min_cm`] = round(vMin, 1)
+    out[`section_${V}_max_cm`] = round(vMax, 1)
+  }
+  if (forms.length > 0) {
+    out.section_form_area_cm2 = round(formArea * cell, 1)
+    out.section_stone_outside_form_cm2 = round(outside * cell, 1)
+    out.section_proud_max_cm = round(proud, 1)
+    out.section_form_without_stone_cm2 = round(missing * cell, 1)
+  }
+  if (opts.outlines) {
+    out.section_reference_area_cm2 = round(refArea * cell, 1)
+    out.section_stone_outside_reference_cm2 = round(outsideRef * cell, 1)
+  }
+  return out
+}
+
 export interface MeasureOptions {
   // Names of declared forms to measure against, as one union. Default: every form declared
   // on the grid. Names that are not declared are skipped.
@@ -392,6 +544,11 @@ export function measureAll(grid: Grid, opts: MeasureOptions = {}): Record<string
   out.bbox_y_max_cm = round(box.max[1], 1)
   out.bbox_z_min_cm = round(box.min[2], 1)
   out.bbox_z_max_cm = round(box.max[2], 1)
+
+  const skin = surfaceFinish(grid)
+  out.surface_rough_pct = round(100 * skin.rough, 1)
+  out.surface_rasped_pct = round(100 * skin.rasped, 1)
+  out.surface_polished_pct = round(100 * skin.polished, 1)
 
   const forms: CompiledForm[] = []
   for (const name of opts.forms ?? grid.forms.keys()) {

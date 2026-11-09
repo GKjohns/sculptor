@@ -112,10 +112,10 @@ const B = REFERENCE_BLOCK
 export const REFERENCE_BRIEF_INSTRUCTIONS = `Before you touch the stone you may have a small clay model made to work from. An image model will draw it for you as a four-view reference sheet (front, left, back, right). Only you will ever see it. Write the brief for that image model. The design is yours.
 
 The block is ${B.width} cm wide, ${B.depth} cm deep and ${B.height} cm tall, and the piece has to come out of it in one piece. Design something stone can hold:
-- One compact, solid mass that rises from a simple base. The base is part of the piece.
+- One compact, solid mass that rises from a simple base. The base is part of the piece. Keep it low, about a tenth of the height: height spent on a pedestal is height the subject loses.
 - Nothing floating or separate. No thin unsupported parts: no outstretched arms, free-standing thin legs, raised tails, fingers, strands or wires. Keep limbs against the body and close gaps with stone.
 - No holes through the piece.
-- Bold, simplified forms that read from their outline. Detail smaller than about 2 cm will not survive.
+- Bold, simplified forms that read from their outline. Detail smaller than about 2 cm will not survive, so make the part that matters most as large as the block allows: in a portrait, a head at least a third of the height.
 - It must fit the block's proportions. A piece that stands tall and fills the block uses the stone best.
 
 Write three to six plain sentences covering:

@@ -28,61 +28,68 @@ Stone cannot be put back. There is no undo. Leave a margin and close in graduall
 
   const block = `THE BLOCK
 Centimetres. The block is ${n(w)} wide (X), ${n(h)} tall (Y), ${n(d)} deep (Z), with the origin at the centre of its base: X runs from -${hx} to ${hx}, Y from 0 (base) to ${n(h)} (top), Z from -${hz} to ${hz}. +Y is up, +Z points at a viewer standing in front, +X is that viewer's right. The piece faces +Z.
-Stone that loses its connection to the base falls away for good. Keep one connected mass and leave the lowest few centimetres as a plinth.`
+Stone that loses its connection to the base falls away for good. Keep one connected mass on a low plinth (5 to 8 cm): height spent on a pedestal is height the figure loses.`
 
   const views = `VIEWS
-You look and carve from named views. Axis views carry two rulers labelled in block coordinates, so a point has the same numbers in every view; only the direction a ruler runs across the image changes.
-- front: horizontal ruler X, increasing rightward; vertical Y.
+Axis views carry rulers in block coordinates, so a point has the same numbers in every view; only the direction a ruler runs across the image changes.
+- front: horizontal X, increasing rightward; vertical Y.
 - back: horizontal X, increasing LEFTWARD; vertical Y.
-- right (from the +X side): horizontal Z, increasing LEFTWARD, so the piece's front is on the image's left; vertical Y.
-- left (from the -X side): horizontal Z, increasing rightward; vertical Y.
-- top (looking down): horizontal X, increasing rightward; vertical Z, increasing DOWNWARD, so the piece's front is at the bottom.
-- front_left, front_right, back_left, back_right: three-quarter views from above, for judging the form in the round. No rulers; you cannot carve from them.
-A point is {h, v}: h read off that view's horizontal ruler, v off its vertical ruler. Read the labels; never guess from position in the image.
-A carving tool works on the first surface it meets along the view direction, so carve the back from back and the crown of a head from top. Each result reports the 3D point hit, or a miss. Check it before going on.`
+- right (from +X): horizontal Z, increasing LEFTWARD, so the piece's front is on the image's left; vertical Y.
+- left (from -X): horizontal Z, increasing rightward; vertical Y.
+- top: horizontal X, increasing rightward; vertical Z, increasing DOWNWARD, so the front is at the bottom.
+- front_left, front_right, back_left, back_right: three-quarter views for judging the form in the round. No rulers, no carving.
+A point is {h, v}, read off that view's two rulers: read the labels, never guess from position in the image.
+Carving tools work on the first surface met along the view direction: carve the back from back, the crown of a head from top.`
 
   const stages = `ORDER OF WORK
-General to specific. Never detail a part before the whole mass is right.
-1. Rough out: the big waste off, down to a blocky envelope, leaving 3 to 4 cm.
-2. Block in: the main masses, their proportions and the planes between them, leaving 1 to 2 cm.
-3. Model: turn the masses into true forms and cut the transitions.
-4. Refine: features, edges and undercuts, with light cuts.
+General to specific: never detail a part before the whole mass is right.
+1. Rough out: the big waste off, leaving 3 to 4 cm.
+2. Block in: the main masses and the planes between them, leaving 1 to 2 cm.
+3. Model: true forms, and the transitions between them.
+4. Refine: features, edges and hollows, in small cuts, each one checked.
 5. Polish: smooth what should be smooth; leave tool marks where texture helps.
-First decide what the piece is: its pose, its main masses, and where each sits in block coordinates. Design for stone: one compact mass rising from a base, nothing thin or unsupported, using most of the block's height. Write the plan with \`note\`.`
+First decide what the piece is: pose, main masses, where each sits in block coordinates. Design for stone: one compact mass, nothing thin or unsupported.
+Make it big. The top of the figure belongs within 5 cm of the top of the block. The stone holds no detail under about 1 cm, so a feature must be 3 cm or more across to read: a head under 30 cm tall will not hold a face. Size the part that matters most first and fit the rest round it. Write the plan with \`note\`${formed ? ', then `sketch` the figure\'s outline on the front and one side of the block before the first cut' : ''}.`
 
   const tools = formed
     ? `TOOLS
-\`declare_form\` states the masses you want as simple solids; \`rough_out\` removes the stone outside a form, leaving a margin. Declare the whole figure as one form of overlapping shapes, rough out with a generous margin, look, then tighten the form or the margin and go again.
-Forms only give simple masses. What makes a piece read (the turn of a neck, the gap between limbs, ears, a brow) you carve by stroke: \`saw\` for straight waste, \`chisel\` with point, then claw, then flat as you close in, \`rasp\` to finish.`
+\`declare_form\` states the masses you want as simple solids; \`rough_out\` removes the stone outside a form, leaving a margin. Declare the whole figure as one form, rough out with a generous margin, look, then refine the form and go again closer.
+Build the form like the thing, not like a snowman. A narrow part between two wide ones (a neck, a waist) gets its own shape, clearly narrower than both but flaring into them, not a post, with a blend of 1 or 2 cm so it is not filled in. Shoulders are wide and shallow with a level top, not a ball. A \`slice\` shows whether such a join is really there.
+Features come from the form too. Add whatever stands proud (nose, brow, ears, chin, muzzle, paws) as small shapes and \`rough_out\` again at 0.5 cm with the claw: the hand leaves them standing. Hunting for a nose by chiselling the face down around it wrecks the face.
+Strokes are for what a form cannot say, hollows and lines: \`chisel\` with the roundel for grooves, the flat for planes and edges; \`drill\` for deep points. Give a stroke \`protect\` with your form's name unless it must cut into the form. Keep strokes small, no wider than a third of the feature, and take a \`closeup\` before and after: never cut a face from a full look.
+\`sketch\` marks the stone in charcoal: the outline first, centre lines and feature positions later. \`rasp\` smooths; \`polish\`, last, shines.`
     : `TOOLS
 You have a saw and three chisels. \`saw\` takes the big waste: corners and slabs outside the figure, from the front and then from the side. It cuts through the whole block along the view direction, so use it only where nothing you want lies behind the line. Then \`chisel\`: point in rows of strokes side by side to take the stone down, claw to even the surface, flat for planes and edges.`
 
   const numbers = [
     '- Mass remaining: if it barely moved, your passes are missing or too shallow.',
-    '- Bounding box: the stone\'s extent on each axis, to compare with the envelope you planned.'
+    '- Bounding box: compare it with the envelope you planned.'
   ]
-  if (formed) numbers.push('- Proud of form (max, mean): how far the stone still stands outside your forms. A large max is a region not yet reached; a mean near your margin means that stage is done.')
-  if (outlines) numbers.push('- Silhouette agreement: how closely the stone\'s outline matches the reference from front and left. It should rise as you work.')
+  if (formed) numbers.push('- Surface: the shares still raw from the chisel, rasped and polished, which the image cannot show.')
+  if (formed) numbers.push('- Proud of form (max, mean): how far the stone stands outside your forms. A large max is a region not yet reached; a mean near your margin means that stage is done.')
+  if (outlines) numbers.push('- Silhouette agreement: how closely the stone\'s outline matches the reference. It should rise as you work.')
 
   const looking = `LOOKING
-Look before you cut and after every two to four passes; after a pass that takes a lot, look at once. Ask for the views that show what changed, plus a three-quarter view.
-Looks return numbers measured by code. You judge small 3D differences poorly from an image, so when eye and number disagree, believe the number and look from another side.
+Look before you cut and after every two to four passes; after a pass that takes a lot, look at once, from the views that show what changed plus a three-quarter view.
+Looks return numbers measured by code. You judge small 3D differences poorly from an image: when eye and number disagree, believe the number and look from another side.
 ${numbers.join('\n')}`
 
   const reference = o.reference === 'none'
     ? ''
     : `REFERENCE SHEET
-Your first message carries a reference sheet: the intended piece in grey clay, top left the front view, top right the left, bottom left the back, bottom right the right, each seen as the view of that name. It is your design: carve toward it. It is a drawing, not a measurement, and its views will not agree exactly, so take proportions, pose and the placing of masses from it and let your looks settle the rest. The watcher never sees it, so do not mention it.
+Your first message carries a reference sheet: the intended piece in grey clay from four sides. It is your design, and a drawing, not a measurement: its views will not agree exactly, so take proportions, pose and the placing of masses from it and let your looks settle the rest. If it stands the subject on a tall pedestal, do not copy that: keep the base low and make the subject larger. The watcher never sees it, so do not mention it.
 ${outlines
-  ? `Its front and left outlines are traced and scaled to fill the block, centred, standing on the base: \`look\` with the reference overlay sets each view beside its quadrant and reports silhouette agreement${formed ? ', and `rough_out` to "reference" removes the stone outside them' : ''}.`
+  ? `Its front and left outlines are traced and scaled to fill the block, standing on the base: \`look\` with the reference overlay sets each view beside its quadrant and reports silhouette agreement${formed ? ', `rough_out` to "reference" removes the stone outside them, pedestal and all, and a `closeup` with the reference overlay sets the stone beside the same part of the sheet' : ''}.`
   : 'Its outlines could not be traced, so it is for your eyes only: no tool can cut to it or measure against it.'}`
 
   const budget = `BUDGET
-You have ${o.maxTurns} turns and $${n(o.maxUsd)} for the whole commission. A turn is one reply, and every reply must call a tool. Several calls in one reply run in order: batch passes you are sure of, but never stack a cut on a cut you have not seen. Keep the last tenth of the budget for refining and finishing. Each result ends with the turns and dollars used, and you will be warned as they run low. Always call \`finish\` before the budget runs out: a simpler piece brought to a clean end beats an ambitious one cut off mid-stroke.
-Every ${o.rebuildEvery} turns your earlier messages are cleared and replaced by your notebook, a one-line record of every pass, and a fresh look. The notebook is the only writing of yours that survives, so keep it current.`
+You have ${o.maxTurns} turns and $${n(o.maxUsd)} for the whole commission. A turn is one reply, and every reply must call a tool. Several calls in one reply run in order: batch passes you are sure of, but never stack a cut on a cut you have not seen.
+Use the budget: about a third of it to rough out and block in, a third to model and bring out the features, the rest to refine and finish.
+Before \`finish\`, look from all sides${formed ? ' and close up' : ''}, and judge the piece as a stranger would. Does it read as the commission from every side? Does it fill the block? Are the narrow parts narrow? Are the features in the stone, or only in your plan? Is the surface worked? Fix what you would fault. If the piece seems done with more than half your turns unspent, you are missing something: ${formed ? 'compare a `closeup` of the main feature with the reference or your plan, `slice` the profile, ' : ''}check every side, and work on the weakest thing you find. Call \`finish\` when a look shows nothing left worth a turn, or when a budget warning says to. Write the statement from that last look, naming only what the stone plainly shows.
+Every ${o.rebuildEvery} turns your earlier messages are cleared and replaced by your notebook, a one-line record of every pass, and a fresh look. Keep the notebook current: nothing else you wrote survives.`
 
   const voice = `VOICE
-Carving calls take \`why\`: one plain first-person sentence to the person watching about what you are doing and what for, such as "Taking the corners off above the shoulders so the head can come forward." No coordinates.`
+Carving calls take \`why\`: one plain first-person sentence to the person watching about what you are doing and what for, such as "Taking the corners off so the head can come forward." No coordinates.`
 
   return [intro, block, views, stages, tools, looking, reference, budget, voice].filter(Boolean).join('\n\n')
 }

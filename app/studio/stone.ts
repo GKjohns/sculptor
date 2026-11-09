@@ -51,7 +51,7 @@ export class Stone {
   private waiters: { rev: number, done: () => void }[] = []
   private stop: () => void
 
-  constructor(private studio: StudioRenderer, readonly grid: GridInfo) {
+  constructor(private studio: StudioRenderer, public grid: GridInfo) {
     this.material = new THREE.MeshPhysicalNodeMaterial({ color: MARBLE })
     this.material.roughnessNode = mix(float(ROUGH), float(POLISHED), attribute('finish', 'float'))
     this.stop = studio.onFrame(dt => this.frame(dt))
@@ -83,6 +83,25 @@ export class Stone {
   whenShown(rev: number) {
     if (this.shownRev >= rev) return Promise.resolve()
     return new Promise<void>(done => this.waiters.push({ rev, done }))
+  }
+
+  /**
+   * Starts over on a fresh block. Call it when the worker reports the new block ready, before its
+   * first mesh lands: that mesh covers every chunk, so the old ones are refilled in place.
+   */
+  reset(grid: GridInfo) {
+    const g = this.grid
+    if (grid.nx !== g.nx || grid.ny !== g.ny || grid.nz !== g.nz || grid.chunk !== g.chunk || grid.voxel !== g.voxel) {
+      for (const mesh of this.meshes.values()) this.drop(mesh)
+      this.meshes.clear()
+    }
+    this.grid = grid
+    for (const piece of this.falling) this.drop(piece.mesh)
+    this.falling = []
+    this.loose = []
+    this.incoming.clear()
+    this.fresh = false
+    this.arrivedRev = this.shownRev = -1
   }
 
   dispose() {

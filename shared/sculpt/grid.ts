@@ -9,7 +9,7 @@ export const Q_PER_VOXEL = Q_MAX / BAND_VOXELS
 export const DENSITY = 2.71
 
 // Finish-channel values: 0 is rough, 255 is polished.
-export const FINISH = { point: 20, claw: 60, sawn: 90, flat: 110, rasp: 170, polished: 255 } as const
+export const FINISH = { point: 20, drill: 45, claw: 60, sawn: 90, flat: 110, roundel: 125, rasp: 170, polished: 255 } as const
 
 // Air samples kept on every side of the block. Two is the least that lets the mesher and the
 // island check read a neighbour of a neighbour of any stone voxel without bounds checks.

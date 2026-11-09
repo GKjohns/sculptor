@@ -7,9 +7,10 @@ import { buildInstructions } from './prompt.ts'
 import { describeCall, parseCall, toolDefs } from './toolSchemas.ts'
 import { NUDGE_NO_CALL, budgetStatus, budgetWarning, buildContext, formatNumbers, lookReminder, passLine, resultMessages, toBase64 } from './context.ts'
 import type { CallResult, LookSheet } from './context.ts'
-import { DEFAULT_CONFIG, PASS_TOOLS } from './types.ts'
-import type { BrainTurn, BudgetLevel, LoopEvent, Message, PassRecord, PassTool, ReferenceMode, RunConfig, RunEnd, RunOptions, RunResult, RunState, StudioResult, ToolCall } from './types.ts'
-import type { FinishArgs, LookArgs, NoteArgs } from './toolSchemas.ts'
+import { DEFAULT_CONFIG, LOOK_TOOLS, PASS_TOOLS } from './types.ts'
+import type { BrainTurn, BudgetLevel, LookTool, LoopEvent, Message, PassRecord, PassTool, ReferenceMode, RunConfig, RunEnd, RunOptions, RunResult, RunState, StudioResult, ToolCall } from './types.ts'
+import type { CloseupArgs, FinishArgs, LookArgs, NoteArgs, SliceArgs } from './toolSchemas.ts'
+import { SLICE_VIEW } from '../sculpt/measure.ts'
 
 // The look the loop takes for itself when it rebuilds the context.
 const REBUILD_LOOK: LookArgs = { views: ['front', 'right', 'back', 'left', 'top', 'front_right'], overlay: 'grid' }
@@ -226,6 +227,17 @@ export async function runCommission(opts: RunOptions): Promise<RunResult> {
           sheets.push({ id: call.id, label: `Contact sheet: ${a.views.join(', ')} (${a.overlay} overlay).`, images: images.map(toBase64) })
         }
         emit({ type: 'look', turn, auto: false, views: a.views, overlay: a.overlay, images, summary: done.summary, numbers: done.numbers })
+      } else if ((LOOK_TOOLS as readonly string[]).includes(parsed.name)) {
+        // A close-up or a slice: an image comes back, but the whole stone has not been seen,
+        // so the count of passes since the last look carries on.
+        const tool = parsed.name as LookTool
+        const view = tool === 'slice' ? SLICE_VIEW[(parsed.args as SliceArgs).axis] : (parsed.args as CloseupArgs).view
+        const overlay = tool === 'slice' ? 'slice' : (parsed.args as CloseupArgs).overlay
+        if (images.length) {
+          text += '\nThe image is in the next message.'
+          sheets.push({ id: call.id, label: `${describeCall(parsed.name, parsed.args)}.`, images: images.map(toBase64) })
+        }
+        emit({ type: 'look', turn, auto: false, views: [view], overlay, images, summary: done.summary, numbers: done.numbers, tool, args: parsed.args })
       } else if ((PASS_TOOLS as readonly string[]).includes(parsed.name)) {
         const tool = parsed.name as PassTool
         const n = state.passes.length + 1
@@ -241,7 +253,8 @@ export async function runCommission(opts: RunOptions): Promise<RunResult> {
           strikes: done.strikes.length
         }
         state.passes.push(pass)
-        if (tool !== 'declare_form') sinceLook++
+        // Declaring a form and drawing a line change nothing a look would show differently.
+        if (tool !== 'declare_form' && tool !== 'sketch') sinceLook++
       }
 
       results.push({ id: call.id, name: call.name, ok: true, text })

@@ -732,6 +732,62 @@ function abrade(grid: Grid, strike: CutStrike, spec: ToolSpec): StrikeResult {
   return commit(grid, removed, form, minX, minY, minZ, maxX, maxY, maxZ)
 }
 
+// The polish. No distance changes, so no stone moves: the finish of the surface samples
+// inside the pad (the same skin a cutting tool marks) rises toward the polish's own, by the
+// share of the remaining gap the strike carries as its depth. Chunks are flagged because
+// their meshes bake the finish in.
+function burnish(grid: Grid, strike: CutStrike, spec: ToolSpec): StrikeResult {
+  const { nx, ny, nz, voxel, x0, y0, z0, dist, finish } = grid
+  const result: StrikeResult = { dirtyChunks: [], removedCm3: 0, offcuts: [] }
+  const radius = Math.max(strike.size / 2, voxel)
+  const r2 = radius * radius
+  const share = strike.depth > 1 ? 1 : strike.depth > 0 ? strike.depth : 0
+  const top = spec.finish
+  const [ax, ay, az] = strike.at
+  const ia = Math.max(0, Math.ceil((ax - radius - x0) / voxel))
+  const ib = Math.min(nx - 1, Math.floor((ax + radius - x0) / voxel))
+  const ja = Math.max(0, Math.ceil((ay - radius - y0) / voxel))
+  const jb = Math.min(ny - 1, Math.floor((ay + radius - y0) / voxel))
+  const ka = Math.max(0, Math.ceil((az - radius - z0) / voxel))
+  const kb = Math.min(nz - 1, Math.floor((az + radius - z0) / voxel))
+  let minX = nx
+  let maxX = -1
+  let minY = ny
+  let maxY = -1
+  let minZ = nz
+  let maxZ = -1
+  for (let z = ka; z <= kb; z++) {
+    const dz = z0 + z * voxel - az
+    for (let y = ja; y <= jb; y++) {
+      const dy = y0 + y * voxel - ay
+      let i = ia + nx * (y + ny * z)
+      let touched = false
+      for (let x = ia; x <= ib; x++, i++) {
+        const q = dist[i]!
+        if (q <= FINISH_REACH || q >= Q_PER_VOXEL) continue
+        const old = finish[i]!
+        if (old >= top) continue
+        const dx = x0 + x * voxel - ax
+        if (dx * dx + dy * dy + dz * dz >= r2) continue
+        const next = old + Math.ceil((top - old) * share)
+        if (next === old) continue
+        finish[i] = next
+        if (x < minX) minX = x
+        if (x > maxX) maxX = x
+        touched = true
+      }
+      if (touched) {
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+        if (z < minZ) minZ = z
+        if (z > maxZ) maxZ = z
+      }
+    }
+  }
+  if (maxX >= 0) markDirtyBox(grid, minX, minY, minZ, maxX, maxY, maxZ, result.dirtyChunks)
+  return result
+}
+
 // The stretch of a row of samples that lies less than `reach` behind a plane whose signed
 // distance along the row is slope * x + offset. Empty when first > last.
 function firstInRow(slope: number, offset: number, reach: number): number {
@@ -871,8 +927,11 @@ export function applyStrike(grid: Grid, strike: Strike): StrikeResult {
     declareForm(grid, strike.name, strike)
     return { dirtyChunks: [], removedCm3: 0, offcuts: [] }
   }
+  // Charcoal is drawn by whoever shows the stone; the stone itself does not know of it.
+  if (strike.kind === 'sketch') return { dirtyChunks: [], removedCm3: 0, offcuts: [] }
   const spec = toolSpec(strike.tool)
   if (spec.mode === 'bite') return bite(grid, strike, spec)
   if (spec.mode === 'abrade') return abrade(grid, strike, spec)
+  if (spec.mode === 'burnish') return burnish(grid, strike, spec)
   throw new Error(`the ${strike.tool} works as a '${spec.mode}' strike, not a cut`)
 }

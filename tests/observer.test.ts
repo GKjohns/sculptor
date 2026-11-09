@@ -8,7 +8,8 @@ import { decodePng, encodePng } from '../bench/png.ts'
 import { cloneGrid, createGrid } from '../shared/sculpt/grid.ts'
 import { maskToBlock } from '../shared/sculpt/measure.ts'
 import type { Mask } from '../shared/sculpt/measure.ts'
-import { blockToPixel, layoutContactSheet, pixelToBlock, renderContactSheet, renderView } from '../shared/sculpt/observer.ts'
+import { sketch } from '../shared/sculpt/hand.ts'
+import { blockToPixel, layoutContactSheet, pixelToBlock, renderCloseup, renderContactSheet, renderSlice, renderView } from '../shared/sculpt/observer.ts'
 import type { Image, TileLayout } from '../shared/sculpt/observer.ts'
 import { applyStrike } from '../shared/sculpt/strike.ts'
 import { AXIS_VIEWS, VIEW_IDS } from '../shared/sculpt/views.ts'
@@ -319,4 +320,148 @@ test('the reference overlay pairs side views with their tiles and outlines', () 
   assert.equal(bare.tiles.length, 3)
   // The same inputs in grid mode are ignored.
   assert.equal(layoutContactSheet(grid, views, { overlay: 'grid', reference }).tiles.length, 3)
+})
+
+const lum = (c: [number, number, number]) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
+
+test('a charcoal line shows where it was drawn, and stays as a ghost once that stone is gone', () => {
+  const grid = createGrid()
+  // Clear of the grid lines, which fall on every fifth centimetre.
+  const line = sketch(grid, { view: 'front', path: [[-10, 52.5], [10, 52.5]] }).strikes[0]!
+  assert.ok(line.kind === 'sketch')
+  const views: ViewId[] = ['front', 'front_right', 'back']
+  const plain = renderContactSheet(grid, views)
+  const drawn = renderContactSheet(grid, views, { sketches: [line] })
+  // The legend gains an entry and nothing else moves.
+  assert.ok(drawn.height >= plain.height && drawn.width === plain.width)
+  const [front, quarter, back] = layoutContactSheet(grid, views, { sketches: [line] }).tiles as [TileLayout, TileLayout, TileLayout]
+  const changed = (a: Image, b: Image, tile: TileLayout) => {
+    let n = 0
+    for (let y = tile.plot.y; y < tile.plot.y + tile.plot.height; y++) {
+      for (let x = tile.plot.x; x < tile.plot.x + tile.plot.width; x++) {
+        const i = (x + y * a.width) * 4
+        if (a.data[i] !== b.data[i] || a.data[i + 1] !== b.data[i + 1]) n++
+      }
+    }
+    return n
+  }
+  // Dark on the face it was drawn on, at its ruler position and only along its length.
+  const at = (img: Image, h: number, v: number) => rgb(img, ...blockToPixel(front, h, v))
+  assert.ok(lum(at(drawn, 1.3, 52.5)) < 90 && lum(at(plain, 1.3, 52.5)) > 120, `on the line: ${at(drawn, 1.3, 52.5)} over ${at(plain, 1.3, 52.5)}`)
+  assert.deepEqual(at(drawn, 1.3, 56), at(plain, 1.3, 56))
+  assert.deepEqual(at(drawn, 13.7, 52.5), at(plain, 13.7, 52.5))
+  const inFront = changed(plain, drawn, front)
+  assert.ok(inFront > 150 && inFront < 600, `${inFront} pixels`)
+  // The face is in sight from the front right, and out of sight from behind.
+  assert.ok(changed(plain, drawn, quarter) > 60)
+  assert.equal(changed(plain, drawn, back), 0)
+
+  // Take 6 cm off the front. The charcoal went with it: a pale ghost stays in the view it
+  // was drawn from, and nothing shows from the side.
+  const cut = cloneGrid(grid)
+  saw(cut, [0, 0, 24], [0, 0, 1])
+  const bare = renderContactSheet(cut, views)
+  const ghost = renderContactSheet(cut, views, { sketches: [line] })
+  const there = rgb(ghost, ...blockToPixel(front, 1.3, 52.5))
+  const was = rgb(bare, ...blockToPixel(front, 1.3, 52.5))
+  assert.ok(lum(there) > 110 && lum(there) < lum(was) - 25, `ghost ${there} over ${was}`)
+  assert.equal(changed(bare, ghost, quarter), 0)
+
+  // A close-up carries it too.
+  const near = renderCloseup(grid, 'front', [0, 50], 20, { sketches: [line] })
+  assert.ok(lum(rgb(near.image, ...blockToPixel(near.tile, 1.3, 52.5))) < 90)
+})
+
+test('a close-up shows a window of one view under the same rulers, a line per centimetre', () => {
+  const grid = post()
+  // 20 cm across around the post's right-hand edge at X 20, seen from the front.
+  const shot = renderCloseup(grid, 'front', [20, 40], 20)
+  const { tile, image } = shot
+  assert.equal(tile.view, 'front')
+  assert.ok(shot.pxPerCm >= 30 && tile.plot.width === Math.round(20 * shot.pxPerCm) && tile.plot.height === tile.plot.width)
+  assert.ok(image.width >= tile.plot.x + tile.plot.width && image.height > tile.plot.y + tile.plot.height)
+  // The rulers are block centimetres: the window's centre is the point asked for.
+  const [cx, cy] = blockToPixel(tile, 20, 40)
+  assert.ok(Math.abs(cx - (tile.plot.x + tile.plot.width / 2)) < 1e-9 && Math.abs(cy - (tile.plot.y + tile.plot.height / 2)) < 1e-9)
+  // Stone left of X 20, air right of it.
+  assert.equal(isClay(image, ...blockToPixel(tile, 15.4, 40.4)), true)
+  assert.equal(isClay(image, ...blockToPixel(tile, 24.6, 40.4)), false)
+  assert.ok(Math.abs(shot.stoneShare - 0.5) < 0.02, `stone share ${shot.stoneShare}`)
+  // Looking along Z at the post's front face.
+  assert.equal(shot.axis, 'z')
+  assert.ok(Math.abs(shot.surfaceMin - 14) < 0.2 && Math.abs(shot.surfaceMax - 14) < 0.2, `surface ${shot.surfaceMin}..${shot.surfaceMax}`)
+  // A grid line every centimetre: a pixel on a line differs from one between lines.
+  const on = rgb(image, ...blockToPixel(tile, 13, 40.5))
+  const off = rgb(image, ...blockToPixel(tile, 13.5, 40.5))
+  assert.ok(lum(on) < lum(off) - 4, `line ${on} against ${off}`)
+
+  // From the right the ruler runs the other way, and the picture agrees with it.
+  const side = renderCloseup(grid, 'right', [14, 70], 30)
+  assert.equal(side.axis, 'x')
+  assert.equal(isClay(side.image, ...blockToPixel(side.tile, 10, 72)), true)
+  assert.equal(isClay(side.image, ...blockToPixel(side.tile, 18, 72)), false)
+  assert.equal(isClay(side.image, ...blockToPixel(side.tile, 10, 83)), false)
+  assert.ok(blockToPixel(side.tile, 18, 72)[0] < blockToPixel(side.tile, 10, 72)[0])
+
+  // With a form, the window says how far the stone in it stands proud.
+  applyStrike(grid, { kind: 'form', name: 'ball', shapes: [{ kind: 'ellipsoid', center: [15, 40, 10], size: [8, 8, 8], rotation: [0, 0, 0] }], blend: 0 })
+  const formed = renderCloseup(grid, 'front', [15, 40], 16, { overlay: 'form' })
+  // The corner of the window on the post's face is 10.2 cm from the ball's centre.
+  assert.ok(Math.abs(formed.proudMax! - 6.2) < 0.4 && formed.belowMax === 0, `${formed.proudMax} / ${formed.belowMax}`)
+  assert.equal(renderCloseup(grid, 'front', [15, 40], 16).proudMax, undefined)
+  // An empty window is still a picture.
+  assert.equal(renderCloseup(grid, 'front', [-20, 90], 10).stoneShare, 0)
+  // Same stone, same pixels.
+  assert.deepEqual(renderCloseup(grid, 'front', [20, 40], 20).image.data, image.data)
+})
+
+test('a slice draws the stone cut by a plane under the rulers of the view it matches', () => {
+  const grid = post()
+  const scale = 8
+  // The slice's one tile sits where a one-view sheet of the matching view would put it.
+  const tileOf = (view: ViewId) => layoutContactSheet(grid, [view], { pxPerCm: scale }).tiles[0]!
+  const stone = (img: Image, x: number, y: number) => {
+    const c = rgb(img, x, y)
+    return c[0] > 150 && c[0] >= c[2]
+  }
+  // Level through the post, as the top view: X across, Z down.
+  const level = renderSlice(grid, 'y', 40)
+  const top = tileOf('top')
+  assert.ok(level.width >= top.x + top.width && level.height > top.y + top.height)
+  // (Sample points keep off the grid lines on every fifth centimetre.)
+  assert.equal(stone(level, ...blockToPixel(top, 16.3, 11.3)), true)
+  assert.equal(stone(level, ...blockToPixel(top, 11.3, 7.3)), true)
+  assert.equal(stone(level, ...blockToPixel(top, 8.3, 11.3)), false)
+  assert.equal(stone(level, ...blockToPixel(top, 16.3, 16.3)), false)
+  assert.equal(stone(level, ...blockToPixel(top, -16.3, 11.3)), false)
+  // Above the post there is nothing in the plane.
+  assert.equal(stone(renderSlice(grid, 'y', 90), ...blockToPixel(top, 16.3, 11.3)), false)
+  // Front to back through it, as the left view: Z across, Y up.
+  const profile = renderSlice(grid, 'x', 15)
+  const left = tileOf('left')
+  assert.equal(stone(profile, ...blockToPixel(left, 11.3, 41.3)), true)
+  assert.equal(stone(profile, ...blockToPixel(left, 11.3, 86.3)), false)
+  assert.equal(stone(profile, ...blockToPixel(left, 3.3, 41.3)), false)
+  assert.equal(stone(renderSlice(grid, 'x', 5), ...blockToPixel(left, 11.3, 41.3)), false)
+  // Facing the viewer, as the front view.
+  const facing = renderSlice(grid, 'z', 10)
+  const front = tileOf('front')
+  assert.equal(stone(facing, ...blockToPixel(front, 16.3, 41.3)), true)
+  assert.equal(stone(facing, ...blockToPixel(front, 26.3, 41.3)), false)
+
+  // The form's section is outlined in the same plane, the stone outside it is tinted, and
+  // form that has no stone is violet.
+  applyStrike(grid, { kind: 'form', name: 'slab', shapes: [{ kind: 'box', center: [20, 40, 10], size: [12, 20, 4], rotation: [0, 0, 0] }], blend: 0 })
+  const fit = renderSlice(grid, 'y', 40)
+  const inside = rgb(fit, ...blockToPixel(top, 17.3, 10.6))
+  const proud = rgb(fit, ...blockToPixel(top, 11.5, 12.9))
+  const lost = rgb(fit, ...blockToPixel(top, 24.3, 10.6))
+  assert.ok(Math.abs(inside[0] - inside[2]) < 20, `inside the form is plain stone (${inside})`)
+  assert.ok(proud[0] > proud[2] + 60, `outside the form is tinted (${proud})`)
+  assert.ok(lost[2] > lost[0] + 50, `form with no stone is violet (${lost})`)
+  const edge = rgb(fit, ...blockToPixel(top, 14, 10.6))
+  assert.ok(edge[2] > 200 && edge[0] < 60, `the form's outline is cyan (${edge})`)
+  // Plain again when no form is asked for; and the same call gives the same picture.
+  assert.deepEqual(renderSlice(grid, 'y', 40, { forms: [] }).data, level.data)
+  assert.deepEqual(renderSlice(grid, 'y', 40).data, fit.data)
 })

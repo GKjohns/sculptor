@@ -9,7 +9,7 @@ import { toBase64 } from '../shared/agent/context.ts'
 import { createRng } from '../shared/sculpt/rng.ts'
 import { newMeter, settleCost } from './brain.ts'
 import type { CostLine } from './reference.ts'
-import { JUDGE_LABELS } from './subjects.ts'
+import { JUDGE_LABELS, tidySentence } from './subjects.ts'
 
 export interface Verdict {
   pick: string
@@ -86,7 +86,7 @@ export async function judge(opts: JudgeOptions): Promise<Verdict> {
     const usage = usageOf(r.usage)
     const cost: CostLine = { what: 'judge', model, usage, usd: settleCost(model, usage, r.providerMetadata, newMeter(), opts.log) }
     const out = r.output as z.infer<typeof schema>
-    return { pick: out.pick, confidence: out.confidence, reasoning: out.reasoning, labels, model, cost }
+    return { pick: out.pick, confidence: out.confidence, reasoning: tidySentence(out.reasoning), labels, model, cost }
   } catch (err) {
     return { pick: '', confidence: 0, reasoning: '', labels, model, cost: null, error: (err as Error).message.slice(0, 300) }
   }

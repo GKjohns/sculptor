@@ -6,7 +6,7 @@ import { z } from 'zod'
 import type { ToolSet } from 'ai'
 import { AXIS_VIEWS, VIEW_IDS } from '../sculpt/views.ts'
 import { STAGES } from './types.ts'
-import type { PassTool, ReferenceMode, ToolCall, ToolName, ToolSetId } from './types.ts'
+import type { LookTool, PassTool, ReferenceMode, ToolCall, ToolName, ToolSetId } from './types.ts'
 
 export interface ToolOptions {
   toolSet: ToolSetId
@@ -15,9 +15,11 @@ export interface ToolOptions {
 
 // The name `rough_out` takes in `to` to mean the traced reference outlines.
 export const REFERENCE_TARGET = 'reference'
+// What `chisel` takes in `protect` to mean no form at all.
+export const NO_PROTECT = 'none'
 
 const DIRECT: ToolName[] = ['look', 'saw', 'chisel', 'note', 'finish']
-const FORMED: ToolName[] = ['look', 'declare_form', 'rough_out', 'saw', 'chisel', 'rasp', 'note', 'finish']
+const FORMED: ToolName[] = ['look', 'closeup', 'slice', 'sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish']
 
 export function toolNames(toolSet: ToolSetId): ToolName[] {
   return toolSet === 'direct' ? DIRECT : FORMED
@@ -50,13 +52,38 @@ const shape = z.object({
 
 const OVERLAYS = ['grid', 'form', 'reference'] as const
 
+// The stroke-only tool set keeps the chisel it was studied with: three tools, nothing protected.
+const chiselDirect = z.object({
+  tool: z.enum(['point', 'claw', 'flat']),
+  view: carveView,
+  path,
+  depth_cm: z.number().min(0.1).max(8).describe('How deep each bite goes'),
+  width_cm: z.number().min(0.5).max(12).describe('Width of the channel the stroke leaves'),
+  why
+})
+
 const SCHEMAS = {
   look: z.object({
     views: z.array(z.enum(VIEW_IDS)).min(1).max(6),
     overlay: z.enum(OVERLAYS)
   }),
+  closeup: z.object({
+    view: carveView,
+    center: point,
+    span_cm: z.number().min(8).max(50).describe('Width and height of the square window, cm'),
+    overlay: z.enum(OVERLAYS)
+  }),
+  slice: z.object({
+    axis: z.enum(['x', 'y', 'z']).describe('The block axis the cutting plane is square to'),
+    at_cm: z.number().describe('Where the plane sits on that axis, block cm')
+  }),
+  sketch: z.object({
+    view: carveView,
+    path: z.array(point).min(2).max(32).describe('Points along the line, in order'),
+    why
+  }),
   declare_form: z.object({
-    name: z.string().min(1).max(40).refine(n => n !== REFERENCE_TARGET, { message: `"${REFERENCE_TARGET}" is reserved; choose another name` }),
+    name: z.string().min(1).max(40).refine(n => n !== REFERENCE_TARGET && n !== NO_PROTECT, { message: `"${REFERENCE_TARGET}" and "${NO_PROTECT}" are reserved; choose another name` }),
     shapes: z.array(shape).min(1).max(12),
     blend_cm: z.number().min(0).max(10).describe('Radius of the smooth blend where shapes meet; 0 for hard joins'),
     why
@@ -80,11 +107,19 @@ const SCHEMAS = {
     else if (a.from.h === a.to.h && (a.discard === 'above' || a.discard === 'below')) ctx.addIssue({ code: 'custom', path: ['discard'], message: 'a vertical line has no above or below; use left or right' })
   }),
   chisel: z.object({
-    tool: z.enum(['point', 'claw', 'flat']),
+    tool: z.enum(['point', 'claw', 'flat', 'roundel']),
     view: carveView,
     path,
     depth_cm: z.number().min(0.1).max(8).describe('How deep each bite goes'),
     width_cm: z.number().min(0.5).max(12).describe('Width of the channel the stroke leaves'),
+    protect: z.string().min(1).describe(`A form of yours that the stroke must not cut into, or "${NO_PROTECT}"`),
+    why
+  }),
+  drill: z.object({
+    view: carveView,
+    at: point,
+    diameter_cm: z.number().min(0.8).max(6),
+    depth_cm: z.number().min(0.5).max(30).describe('How far in from the surface the hole goes'),
     why
   }),
   rasp: z.object({
@@ -92,6 +127,13 @@ const SCHEMAS = {
     path,
     width_cm: z.number().min(1).max(15),
     passes: z.number().int().min(1).max(6).describe('Times over the same path; more is smoother'),
+    why
+  }),
+  polish: z.object({
+    view: carveView,
+    path,
+    width_cm: z.number().min(1).max(15),
+    passes: z.number().int().min(1).max(6).describe('Times over the same path; more is glossier'),
     why
   }),
   note: z.object({
@@ -105,11 +147,17 @@ const SCHEMAS = {
 }
 
 export type LookArgs = z.infer<typeof SCHEMAS.look>
+export type CloseupArgs = z.infer<typeof SCHEMAS.closeup>
+export type SliceArgs = z.infer<typeof SCHEMAS.slice>
+export type SketchArgs = z.infer<typeof SCHEMAS.sketch>
 export type DeclareFormArgs = z.infer<typeof SCHEMAS.declare_form>
 export type RoughOutArgs = z.infer<typeof SCHEMAS.rough_out>
 export type SawArgs = z.infer<typeof SCHEMAS.saw>
-export type ChiselArgs = z.infer<typeof SCHEMAS.chisel>
+// `protect` is absent in the stroke-only tool set, which has no forms to name.
+export type ChiselArgs = Omit<z.infer<typeof SCHEMAS.chisel>, 'protect'> & { protect?: string }
+export type DrillArgs = z.infer<typeof SCHEMAS.drill>
 export type RaspArgs = z.infer<typeof SCHEMAS.rasp>
+export type PolishArgs = z.infer<typeof SCHEMAS.polish>
 export type NoteArgs = z.infer<typeof SCHEMAS.note>
 export type FinishArgs = z.infer<typeof SCHEMAS.finish>
 export type ViewPoint = z.infer<typeof point>
@@ -117,17 +165,22 @@ export type ShapeArgs = z.infer<typeof shape>
 
 export interface ToolArgs {
   look: LookArgs
+  closeup: CloseupArgs
+  slice: SliceArgs
+  sketch: SketchArgs
   declare_form: DeclareFormArgs
   rough_out: RoughOutArgs
   saw: SawArgs
   chisel: ChiselArgs
+  drill: DrillArgs
   rasp: RaspArgs
+  polish: PolishArgs
   note: NoteArgs
   finish: FinishArgs
 }
 
 // What a Studio receives: the loop has validated `args`, so `call as StudioCall` is sound.
-export type StudioTool = 'look' | PassTool
+export type StudioTool = LookTool | PassTool
 export type StudioCall = { [K in StudioTool]: { id: string, name: K, args: ToolArgs[K] } }[StudioTool]
 
 export interface ToolDef {
@@ -143,6 +196,7 @@ function describe(name: ToolName, o: ToolOptions): string {
     case 'look':
       return [
         'Step back and look at the stone. Returns one contact sheet image of the views you ask for (it arrives in the next message) and numbers measured by code: mass remaining (mass_kg, removed_pct) and the stone\'s bounding box (bbox_*)'
+        + (formed ? ', how much of the surface is still raw chisel work, rasped, or polished (surface_*_pct; a look\'s image shows every finish alike)' : '')
         + (formed ? ', how far the stone stands proud of your declared forms taken together (form_proud_max_cm and form_proud_mean_cm; form_overcut_* is form that no longer has stone, which cannot be put back)' : '')
         + (outlines ? ', and with the reference overlay how well the stone\'s silhouette agrees with the reference outlines from the front and the left (silhouette_*_iou, 1 is a perfect match; stone_outside_outline_pct is still to remove, outline_not_covered_pct is already lost)' : '') + '.',
         'views: up to 6 of front, back, right, left, top (axis views with centimetre rulers in block coordinates) and front_left, front_right, back_left, back_right (three-quarter views, no rulers, for judging the form in the round).',
@@ -150,18 +204,39 @@ function describe(name: ToolName, o: ToolOptions): string {
         + (formed ? ' form also draws your declared forms over the stone: their outline in cyan, stone that stands proud of them tinted yellow, orange, then red (about 1, 4 and 12 cm or more proud), and blue to violet where the stone has been cut below the form.' : '')
         + (outlines ? ' reference puts each side view (front, back, left, right) beside the matching view of the reference sheet under the same rulers, so coordinates can be read off the reference: the reference outline is drawn in cyan over the stone, stone outside it is tinted orange, outline with no stone behind it is dark violet, and the stone\'s own outline is drawn in yellow over the reference.' : '')
       ].join(' ')
+    case 'closeup':
+      return [
+        'Look closely at one part of the stone: one axis view enlarged to a square window span_cm across, centred on center, under the same rulers and with a grid line every centimetre, so a point read off it goes straight into a carving tool. In a full look a face is a few dozen pixels across; take a close-up before you work on anything small (a face, an ear, a paw) and again after, or you are carving blind.',
+        POINTS,
+        'overlay: as in look.' + (outlines ? ' With reference, the same window of the reference sheet sits beside the stone, so you can read off where its features are.' : ''),
+        'Numbers: the share of the window that is stone, and the nearest and deepest surface in it along the view direction (surface_*_min_cm, surface_*_max_cm, relief_cm)' + (formed ? '; with the form overlay, how far the surface in the window stands proud of your forms or is cut below them' : '') + '.'
+      ].join(' ')
+    case 'slice':
+      return [
+        'Cut the stone open with an imaginary plane and look at the section. Nothing is carved. It shows what no look can: how thick a neck or a waist really is, how far a nose stands off a face, whether a hollow is as deep as you think.',
+        'axis y is a level plane at height at_cm, drawn as the top view shows it (X across, Z down the image, the front at the bottom). axis x is an upright plane running front to back at that X, drawn as the left view (Z across with the front on the right, Y up): at_cm 0 is the profile through the middle of a face. axis z is an upright plane facing you at that Z, drawn as the front view.',
+        'The section of your forms in the same plane is outlined in cyan, with stone outside it tinted yellow to red and form that has no stone in violet.' + (outlines ? ' The pink line is the reference: its front and left outlines pushed through the block.' : ''),
+        'Numbers: the section\'s area and its extent on each ruler (section_*).'
+      ].join(' ')
+    case 'sketch':
+      return [
+        'Draw a line on the stone in charcoal, the way a sculptor marks a block before cutting: a profile on a face of the block, a centre line, where a feature will sit. path is the line, laid on the first surface it meets from that view.',
+        POINTS,
+        'It cuts nothing and no tool cuts to it. It shows in your looks and close-ups from then on: dark on the stone it was drawn on, and in its own view a faint ghost once that stone has been cut away, so a profile drawn on the block stays as a guide. The person watching sees you draw it.'
+      ].join(' ')
     case 'declare_form':
       return [
         'Declare the masses the stone should end up as, as a few simple solids in block coordinates (cm). Nothing is cut. Declaring a name again replaces that form.',
         'Every shape has a centre, a full size along its own three axes, and a rotation in degrees (Euler order XYZ; 0 0 0 is upright, and most shapes need at most one turn). An ellipsoid or box fills its size. A capsule or cone stands along its own Y: size_y is its full length, size_x and size_z its thickness, and a cone has its base at the -Y end and its point at the +Y end.',
         'Overlap shapes that belong to one mass; blend_cm rounds the joins between them.',
-        'Put the whole figure, base included, in one form: rough_out protects only the form it is given. The result says where the form sits in the block and warns if it does not reach the base.'
+        'Put the whole figure, base included, in one form: rough_out protects only the form it is given. The result says where the form sits in the block and warns if it does not reach the base.',
+        'Whatever stands proud of a surface (a nose, ears, a brow, a chin, a muzzle, paws) belongs in the form as a small shape of its own, with a blend of 1 cm or less so it is not smoothed away. Declared, it is left standing by rough_out and can be protected from every stroke; left to be found later by chiselling, it is usually destroyed.'
       ].join(' ')
     case 'rough_out':
       return [
         'Remove the stone that lies outside a target, leaving margin_cm of stone standing all round it. The hand saws off any big slabs first, then works down with the chisel you choose: point is fast and coarse, claw is slower and leaves an even surface.',
         `to: the name of a form you have declared${outlines ? `, or "${REFERENCE_TARGET}" for the volume inside both the front and the left outline of the reference sheet` : ''}. Only that target is protected: stone inside any other form you declared is cut away like the rest. The target must be one connected mass standing on the base (Y 0); one that floats, or has a part not joined to the rest, is refused and nothing is cut.`,
-        'Start with a generous margin (3 to 4 cm) and come back with a smaller one after looking; stone cannot be put back.'
+        'Start with a generous margin (3 to 4 cm) and come back with a smaller one after looking; stone cannot be put back. Once the form carries the features, a last pass with the claw at 0.5 cm or less is the safe way to bring them out of the stone.'
       ].join(' ')
     case 'saw':
       return [
@@ -172,9 +247,22 @@ function describe(name: ToolName, o: ToolOptions): string {
     case 'chisel':
       return [
         'One chisel stroke along a path on the surface. Each bite goes depth_cm into the stone, square to the surface at that point, and the stroke leaves a channel width_cm wide. To lower an area, lay strokes side by side about one width apart.',
-        'tool: point is for fast rough removal and leaves a coarse surface (bites of 1 to 4 cm). claw evens out what the point left (0.5 to 1.5 cm). flat makes clean planes and crisp edges (0.2 to 1 cm).',
+        'tool: point is for fast rough removal and leaves a coarse surface (bites of 1 to 4 cm). claw evens out what the point left (0.5 to 1.5 cm). flat makes clean planes and crisp edges (0.2 to 1 cm).'
+        + (formed ? ' roundel has a rounded end and leaves a smooth concave channel: the line of a mouth, a fold, the groove under a brow or round an eye (0.3 to 1.5 cm deep, never more than 1.5 times its width).' : ''),
+        ...(formed
+          ? [
+              `protect: the name of one of your forms, or "${NO_PROTECT}". The stroke cannot cut into that form however deep you ask, so name your figure's form whenever you clear stone from around something in it (beside a nose, behind an ear, under a chin). "${NO_PROTECT}" lets the stroke cut whatever it meets: only for sinking a hollow into the form itself (an eye socket, a mouth, a nostril), and then shallow.`,
+              'Size the stroke to the feature: no wider than a third of what you are shaping and no deeper than half its own width. On a face that means widths of 0.6 to 2 cm. A 3 cm stroke takes out a whole cheek.'
+            ]
+          : []),
         POINTS,
         REACH
+      ].join(' ')
+    case 'drill':
+      return [
+        'Bore a round hole straight along the view direction, starting on the first surface under at: diameter_cm across and depth_cm deep. For deep, narrow detail no chisel reaches: nostrils, the corners of eyes and mouth, a pupil, the gap between an arm and a body. It stops if it comes out into open air.',
+        POINTS,
+        'The result gives the 3D point where the bit went in and the depth it reached.'
       ].join(' ')
     case 'rasp':
       return [
@@ -182,10 +270,17 @@ function describe(name: ToolName, o: ToolOptions): string {
         POINTS,
         REACH
       ].join(' ')
+    case 'polish':
+      return [
+        'Polish the surface along a path: a band width_cm wide is rubbed toward a shine, further with each pass. Only the finish changes. No stone comes off and the shape stays as it is, so a look\'s image shows no difference; the result and every look report it in numbers (surface_polished_pct).',
+        'Rasp first: polish over raw chisel work is only shiny chisel work. Leave some surfaces unpolished (hair, drapery, the base) so the polished ones read against them.',
+        POINTS,
+        REACH
+      ].join(' ')
     case 'note':
       return 'Write your notebook: the stage you are in (rough_out, block_in, model, refine or polish) and your plan. It replaces the previous note, and it is the only thing you wrote that survives when your earlier messages are cleared, so keep in it what you would need to carry on cold: what the piece is, where its masses sit in block coordinates, what is done and what comes next.'
     case 'finish':
-      return 'End the commission. Nothing can be carved afterwards. title: the name of the piece. statement: two or three sentences from you about it, for the plaque.'
+      return 'End the commission. Nothing can be carved afterwards, so call it on its own, after a look taken since your last cut. title: the name of the piece. statement: two or three sentences from you for the plaque, written from that last look: describe the stone as it is and name no feature it does not plainly have.'
   }
 }
 
@@ -193,10 +288,11 @@ export function toolDefs(o: ToolOptions): ToolDef[] {
   const overlays = OVERLAYS.filter(v => v === 'grid' || (v === 'form' && o.toolSet === 'formed') || (v === 'reference' && o.reference === 'outlines'))
   // Only the overlays this commission can draw are offered, so the model cannot ask for one that is not there.
   const look = SCHEMAS.look.extend({ overlay: z.enum(overlays) })
+  const closeup = SCHEMAS.closeup.extend({ overlay: z.enum(overlays) })
   return toolNames(o.toolSet).map(name => ({
     name,
     description: describe(name, o),
-    schema: name === 'look' ? look : SCHEMAS[name]
+    schema: name === 'look' ? look : name === 'closeup' ? closeup : name === 'chisel' && o.toolSet === 'direct' ? chiselDirect : SCHEMAS[name]
   }))
 }
 
@@ -265,6 +361,18 @@ export function describeCall(name: ToolName, args: Record<string, unknown>): str
       const a = args as LookArgs
       return `look ${a.views.join(', ')} (${a.overlay})`
     }
+    case 'closeup': {
+      const a = args as CloseupArgs
+      return `closeup ${a.view} at ${pt(a.center)}, ${num(a.span_cm)} cm across (${a.overlay})`
+    }
+    case 'slice': {
+      const a = args as SliceArgs
+      return `slice at ${a.axis.toUpperCase()} ${num(a.at_cm)}`
+    }
+    case 'sketch': {
+      const a = args as SketchArgs
+      return `sketch ${a.view} ${a.path.map(pt).join('→')}`
+    }
     case 'declare_form': {
       const a = args as DeclareFormArgs
       const shapes = a.shapes.map((s) => {
@@ -283,7 +391,16 @@ export function describeCall(name: ToolName, args: Record<string, unknown>): str
     }
     case 'chisel': {
       const a = args as ChiselArgs
-      return `chisel ${a.tool} ${a.view} ${a.path.map(pt).join('→')}, depth ${num(a.depth_cm)}, width ${num(a.width_cm)}`
+      const kept = a.protect && a.protect !== NO_PROTECT ? `, protecting "${a.protect}"` : ''
+      return `chisel ${a.tool} ${a.view} ${a.path.map(pt).join('→')}, depth ${num(a.depth_cm)}, width ${num(a.width_cm)}${kept}`
+    }
+    case 'drill': {
+      const a = args as DrillArgs
+      return `drill ${a.view} ${pt(a.at)}, ${num(a.diameter_cm)} cm across, ${num(a.depth_cm)} deep`
+    }
+    case 'polish': {
+      const a = args as PolishArgs
+      return `polish ${a.view} ${a.path.map(pt).join('→')}, width ${num(a.width_cm)}, ${a.passes}×`
     }
     case 'rasp': {
       const a = args as RaspArgs

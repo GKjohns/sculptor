@@ -1,11 +1,12 @@
 /**
- * What window.__sculptor runs for verification: a fixed demo carving for screenshots and a burst of
- * strikes for frame timing. Both are deterministic; neither is part of the product.
+ * What window.__sculptor runs for verification: a fixed demo carving for screenshots, a burst of
+ * strikes for frame timing, and a timed replay. All deterministic; none is part of the product.
  */
 import { createRng } from '#shared/sculpt/rng'
 import type { Strike, ToolId, Vec3 } from '#shared/sculpt/types'
 import type { KernelClient } from './kernel'
 import type { StudioRenderer } from './renderer'
+import type { ReplayPlayer, ReplaySpeed } from './replay'
 import type { Stone } from './stone'
 
 export interface FrameStats {
@@ -15,6 +16,42 @@ export interface FrameStats {
   maxMs: number
   /** Frames that took longer than 60 fps allows, with a millisecond of grace for timer jitter. */
   over16: number
+}
+
+function frameStats(times: number[]): FrameStats {
+  const sorted = times.slice().sort((a, b) => a - b)
+  const round = (ms: number) => Math.round(ms * 100) / 100
+  return {
+    frames: times.length,
+    meanMs: round(times.reduce((sum, ms) => sum + ms, 0) / Math.max(1, times.length)),
+    p95Ms: round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0),
+    maxMs: round(sorted[sorted.length - 1] ?? 0),
+    over16: times.filter(ms => ms > 17.7).length
+  }
+}
+
+/** Times every frame from now until stop() is called, e.g. across a stretch of live carving. */
+export function frameMeter(studio: StudioRenderer): { stop: () => FrameStats & { slow: { atS: number, ms: number }[] } } {
+  const times: number[] = []
+  // The frames a person would notice, and when they came (seconds since the meter started).
+  const slow: { atS: number, ms: number }[] = []
+  let first = 0
+  let last = 0
+  const unhook = studio.onFrame((_dt, now) => {
+    if (last) {
+      times.push(now - last)
+      if (now - last > 34 && slow.length < 40) slow.push({ atS: Math.round((now - first) / 100) / 10, ms: Math.round(now - last) })
+    } else {
+      first = now
+    }
+    last = now
+  })
+  return {
+    stop: () => {
+      unhook()
+      return { ...frameStats(times), slow }
+    }
+  }
 }
 
 // Point-chisel strikes over a rectangle of the front face, on a jittered lattice.
@@ -125,15 +162,36 @@ export async function burst(studio: StudioRenderer, kernel: KernelClient, stone:
   await studio.rendered(2)
   stopTiming()
 
-  const sorted = times.slice().sort((a, b) => a - b)
-  const round = (ms: number) => Math.round(ms * 100) / 100
-  const stats: FrameStats = {
-    frames: times.length,
-    meanMs: round(times.reduce((sum, ms) => sum + ms, 0) / Math.max(1, times.length)),
-    p95Ms: round(sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] ?? 0),
-    maxMs: round(sorted[sorted.length - 1] ?? 0),
-    over16: times.filter(ms => ms > 17.7).length
-  }
+  const stats = frameStats(times)
   console.log(`[sculptor] burst(${n}) on ${studio.backend}:`, JSON.stringify(stats))
+  return stats
+}
+
+/**
+ * Restarts the loaded replay at `speed` and times every frame until the finished stone is on
+ * screen, or for the first `seconds` of it. `strikes` is how many log entries went in meanwhile.
+ */
+export async function timeReplay(studio: StudioRenderer, player: ReplayPlayer, stone: Stone, speed: ReplaySpeed, seconds = Infinity): Promise<FrameStats & { strikes: number, seconds: number }> {
+  player.pause()
+  await player.restart()
+  await stone.whenShown(0)
+  player.setSpeed(speed)
+  const times: number[] = []
+  let first = 0
+  let last = 0
+  const stopTiming = studio.onFrame((_dt, now) => {
+    if (last) times.push(now - last)
+    else first = now
+    last = now
+  })
+  player.play()
+  while (!player.state().done && last - first < seconds * 1000) await studio.rendered(1)
+  const strikes = player.state().applied
+  if (player.state().done) await stone.whenShown(player.rev)
+  else player.pause()
+  await studio.rendered(2)
+  stopTiming()
+  const stats = { ...frameStats(times), strikes, seconds: Math.round(last - first) / 1000 }
+  console.log(`[sculptor] replay at ${speed} on ${studio.backend}:`, JSON.stringify(stats))
   return stats
 }

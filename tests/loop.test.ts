@@ -12,7 +12,7 @@ import { buildInstructions } from '../shared/agent/prompt.ts'
 import { jsonTools, parseCall, sdkTools, toolDefs } from '../shared/agent/toolSchemas.ts'
 import type { Brain, LoopEvent, Message, RunConfig, Studio, StudioResult, ToolCall } from '../shared/agent/types.ts'
 
-const CHISEL = { tool: 'flat', view: 'front', path: [{ h: -10, v: 60 }, { h: 10, v: 62 }], depth_cm: 1, width_cm: 3, why: 'Flattening the brow.' }
+const CHISEL = { tool: 'flat', view: 'front', path: [{ h: -10, v: 60 }, { h: 10, v: 62 }], depth_cm: 1, width_cm: 3, protect: 'none', why: 'Flattening the brow.' }
 const SAW = { view: 'front', from: { h: -30, v: 80 }, to: { h: -10, v: 100 }, discard: 'above', why: 'Taking the corner off above the shoulder.' }
 const LOOK = { views: ['front', 'right'], overlay: 'grid' }
 const NOTE = { stage: 'rough_out', text: 'A cat lying like a loaf. Head centred at X0 Y78 Z4.' }
@@ -53,6 +53,8 @@ function fakeStudio() {
     async run(call): Promise<StudioResult> {
       calls.push(call)
       if (call.name === 'look') return { summary: 'The stone from the views asked for.', numbers: { mass_kg: 900.5 }, images: [SHEET], strikes: [] }
+      if (call.name === 'closeup' || call.name === 'slice') return { summary: `A ${call.name}.`, numbers: { relief_cm: 3 }, images: [SHEET], strikes: [] }
+      if (call.name === 'sketch') return { summary: 'Drew a line.', strikes: [{ kind: 'sketch', view: 'front', points: [[0, 0], [1, 1]], strokes: [], ms: 600 }] }
       if (call.name === 'rough_out' && (call.args as { to: string }).to === 'missing') throw new Error('no form named "missing"')
       return { summary: 'Removed 120 cm³. Hit the stone at (0, 61, 30).', numbers: { removed_cm3: 120 }, strikes: [{ kind: 'detach' }, { kind: 'detach' }] }
     }
@@ -298,7 +300,7 @@ test('a look\'s image arrives as a user message after the tool result, never ins
 test('invalid arguments come back as an error result and nothing is cut', async () => {
   const { done, seen, calls, events } = run((turn) => {
     if (turn === 1) return { calls: [{ name: 'chisel', args: { ...CHISEL, view: 'front_left', path: [{ h: 1 }] } }] }
-    if (turn === 2) return { calls: [{ name: 'polish', args: {} }, { name: 'rough_out', args: { to: 'missing', margin_cm: 3, tool: 'point', why: 'Roughing.' } }] }
+    if (turn === 2) return { calls: [{ name: 'glue', args: {} }, { name: 'rough_out', args: { to: 'missing', margin_cm: 3, tool: 'point', why: 'Roughing.' } }] }
     return { calls: [{ name: 'finish', args: FINISH }] }
   })
   const r = await done
@@ -310,7 +312,7 @@ test('invalid arguments come back as an error result and nothing is cut', async 
   const second = parts(seen[2]!.at(-1))
   const [unknown, refused] = second.map(x => x.output as { type: string, value: string })
   assert.equal(unknown!.type, 'error-text')
-  assert.match(unknown!.value, /no tool called "polish".*Your tools: look, declare_form, rough_out, saw, chisel, rasp, note, finish/)
+  assert.match(unknown!.value, /no tool called "glue".*Your tools: look, closeup, slice, sketch, declare_form, rough_out, saw, chisel, drill, rasp, polish, note, finish/)
   // The Studio's own refusal reaches the model the same way.
   assert.equal(refused!.type, 'error-text')
   assert.match(refused!.value, /rough_out to "missing".* was refused: no form named "missing"/)
@@ -353,6 +355,36 @@ test('the model is reminded to look after several passes without one', async () 
   await done
   assert.ok(!textOf(seen[1]!).includes('since you last looked'))
   assert.match(textOf(seen[2]!), /You have made 4 passes since you last looked/)
+})
+
+test('a close-up or a slice sends its image back but does not count as a look; a sketch is recorded and is not a cut', async () => {
+  const CLOSEUP = { view: 'front', center: { h: 0, v: 60 }, span_cm: 20, overlay: 'grid' }
+  const SKETCH = { view: 'front', path: [{ h: -5, v: 50 }, { h: 5, v: 50 }], why: 'Marking the brow line.' }
+  const { done, seen, calls, events } = run((turn) => {
+    if (turn === 1) return { calls: [{ name: 'sketch', args: SKETCH }, chisel, chisel, { name: 'closeup', args: CLOSEUP }, { name: 'slice', args: { axis: 'x', at_cm: 0 } }] }
+    if (turn === 2) return { calls: [chisel, chisel] }
+    return { calls: [{ name: 'finish', args: FINISH }] }
+  }, { lookEvery: 4 })
+  const r = await done
+  assert.deepEqual(calls.map(c => c.name), ['look', 'sketch', 'chisel', 'chisel', 'closeup', 'slice', 'chisel', 'chisel'])
+
+  // Both images follow the results in one user message, each under its own label.
+  const after = parts(seen[1]!.at(-1))
+  assert.deepEqual(after.map(x => x.type), ['text', 'file', 'text', 'file'])
+  assert.equal(after[0]!.text, 'closeup front at (0,60), 20 cm across (grid).')
+  assert.equal(after[2]!.text, 'slice at X 0.')
+  assert.match(textOf(seen[1]!), /A closeup\.\nNumbers: relief_cm 3\.\nThe image is in the next message\./)
+  const looks = events.filter(e => e.type === 'look' && !e.auto)
+  assert.deepEqual(looks.map(e => e.type === 'look' && [e.tool, e.views, e.overlay]), [['closeup', ['front'], 'grid'], ['slice', ['left'], 'slice']])
+  assert.ok(looks.every(e => e.type === 'look' && e.images.length === 1))
+  assert.deepEqual(looks.map(e => e.type === 'look' && e.args), [CLOSEUP, { axis: 'x', at_cm: 0 }])
+
+  // Neither is a look at the whole stone, and the sketch is not a cut: four cuts, then the reminder.
+  assert.ok(!textOf(seen[1]!).includes('since you last looked'))
+  assert.match(textOf(seen[2]!), /You have made 4 passes since you last looked/)
+  // The sketch is in the pass record, so a rebuilt context still knows of the line.
+  assert.deepEqual(r.passes.map(p => p.tool), ['sketch', 'chisel', 'chisel', 'chisel', 'chisel'])
+  assert.match(r.passes[0]!.line, /^1\. turn 1: sketch front \(-5,50\)→\(5,50\) — "Marking the brow line\." → Drew a line\. \(1 strikes\)$/)
 })
 
 test('a failed turn is retried once, and a second failure is surfaced with the state intact', async () => {
@@ -514,7 +546,7 @@ test('tool schemas are flat: no unions, nothing optional, and the right tools pe
   const direct = jsonTools({ toolSet: 'direct', reference: 'none' })
   const formed = jsonTools({ toolSet: 'formed', reference: 'outlines' })
   assert.deepEqual(direct.map(t => t.name), ['look', 'saw', 'chisel', 'note', 'finish'])
-  assert.deepEqual(formed.map(t => t.name), ['look', 'declare_form', 'rough_out', 'saw', 'chisel', 'rasp', 'note', 'finish'])
+  assert.deepEqual(formed.map(t => t.name), ['look', 'closeup', 'slice', 'sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'])
 
   const walk = (node: unknown, at: string) => {
     if (!node || typeof node !== 'object') return
@@ -535,7 +567,7 @@ test('tool schemas are flat: no unions, nothing optional, and the right tools pe
   assert.deepEqual(overlay(jsonTools({ toolSet: 'formed', reference: 'view' })), ['grid', 'form'])
 
   // Every carving tool asks for a why; points are {h, v}; only axis views can be carved from.
-  for (const name of ['declare_form', 'rough_out', 'saw', 'chisel', 'rasp']) {
+  for (const name of ['sketch', 'declare_form', 'rough_out', 'saw', 'chisel', 'drill', 'rasp', 'polish']) {
     const t = formed.find(x => x.name === name)!
     assert.ok((t.parameters.required as string[]).includes('why'), name)
   }
@@ -575,9 +607,21 @@ test('the prompt is tight and follows the tool set and the reference', () => {
   const words = (s: string) => s.split(/\s+/).length
   const full = buildInstructions({ ...base, toolSet: 'formed', reference: 'outlines' })
   const direct = buildInstructions({ ...base, toolSet: 'direct', reference: 'none' })
-  assert.ok(words(full) < 1050, `${words(full)} words`)
-  assert.ok(words(direct) < 900, `${words(direct)} words`)
-  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 900)
+  assert.ok(words(full) < 1350, `${words(full)} words`)
+  assert.ok(words(direct) < 1000, `${words(direct)} words`)
+  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 1200)
+  // The tool set's own tools are named, and only they are.
+  for (const tool of ['closeup', 'slice', 'sketch', 'drill', 'polish', 'protect', 'roundel']) {
+    assert.ok(full.includes(`\`${tool}\``) || full.includes(tool), tool)
+    assert.ok(!direct.includes(`\`${tool}\``), `${tool} in the stroke-only prompt`)
+  }
+  // Pacing and the finish check are in both.
+  for (const text of [full, direct]) {
+    assert.match(text, /Use the budget/)
+    assert.match(text, /more than half your turns unspent/)
+    assert.match(text, /Before `finish`, look from all sides/)
+    assert.match(text, /within 5 cm of the top of the block/)
+  }
   assert.match(full, /60 wide \(X\), 100 tall \(Y\), 60 deep \(Z\)/)
   assert.match(full, /X runs from -30 to 30/)
   assert.match(full, /60 turns and \$8/)

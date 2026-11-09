@@ -4,3 +4,13 @@
 @theme static {
   --font-sans: 'Geist', sans-serif;
 }
+
+:root {
+  /* Width of the HUD's side panel on a wide screen. Everything else in the HUD moves over by it. */
+  --hud-panel: clamp(21rem, 31vw, 27.5rem);
+}
+
+/* The HUD's glass: every panel that floats over the canvas. */
+@utility hud-glass {
+  @apply rounded-lg bg-elevated/85 ring ring-default backdrop-blur;
+}

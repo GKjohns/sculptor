@@ -5,9 +5,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { FINISH, cloneGrid, createGrid, hashGrid, stoneVolumeCm3 } from '../shared/sculpt/grid.ts'
-import { chisel, rasp, roughOut, saw, silhouetteForm, standingProud } from '../shared/sculpt/hand.ts'
-import type { Discard, Mask, PassResult } from '../shared/sculpt/hand.ts'
+import { FINISH, cloneGrid, createGrid, hashGrid, stoneVolumeCm3, takeDirty } from '../shared/sculpt/grid.ts'
+import { DETACH_EVERY_MS, chisel, drill, polish, rasp, roughOut, saw, silhouetteForm, sketch, standingProud } from '../shared/sculpt/hand.ts'
+import { detachIslands } from '../shared/sculpt/islands.ts'
+import type { ChiselPass, Discard, Mask, PassResult } from '../shared/sculpt/hand.ts'
 import { raycast, sampleDistance } from '../shared/sculpt/raycast.ts'
 import { createRng } from '../shared/sculpt/rng.ts'
 import { formDistance } from '../shared/sculpt/shapes.ts'
@@ -627,4 +628,303 @@ test('a rough-out to two outlines keeps the stone both cover and clears the rest
   const again = roughOut(named, { to: 'reference', margin_cm: margin, tool: 'point' })
   assert.ok(again.strikes.every(s => s.kind !== 'cut' || s.protect === 'reference'))
   assert.equal(hashGrid(named), hashGrid(grid))
+})
+
+// ---------- the Sprint 3 tools ----------
+
+// How far below the cube's top face (y = 20) the stone starts at (x, z).
+const sunk = (grid: Grid, x: number, z: number) => 20 - raycast(grid, [x, 40, z], [0, -1, 0])!.point[1]
+
+test('the roundel leaves a round-bottomed channel as wide and as deep as asked', () => {
+  // As deep as half its width: a half-round channel. Shallower: an arc of a wider circle.
+  for (const [width, depth] of [[4, 2], [5, 1]] as const) {
+    const start = cube()
+    const grid = cloneGrid(start)
+    const result = chisel(grid, { tool: 'roundel', view: 'top', path: [[-6, 0], [6, 0]], depth_cm: depth, width_cm: width })
+    assert.equal(result.error, undefined)
+    assert.ok(endsWithDetach(result))
+    const cuts = result.strikes.filter(s => s.kind === 'cut')
+    // Every bite is the whole tool, sunk from the face the stroke started on.
+    assert.ok(cuts.length > 5 && cuts.every(s => s.kind === 'cut' && s.tool === 'roundel' && s.depth === depth && Math.abs(s.at[1] - 20) < 0.05 && s.dir[1] < -0.99))
+    const half = width / 2
+    const radius = (half * half + depth * depth) / (2 * depth)
+    for (const off of [0, 0.3, 0.6, 0.85]) {
+      const z = off * half
+      const want = depth - radius + Math.sqrt(radius * radius - z * z)
+      for (const x of [-3, 0, 3]) {
+        const got = sunk(grid, x, z)
+        assert.ok(Math.abs(got - want) < 0.25, `${width}×${depth}: ${got.toFixed(2)} deep at ${z.toFixed(2)} from the centre line, wanted ${want.toFixed(2)}`)
+      }
+    }
+    // Nothing is cut beyond the width, and the floor carries the roundel's finish.
+    assert.ok(sunk(grid, 0, half + 0.8) < 0.1 && sunk(grid, 0, -half - 0.8) < 0.1)
+    const floor = Math.round((20 - depth - 0.3 - grid.y0) / grid.voxel)
+    assert.equal(grid.finish[Math.round(-grid.x0 / grid.voxel) + grid.nx * (floor + grid.ny * Math.round(-grid.z0 / grid.voxel))], FINISH.roundel)
+    assert.equal(hashGrid(replay(start, JSON.parse(JSON.stringify(result.strikes)))), hashGrid(grid))
+  }
+  // A flat chisel of the same size leaves a flat floor; the roundel's is deepest in the middle.
+  const flat = cube()
+  chisel(flat, { tool: 'flat', view: 'top', path: [[-6, 0], [6, 0]], depth_cm: 1, width_cm: 5 })
+  const round = cube()
+  chisel(round, { tool: 'roundel', view: 'top', path: [[-6, 0], [6, 0]], depth_cm: 1, width_cm: 5 })
+  assert.ok(sunk(flat, 0, 1.5) > sunk(round, 0, 1.5) + 0.2)
+
+  // Too deep for its width is a slot, and is cut back to a channel.
+  const deep = chisel(cube(), { tool: 'roundel', view: 'top', path: [[-6, 0], [6, 0]], depth_cm: 6, width_cm: 2 })
+  assert.match(deep.summary, /Depth was limited to 3 cm/)
+  assert.match(deep.summary, /^Roundel from the top view/)
+})
+
+test('a protected stroke clears the stone round a form and cannot cut into it', () => {
+  const start = cube()
+  const nose: Form = { shapes: [{ kind: 'ellipsoid', center: [0, 19, 0], size: [4, 6, 4], rotation: [0, 0, 0] }], blend: 0 }
+  applyStrike(start, { kind: 'form', name: 'nose', ...nose })
+  const inside = (x: number, y: number, z: number) => formDistance(start.forms.get('nose')!, x, y, z) < 0
+  const pass: ChiselPass = { tool: 'flat', view: 'top', path: [[-6, 0], [6, 0]], depth_cm: 2.5, width_cm: 5 }
+
+  const kept = cloneGrid(start)
+  const guarded = chisel(kept, { ...pass, protect: 'nose' })
+  assert.equal(guarded.error, undefined)
+  assert.ok(guarded.strikes.filter(s => s.kind === 'cut').every(s => s.kind === 'cut' && s.protect === 'nose'))
+  assert.equal(cutInside(start, kept, inside), 0)
+  // The stone either side of it did come down.
+  assert.ok(sunk(kept, -5, 0) > 2 && sunk(kept, 5, 0) > 2 && sunk(kept, 0, 0) < 0.1)
+  assert.match(guarded.summary, /Nothing inside 'nose' was cut/)
+  assert.equal(hashGrid(replay(start, guarded.strikes)), hashGrid(kept))
+
+  const bare = cloneGrid(start)
+  chisel(bare, pass)
+  assert.ok(cutInside(start, bare, inside) > 50)
+
+  const before = hashGrid(kept)
+  const refused = chisel(kept, { ...pass, protect: 'chin' })
+  assert.match(refused.error!, /No form named 'chin'/)
+  assert.equal(refused.strikes.length, 0)
+  assert.equal(hashGrid(kept), before)
+})
+
+test('the drill bores along the view direction to the depth asked and says where it went in', () => {
+  const start = cube()
+  const grid = cloneGrid(start)
+  const result = drill(grid, { view: 'front', at: [2, 12], diameter_cm: 2, depth_cm: 6 })
+  assert.equal(result.error, undefined)
+  assert.ok(endsWithDetach(result))
+  const pecks = result.strikes.filter(s => s.kind === 'cut')
+  assert.equal(pecks.length, 3)
+  assert.ok(pecks.every(s => s.kind === 'cut' && s.tool === 'drill' && s.dir[2] === -1 && s.size === 2 && s.depth === 2 && s.at[0] === 2 && s.at[1] === 12))
+  const bore = result.bore!
+  assert.ok(Math.abs(bore.entry[0] - 2) < 1e-6 && Math.abs(bore.entry[1] - 12) < 1e-6 && Math.abs(bore.entry[2] - 10) < 0.1, `entry ${bore.entry}`)
+  assert.equal(bore.through, false)
+  assert.ok(Math.abs(bore.depthCm - 6) < 0.3, `depth ${bore.depthCm}`)
+  // Open down its axis to the depth, stone beyond it and beside it.
+  assert.ok(!isStone(grid, [2, 12, 9]) && !isStone(grid, [2, 12, 4.6]) && isStone(grid, [2, 12, 3.4]))
+  assert.ok(isStone(grid, [3.6, 12, 7]) && isStone(grid, [2, 13.6, 7]) && !isStone(grid, [2.6, 12, 7]))
+  // A straight bore of about its nominal volume.
+  assert.ok(within(result.removedCm3, Math.PI * 6, 0.12), `removed ${result.removedCm3}`)
+  assert.match(result.summary, /went in at \(x 2\.0, y 12\.0, z 10\.0\) and bored a hole 2 cm across, 6\.\d cm deep/)
+  assert.equal(hashGrid(replay(start, JSON.parse(JSON.stringify(result.strikes)))), hashGrid(grid))
+
+  // Off the stone: said, not thrown, and nothing is logged.
+  const miss = drill(grid, { view: 'front', at: [30, 12], diameter_cm: 2, depth_cm: 6 })
+  assert.equal(miss.strikes.length, 0)
+  assert.match(miss.summary, /missed the stone/)
+  assert.match(drill(grid, { view: 'front_left', at: [0, 0], diameter_cm: 2, depth_cm: 2 }).error!, /not 'front_left'/)
+})
+
+test('a drill that comes out into open air stops there', () => {
+  // A wall about 3 cm thick across the front of the cube, with a slot some 4 cm wide sunk
+  // from the top behind it.
+  const grid = cube()
+  for (let x = -8; x <= 8; x += 2) applyStrike(grid, { kind: 'cut', tool: 'flat', at: [x, 20, 5], dir: [0, -1, 0], size: 4, depth: 16, seed: 3, ms: 1 })
+  assert.ok(isStone(grid, [0, 10, 8.5]) && !isStone(grid, [0, 10, 5]) && isStone(grid, [0, 10, 1]))
+  const behind = stoneVolumeCm3(grid)
+  const result = drill(grid, { view: 'front', at: [0, 10], diameter_cm: 1.6, depth_cm: 12 })
+  const bore = result.bore!
+  assert.equal(bore.through, true)
+  assert.ok(bore.depthCm > 2.4 && bore.depthCm < 4.4, `stopped at ${bore.depthCm}`)
+  assert.match(result.summary, /came out into open air/)
+  // Through the wall, and the stone across the gap is untouched.
+  assert.ok(!isStone(grid, [0, 10, 8.5]) && isStone(grid, [0, 10, 2.5]))
+  assert.ok(behind - stoneVolumeCm3(grid) < Math.PI * 0.8 * 0.8 * 5, `${behind - stoneVolumeCm3(grid)} cm³ came out`)
+})
+
+test('polish raises the finish under the path and moves no stone', () => {
+  const start = cube()
+  chisel(start, { tool: 'point', view: 'top', path: [[-6, -3], [6, -3]], depth_cm: 1, width_cm: 3 })
+  takeDirty(start)
+  const grid = cloneGrid(start)
+  const dist = grid.dist.slice()
+  const result = polish(grid, { view: 'top', path: [[-6, 0], [6, 0]], width_cm: 4, passes: 2 })
+  assert.equal(result.error, undefined)
+  // Not one distance changed: the shape, the volume and what a look renders are the same.
+  assert.deepEqual(grid.dist, dist)
+  assert.equal(grid.solidUnits, start.solidUnits)
+  assert.equal(result.removedCm3, 0)
+  assert.equal(result.offcuts.length, 0)
+  // No island check either: nothing can have come loose.
+  assert.ok(result.strikes.length > 10 && result.strikes.every(s => s.kind === 'cut' && s.tool === 'polish' && s.ms > 0))
+  // The finish did change, so the hash did, and the chunks that bake it in are stale.
+  assert.notEqual(hashGrid(grid), hashGrid(start))
+  assert.ok(takeDirty(grid).length > 0)
+  assert.equal(result.sheen!.before, FINISH.sawn)
+  assert.ok(result.sheen!.after > 220, `after ${result.sheen!.after}`)
+  const at = (g: Grid, x: number, z: number) => g.finish[Math.round((x - g.x0) / g.voxel) + g.nx * (Math.round((19.8 - g.y0) / g.voxel) + g.ny * Math.round((z - g.z0) / g.voxel))]!
+  assert.ok(at(grid, 0, 0) > 220 && at(grid, 0, 0) <= 255)
+  // Outside the band nothing was touched: the sawn face, and the chisel work beside it.
+  assert.equal(at(grid, 0, 6), FINISH.sawn)
+  assert.equal(at(grid, 8, 8), at(start, 8, 8))
+  assert.match(result.summary, /The finish under the path went from 90 to 2\d\d/)
+  assert.match(result.summary, /No stone was removed/)
+
+  // More passes, more shine; it tops out at a full polish and never wraps.
+  const once = cloneGrid(start)
+  const one = polish(once, { view: 'top', path: [[-6, 0], [6, 0]], width_cm: 4, passes: 1 })
+  assert.ok(one.sheen!.after > FINISH.sawn + 40 && one.sheen!.after < result.sheen!.after)
+  const many = cloneGrid(start)
+  for (let n = 0; n < 4; n++) polish(many, { view: 'top', path: [[-6, 0], [6, 0]], width_cm: 4, passes: 8 })
+  assert.equal(at(many, 0, 0), FINISH.polished)
+  assert.deepEqual(many.dist, dist)
+
+  assert.equal(hashGrid(replay(start, JSON.parse(JSON.stringify(result.strikes)))), hashGrid(grid))
+  assert.match(polish(grid, { view: 'top', path: [[40, 0], [50, 0]], width_cm: 4, passes: 1 }).summary, /Nothing was polished/)
+})
+
+test('a sketch lays charcoal on the surface, is logged as one entry, and leaves the grid alone', () => {
+  const grid = cube()
+  const before = hashGrid(grid)
+  takeDirty(grid)
+  // Across the front face and off its right edge: x from -6 to 14, the face ends at 10.
+  const result = sketch(grid, { view: 'front', path: [[-6, 5], [-6, 15], [14, 15]] })
+  assert.equal(result.error, undefined)
+  assert.equal(hashGrid(grid), before)
+  assert.equal(takeDirty(grid).length, 0)
+  assert.equal(result.removedCm3, 0)
+  assert.equal(result.strikes.length, 1)
+  const entry = result.strikes[0]!
+  assert.ok(entry.kind === 'sketch')
+  assert.equal(entry.view, 'front')
+  assert.deepEqual(entry.points, [[-6, 5], [-6, 15], [14, 15]])
+  assert.ok(entry.ms >= 600 && entry.ms === result.ms)
+  // One run of marks about a centimetre apart, all on the face at z = 10, ending at its edge.
+  assert.equal(entry.strokes.length, 1)
+  const marks = entry.strokes[0]!
+  assert.ok(marks.length >= 24 && marks.length <= 28, `${marks.length} marks`)
+  assert.ok(marks.every(m => Math.abs(m[2] - 10) < 0.1 && m[0] >= -6.01 && m[0] <= 10.01 && m[1] >= 4.99 && m[1] <= 15.01))
+  assert.deepEqual(marks[0]!.slice(0, 2), [-6, 5])
+  for (let i = 1; i < marks.length; i++) {
+    const step = Math.hypot(marks[i]![0] - marks[i - 1]![0], marks[i]![1] - marks[i - 1]![1], marks[i]![2] - marks[i - 1]![2])
+    assert.ok(step > 0.5 && step < 1.3, `marks ${step} apart`)
+  }
+  assert.ok(Math.abs(result.line!.drawnCm - 26) < 1.2 && Math.abs(result.line!.missedCm - 4) < 1.2, JSON.stringify(result.line))
+  assert.match(result.summary, /drew 2\d cm of line on the stone/)
+  assert.match(result.summary, /No stone was cut/)
+
+  // The kernel takes the entry and does nothing with it, so a log that holds one replays.
+  const applied = applyStrike(grid, JSON.parse(JSON.stringify(entry)) as Strike)
+  assert.deepEqual(applied, { dirtyChunks: [], removedCm3: 0, offcuts: [] })
+  assert.equal(hashGrid(grid), before)
+
+  // A line that runs down into a pocket 5 cm deep breaks there into two runs.
+  const stepped = cube()
+  for (let y = 3; y <= 17; y += 2) applyStrike(stepped, { kind: 'cut', tool: 'flat', at: [5, y, 10], dir: [0, 0, -1], size: 6, depth: 5, seed: 3, ms: 1 })
+  const over = sketch(stepped, { view: 'front', path: [[-8, 10], [6, 10]] })
+  assert.equal(over.error, undefined)
+  const runs = over.strikes[0]!
+  assert.ok(runs.kind === 'sketch' && runs.strokes.length === 2, JSON.stringify(runs))
+  assert.ok(runs.strokes[0]!.every(m => m[2] > 9.8) && runs.strokes[1]!.every(m => m[2] < 6.5))
+
+  // A line that misses the stone, or has no length, is refused and nothing is logged.
+  const none = sketch(stepped, { view: 'front', path: [[12, 5], [16, 15]] })
+  assert.match(none.error!, /does not lie on the stone/)
+  assert.equal(none.strikes.length, 0)
+  assert.match(sketch(stepped, { view: 'front', path: [[2, 5], [2, 5]] }).error!, /no length/)
+  assert.match(sketch(grid, { view: 'back_left', path: [[0, 0], [1, 1]] }).error!, /not 'back_left'/)
+})
+
+// How many strikes in a row land while stone that has been cut free is still in the grid.
+function longestFloat(start: Grid, strikes: Strike[]): { strikes: number, ms: number, drops: number } {
+  const grid = cloneGrid(start)
+  let floating = false
+  let run = 0
+  let ms = 0
+  let worst = 0
+  let worstMs = 0
+  let drops = 0
+  for (const strike of strikes) {
+    const result = applyStrike(grid, strike)
+    if (strike.kind === 'detach') {
+      if (result.removedCm3 > 0) drops++
+      floating = false
+      run = 0
+      ms = 0
+      continue
+    }
+    if (strike.kind !== 'cut' && strike.kind !== 'saw') continue
+    if (!floating) floating = detachIslands(cloneGrid(grid)).removedCm3 > 0
+    if (floating) {
+      run++
+      ms += strike.ms
+      if (run > worst) worst = run
+      if (ms > worstMs) worstMs = ms
+    }
+  }
+  return { strikes: worst, ms: worstMs, drops }
+}
+
+test('loose stone never hangs for more than a few strikes: passes check for islands as they go', () => {
+  // A cat: the stone between and beside the ears is cut free in pieces as the layers go down.
+  const cat: Form = {
+    shapes: [
+      { kind: 'box', center: [0, 4, 0], size: [50, 8, 54], rotation: [0, 0, 0] },
+      { kind: 'ellipsoid', center: [0, 28, -4], size: [44, 44, 50], rotation: [0, 0, 0] },
+      { kind: 'ellipsoid', center: [0, 56, 12], size: [30, 28, 28], rotation: [0, 0, 0] },
+      { kind: 'cone', center: [-9, 72, 12], size: [9, 12, 7], rotation: [0, 0, 0] },
+      { kind: 'cone', center: [9, 72, 12], size: [9, 12, 7], rotation: [0, 0, 0] }
+    ],
+    blend: 4
+  }
+  const start = createGrid({ voxel: 0.8 })
+  const grid = cloneGrid(start)
+  const result = roughOut(grid, { to: cat, margin_cm: 2, tool: 'point' })
+  assert.equal(result.error, undefined)
+  const { strikes } = result
+  // The slowest blow is 600 ms, so a check comes round at least every 2.6 s of work, and
+  // no more than nine blows (at 250 ms each) can pass between two of them.
+  const K = Math.ceil(DETACH_EVERY_MS / 250) + 1
+  let since = 0
+  let sinceMs = 0
+  let checks = 0
+  for (let i = 0; i < strikes.length; i++) {
+    const s = strikes[i]!
+    if (s.kind === 'detach') {
+      checks++
+      since = 0
+      sinceMs = 0
+    } else if (s.kind === 'saw') {
+      // Every saw cut is followed at once by a check.
+      assert.equal(strikes[i + 1]!.kind, 'detach')
+    } else if (s.kind === 'cut') {
+      since++
+      sinceMs += s.ms
+      assert.ok(since <= K && sinceMs < DETACH_EVERY_MS + 600, `${since} blows, ${sinceMs} ms without an island check at entry ${i}`)
+    }
+  }
+  assert.ok(endsWithDetach(result))
+  const cuts = strikes.filter(s => s.kind === 'cut').length
+  assert.ok(checks > cuts / K && checks < cuts / 2, `${checks} checks for ${cuts} blows`)
+  // Measured on the stone itself: with an island in the grid, at most K strikes go by.
+  const float = longestFloat(start, strikes)
+  assert.ok(float.strikes <= K, JSON.stringify(float))
+  // And there were islands to drop: the checks along the way found loose stone many times.
+  assert.ok(float.drops > 5, JSON.stringify(float))
+  // The same stone as ever comes out of it.
+  assert.ok(result.stats!.proudMeanCm < 1 && result.stats!.proudMaxCm < 3.5, JSON.stringify(result.stats))
+  assert.equal(hashGrid(replay(start, JSON.parse(JSON.stringify(strikes)))), hashGrid(grid))
+
+  // A long stroke checks as it goes too, and still ends on one.
+  const block = createGrid({ voxel: 0.8 })
+  const stroke = chisel(block, { tool: 'point', view: 'front', path: [[-25, 20], [25, 20], [25, 80], [-25, 80]], depth_cm: 6, width_cm: 4 })
+  const kinds = stroke.strikes.map(s => s.kind)
+  assert.ok(kinds.filter(k => k === 'detach').length > 10 && endsWithDetach(stroke))
+  assert.ok(longestFloat(createGrid({ voxel: 0.8 }), stroke.strikes).strikes <= K)
 })

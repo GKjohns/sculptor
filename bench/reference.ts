@@ -9,7 +9,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { generateText } from 'ai'
 import { IMAGE_MODEL, MODELS, usageOf } from '../shared/agent/pricing.ts'
-import { REFERENCE_BRIEF_INSTRUCTIONS, analyzeReference, referenceBriefPrompt, referenceImagePrompt } from '../shared/agent/reference.ts'
+import { referenceBriefCall, referenceImageCall } from '../shared/agent/brainRequest.ts'
+import { analyzeReference } from '../shared/agent/reference.ts'
 import type { ReferenceAnalysis } from '../shared/agent/reference.ts'
 import type { Usage } from '../shared/agent/types.ts'
 import { newMeter, settleCost } from './brain.ts'
@@ -134,20 +135,10 @@ export async function makeReference(opts: MakeReferenceOptions): Promise<Referen
   const attempts: ReferenceAttempt[] = []
   const meter = newMeter()
   const within = (ms: number) => opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms)
-  const anthropic = opts.sculptor.startsWith('anthropic/')
 
   let brief = ''
   try {
-    const r = await generateText({
-      model: opts.sculptor,
-      instructions: REFERENCE_BRIEF_INSTRUCTIONS,
-      prompt: referenceBriefPrompt(opts.commission),
-      reasoning: 'low',
-      maxOutputTokens: 3000,
-      maxRetries: 1,
-      abortSignal: within(BRIEF_TIMEOUT_MS),
-      providerOptions: { gateway: { ...(anthropic ? { order: ['anthropic'] } : {}) } }
-    })
+    const r = await generateText({ ...referenceBriefCall(opts.sculptor, opts.commission), maxRetries: 1, abortSignal: within(BRIEF_TIMEOUT_MS) })
     const usage = usageOf(r.usage)
     costs.push({ what: 'reference_brief', model: opts.sculptor, usage, usd: settleCost(opts.sculptor, usage, r.providerMetadata, meter, opts.log) })
     brief = r.text.trim()
@@ -161,13 +152,7 @@ export async function makeReference(opts: MakeReferenceOptions): Promise<Referen
   let error: string | undefined
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const r = await generateText({
-        model,
-        prompt: referenceImagePrompt(brief),
-        maxRetries: 1,
-        abortSignal: within(IMAGE_TIMEOUT_MS),
-        providerOptions: { google: { responseModalities: ['IMAGE'] } }
-      })
+      const r = await generateText({ ...referenceImageCall(brief), maxRetries: 1, abortSignal: within(IMAGE_TIMEOUT_MS) })
       const file = r.files.find(f => f.mediaType?.startsWith('image/'))
       const usage = usageOf(r.usage)
       costs.push({ what: 'reference_image', model, usage, usd: settleCost(model, usage, r.providerMetadata, meter, opts.log, file ? 1 : 0) })
