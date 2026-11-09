@@ -1,7 +1,7 @@
 # Sculptor — Implementation Plan
 
 **Created:** November 8, 2026
-**Status:** In Progress — Sprints 1 to 3 complete (gate passed November 9, 2026); Sprint 4 next
+**Status:** In Progress — Sprints 1 to 3 complete (gate passed November 9, 2026); Sprint 4 built and merged, waiting on Kyle's sign-off on the look; Sprint 5 next
 **Context:** Kyle wants an AI that carves a virtual block of marble the way a sculptor does: it knocks stone off with different tools, walks around the piece, thinks, and goes back in. He wants to watch it happen live and have it look like a film.
 
 **Goal:** Type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export.
@@ -329,7 +329,7 @@ The reference sheet has no frame on purpose: the person watching never sees it.
 
 #### Verification
 - [x] `npm run bench:sculpt -- --subject pawn --model opus` completes and writes a contact sheet. First real run: Opus 5.5, formed tools, no reference, 11 turns, $0.33, judge picked "chess pawn" at 0.97, strike log replays to the same hash (`verification/screenshots/sprint2_smoke_pawn_opus.webp`).
-- [x] `report.html` exists and covers all three rounds: [study/report.html](study/report.html), 16 runs, $17.88 of the $100 cap.
+- [x] `report.html` exists and covers all three rounds: [study/report.html](study/report.html), 16 runs, $17.88 of the $100 cap ($17.72 in recorded runs plus a $0.16 allowance for timed-out turns).
 - [x] The report answers the reference question plainly: per subject, with and without, the judge's pick, the measured agreement, and the cost difference.
 
 #### Study results (November 9, 2026)
@@ -372,7 +372,7 @@ What the study says:
 - **The judge sees two sheets**: the six-view sheet with rulers and four three-quarter views. Never the reference or the commission.
 - **Loop additions beyond the plan's seams:** a run ends as `stalled` after three turns with no tool call; budget warnings at 75% and 90% and a final-turn notice; invalid arguments come back to the model as an error result; the 90 s deadline and single retry live in the loop, not the Brain.
 - **Cost accounting** charges the larger of the price table and the gateway's own figure. `--max-usd` includes the reference and judge calls.
-- Not yet exercised with real calls: native tool calling on GPT-6 Sol and Gemini 3.1 Pro (Round C), and the JSON-lines fallback.
+- Native tool calling on GPT-6 Sol and Gemini 3.1 Pro was exercised in Round C and worked. The JSON-lines fallback has still not been exercised with real calls.
 
 ---
 
@@ -401,7 +401,7 @@ What the study says:
 #### Verification
 - [x] A full commission runs start to finish in the browser with no manual steps. "A chess pawn", Opus 5.5, speed 8, WebGPU: 20 turns, $1.09, 293 s, title "Pawn"; true and shown hashes equal; the saved log replays in Node to the same hash. The screen ran at most 20.5 s behind and finished 24 s after the model.
 - [x] Screenshots of the HUD for storyboard frames 1 to 4: `verification/screenshots/sprint3_live_*.webp` (live) and `sprint3_hud_frame*.webp` (mock preview at `/hud`). The scene is still the plain render.
-- [x] Reloading mid-commission restores the stone exactly and the sculptor carries on: "a sleeping cat curled in a loaf" was killed during turn 7, restored from `?session=` to the saved hash, and finished as "Loaf" at turn 49 ($1.58). Replaying a 10,218-strike log takes 5.8 s; a 13,547-entry new-format log takes 9.1 s.
+- [x] Reloading mid-commission restores the stone exactly and the sculptor carries on: "a sleeping cat curled in a loaf" was killed during turn 7, restored from `?session=` to the saved hash, and finished as "Loaf" at turn 49 ($1.575; the stats bar shows $1.57). Replaying a 10,218-strike log takes 5.8 s; a 13,547-entry new-format log takes 9.1 s.
 - [x] The stats bar's cost equals the sum of the server's per-turn cost plus the reference, and the server's priced cost equalled the gateway's own figure on every verified turn.
 
 #### Results and deviations
@@ -413,11 +413,11 @@ What the study says:
 - **Pacing rule:** playback rate = backlog ÷ drain time, clamped between a floor and 8× the chosen speed and eased over 0.5 s; the loop is held at its next tool call while paused or more than 60 s behind.
 - **Sessions** are files under `.data/sessions/<id>/` with an append-only `strikes.ndjson`. Request bodies to `/api/brain` are capped at 24 MB; a Vercel deploy will need WebP looks to fit its 4.5 MB function limit (Sprint 5).
 - **HUD departures from the storyboard:** no "Sketch" stage (the loop has none), speed stops 1/4/8/20/60 on a slider, the overlay in the eye panel is a badge, scrubber and export wait for Sprint 5.
-- **Known rough edges:** about 27 s of dead air before the first cut (the opening look was lengthened afterwards and not re-measured); a turn in flight at reload is paid for but lost; charcoal sketches are wiped at the next cutting pass, not faded where carved; restored sessions show past looks without images; each of a new log's frequent checks costs a full island check on the shown stone; the model picker shows the short key ("opus") and the Nuxt DevTools pill overlaps the transport in dev.
+- **Known rough edges:** about 27 s of dead air before the first cut (the opening look was lengthened afterwards and not re-measured); a turn in flight at reload is paid for but lost; charcoal sketches are wiped at the next cutting pass, not faded where carved; restored sessions show past looks without images; each of a new log's frequent checks costs a full island check on the shown stone; the stats bar shows the model's short key ("opus") during a run (the picker itself says "Opus 5.5") and the Nuxt DevTools pill overlaps the transport in dev.
 
 ---
 
-### Sprint 4: Cinema `[Not Started]`
+### Sprint 4: Cinema `[Built — awaiting Kyle's sign-off]`
 **Goal:** The same commission looks and sounds like a film.
 **Estimated effort:** 10–14 hours, iterated by screenshot against saved sessions
 
@@ -432,10 +432,23 @@ What the study says:
 - 4.8 Look book — `docs/look/`: five fixed camera presets on three saved stones (early, middle, finished), shot with `npm run shoot -- --gpu` after every tuning pass, the way `workspace-3d` iterates against reference shots.
 
 #### Verification
-- [ ] Storyboard frame 5 reproduced: macro shot with raw, rasped and polished stone in one frame and light through a thin edge.
-- [ ] A slab fall captured as a five-frame sequence: cut, fall, impact, break, settle.
-- [ ] 60 fps during normal carving and no frame over 33 ms during a slab fall on Kyle's Mac; the WebGL 2 fallback renders without errors.
+- [~] Storyboard frame 5 reproduced: macro shot with raw, rasped and polished stone in one frame and light through a thin edge. Partly: `sprint4_frame5_macro_gpu` has pitted and polished stone and `sprint4_backlit_thin_edge_gpu` has a fin glowing when backlit, but it is a test stone, not a commission, the rasped zone is hard to tell apart, and no tool is in frame.
+- [x] A slab fall captured as a five-frame sequence: cut, fall, impact, break, settle (`sprint4_slab_1_cut_gpu` to `sprint4_slab_5_settle_gpu`, shot before the dust and debris fixes; `sprint4_fix_impact_dust` shows the landing puff after them).
+- [x] 60 fps during normal carving and no frame over 33 ms during a slab fall on Kyle's Mac; the WebGL 2 fallback renders without errors. Headed Chrome, 120 Hz, film tier at 1.5x: first slab fall after a fresh load 8.33 ms mean, 9.4 max; 8x replay through a rough-out 8.34 mean, 16.6 max; 200 hand strikes 8.33 mean, 9.4 max; no frame over 16.7 ms in any of the three. The GPU may have been shared during the measurement, and a separate measurement under known shared load gave 12.4 ms mean, p95 16.7, max 25.1 for an 8x replay. `--gl` and headed `?gl=1` reach ready with a clean console.
 - [ ] Kyle watches one full commission and signs off on the look.
+
+#### Results and deviations (November 9, 2026)
+- **Built in a worktree** (`sprint4-cinema`, four commits) so the live tab did not hot-reload, then merged into `ai-sculptor-build` as `5742f14`. 185 tests, typecheck and lint pass. `KERNEL_VERSION` is still 2 and the three reference replays end on their recorded hashes (cat `90ed9085f7a66a4d`, pawn `aee99ec9b7973290`, Sol bust `0ab275d2c385097f`).
+- **Look:** marble with veins baked into a tiled volume read at block coordinates (they run through cuts and offcuts), finish-driven roughness, light through thin stone from a thickness march toward the key; atelier with a window shaft; post is pre-pass, GTAO, scene, god rays, TRAA, depth of field, bloom, AgX, vignette, grain. The film tier renders at 1.5x (`?dpr=2` overrides). WebGL 2 gets scene, AgX, vignette and grain; software GL gets a lean mode with no veins. Tuning log and look book: `docs/look/`.
+- **Grid stays at 0.4 cm.** The 0.25 cm trial gave 648k triangles against 242k, 55 MB per grid copy against 13 MB, and a 33 s restore against 10 s.
+- **Shading pass after an independent review** of the first screenshots (verdict: the room read as film, the stone as ribbed plaster). Shading normals now come from the distance field blurred two voxels wide, which removed the corduroy ribbing on rasped and polished stone; contact shadows are off in the film tier and the key's normal bias is 0.7 cm, which removed the sawtooth and moire shadows; vein coverage widened; polish roughness 0.26 to 0.36; shadow tint warm-neutral.
+- **Motion:** falling offcuts on Rapier that topple, break and settle, chips with a rubble pile, dust, a floating chisel, mallet and saw, synthesised sound with a mute button, and a camera director (wide, medium, macro, saw, fall in slow motion, look, reveal, free) with a 3.5 s minimum between cuts. `?film=0` turns the layer off, `?cam=free` the director. Caps: 6,000 chip instances, 24 moving offcut bodies, 28 sound voices.
+- **Fixes from the review:** the saw shows only during its cut and has a matt steel blade; the mallet rests when idle; debris that comes to rest on the sculpture is pushed off, then shrinks away; dust varies in size and opacity and a landing slab raises a visible puff.
+- **First-slab-fall hitch:** first-use pipeline compiles cost one 299 ms frame; a prewarm draw before `__sceneReady` brings the worst frame to 9.4 ms (`?prewarm=0` turns it off).
+- **Live run on the film build:** "a chess pawn" on Opus 5.5, 14 turns, $0.93, true and shown hashes both `e71e528775456405`, the same after a reload. The run was interrupted at turn 4 and resumed from `?session=`. No saw cut happened after the resume, so no slab fall has been seen in a live commission, only in replays.
+- **Sound** was confirmed by an analyser on the master gain in headed Chrome (signal 0.117 playing, 0.012 paused, 0.0025 muted). Nobody has listened to it on speakers.
+- **Sprint 3 rough edges closed:** charcoal is rubbed out where the stone is cut, the stats bar shows "Opus 5.5", Nuxt DevTools is off, the finished plaque wraps at 400 px, the tool badge has a backing, `timeReplay` twice in one page no longer hangs.
+- **Known rough edges:** bumpy silhouettes and a faint toothed shadow edge at grazing light, both from the 0.4 cm voxels; thin relief such as an ear does not glow because there is no air behind it; veins are faint on brightly lit polished stone; the point-chisel band reads as honeycomb close up; break faces are clean planes; dust still reads a little dotted; the mallet floats in front of the stone when carried between passes; the room is sparsely dressed and the window is a plain bright rectangle; the stage list stayed on "Rough out" for the whole live pawn (not diagnosed); `docs/look/*` was shot before the saw fix; medium and macro cuts wait on an async raycast, so cut frames will not be bit-exact under a fixed-step export (matters for Sprint 5's film export); SSGI was never tried; the `NERO` black marble preset exists but is untuned.
 
 ---
 

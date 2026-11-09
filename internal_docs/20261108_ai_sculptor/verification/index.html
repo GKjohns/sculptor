@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sculptor: verification</title>
+<style>
+  :root {
+    --bg: #fafaf7;
+    --panel: #ffffff;
+    --text: #1d1d1b;
+    --muted: #5f5f5a;
+    --line: #dcdcd4;
+    --link: #1a5fb4;
+    --code-bg: #efefe9;
+    --ok: #1a7f37;
+    --ok-bg: #e3f4e6;
+    --warn: #8a5a00;
+    --warn-bg: #fbefcf;
+    --idle: #5f5f5a;
+    --idle-bg: #ebebe5;
+    --shot-bg: #0d0c0b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121311;
+      --panel: #1b1c1a;
+      --text: #e8e8e3;
+      --muted: #a3a39b;
+      --line: #34352f;
+      --link: #8ab4f8;
+      --code-bg: #262723;
+      --ok: #6fd08a;
+      --ok-bg: #173322;
+      --warn: #f0c060;
+      --warn-bg: #3a2e10;
+      --idle: #a3a39b;
+      --idle-bg: #2a2b27;
+      --shot-bg: #0d0c0b;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: 32px 16px 80px; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 4px; }
+  h2 { font-size: 1.45rem; line-height: 1.25; margin: 56px 0 6px; padding-top: 20px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.08rem; margin: 30px 0 8px; }
+  p { margin: 0 0 12px; }
+  a { color: var(--link); }
+  code { font: 0.88em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  .goal { margin: 0 0 6px; }
+  .meta { color: var(--muted); font-size: 0.9rem; margin: 0 0 14px; }
+  .note { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; color: var(--muted); margin: 14px 0; }
+  ul, ol { padding-left: 22px; margin: 0 0 12px; }
+  li { margin: 0 0 6px; }
+
+  .status { list-style: none; padding: 0; margin: 18px 0 8px; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); }
+  .status li { margin: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font-size: 0.92rem; }
+  .status b { display: block; }
+  .tag { display: inline-block; font-size: 0.74rem; font-weight: 600; letter-spacing: 0.02em; padding: 1px 8px; border-radius: 999px; margin-bottom: 4px; white-space: nowrap; }
+  .tag.done { color: var(--ok); background: var(--ok-bg); }
+  .tag.wip { color: var(--warn); background: var(--warn-bg); }
+  .tag.todo { color: var(--idle); background: var(--idle-bg); }
+
+  nav.toc { font-size: 0.92rem; margin: 18px 0 0; }
+  nav.toc a { margin-right: 14px; white-space: nowrap; }
+
+  ol.checks { list-style: none; padding: 0; margin: 0 0 12px; }
+  ol.checks > li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 0 0 10px; }
+  ol.checks p { margin: 0 0 6px; }
+  ol.checks p:last-child { margin-bottom: 0; }
+  ol.checks .what { font-weight: 600; }
+  ol.checks .what .tag { margin-right: 6px; }
+  .lbl { font-weight: 600; color: var(--muted); }
+
+  figure { margin: 0 0 18px; }
+  figure img { display: block; max-width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: var(--shot-bg); }
+  figcaption { font-size: 0.9rem; color: var(--muted); margin-top: 6px; }
+  figcaption b { color: var(--text); }
+  .even { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .duo { display: grid; gap: 16px; grid-template-columns: minmax(0, 2.7fr) minmax(0, 1fr); align-items: start; }
+  .shots { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); align-items: start; }
+  .shots figure img { margin: 0 auto; }
+  @media (max-width: 640px) {
+    .even, .duo { grid-template-columns: minmax(0, 1fr); }
+    .duo figure:last-child img { max-width: 70%; }
+  }
+
+  .scroll { overflow-x: auto; margin: 0 0 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.86rem; }
+  th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.n { white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .yes { color: var(--ok); font-weight: 600; }
+  .no { color: var(--warn); font-weight: 600; }
+
+  .placeholder { border: 1px dashed var(--line); border-radius: 8px; padding: 14px 16px; background: var(--panel); }
+  .placeholder p:last-child, .placeholder ul:last-child { margin-bottom: 0; }
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.86rem; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>Sculptor: verification</h1>
+  <p class="sub">An AI carves a block of virtual marble while a person watches. November 9, 2026.</p>
+
+  <p>This is the evidence page for the plan in <a href="../implementation_plan.md">implementation_plan.md</a>. For each sprint it gives the plan's verification checklist, what was checked, the result, and the screenshots that back it. Every claim and number here comes from the plan's own record or from what is visible in a captured screenshot. Nothing was re-run to make this page, and where an item has no screenshot the page says so.</p>
+
+  <p><b>What has been built so far.</b> The plan's goal is to type a commission, pick a stone and a model, and watch that model carve it start to finish in a cinematic real-time studio, ending with a finished piece and a replay you can scrub and export. Sprints 1 to 3 cover the first half of that: a tested carving kernel you can hit by hand in the browser, a headless study of whether models can carve at all, and a live studio where a typed commission is carved on screen with the storyboard's HUD. The stone is still the plain Sprint 1 render. The film look, the reveal, scrubbing and export are Sprints 4 and 5 and are not on this page yet.</p>
+
+  <ul class="status" aria-label="Sprint status">
+    <li><span class="tag done">Done</span><b>Sprint 1: Stone you can hit</b>Local commit <code>6accbac</code>.</li>
+    <li><span class="tag done">Done</span><b>Sprint 2: The sculptor, and the gate</b>Gate passed November 9: formed tool set, reference on by default, Opus 5.5 as the default model. Local commit <code>ef1329e</code>.</li>
+    <li><span class="tag done">Done</span><b>Sprint 3: The live studio</b>Local commit <code>9a693d4</code>.</li>
+    <li><span class="tag wip">In progress</span><b>Sprint 4: Cinema</b>Not verified yet.</li>
+    <li><span class="tag todo">Not started</span><b>Sprint 5: Reveal and share</b></li>
+  </ul>
+
+  <nav class="toc" aria-label="Sections">
+    <a href="#sprint1">Sprint 1</a>
+    <a href="#sprint2">Sprint 2</a>
+    <a href="#sprint3">Sprint 3</a>
+    <a href="#sprint4">Sprint 4</a>
+    <a href="#sprint5">Sprint 5</a>
+    <a href="#e2e">End-to-end</a>
+  </nav>
+
+  <p class="note">How to read the screenshots. A file ending <code>_gpu</code> was shot in headed Chrome on WebGPU, which is the only mode the project uses to judge how anything looks. A file ending <code>_gl</code> was shot headless on software WebGL 2 and is evidence for layout and logic only. The <code>sprint3_hud_frame*</code> files are the mock preview at <code>/hud</code>: the HUD is real, but the stone, banker and light beam behind it are a flat placeholder drawing, not the three.js scene.</p>
+</header>
+
+<!-- ============================== SPRINT 1 ============================== -->
+<section id="sprint1">
+  <h2>Sprint 1: Stone you can hit</h2>
+  <p class="goal"><b>Goal.</b> A block in the browser that you can carve by hand at 60 fps, backed by a tested kernel.</p>
+  <p class="meta">Status: complete. Local commit <code>6accbac</code>, November 8, 2026.</p>
+
+  <h3>Verification checklist</h3>
+  <ol class="checks">
+    <li>
+      <p class="what"><span class="tag done">Passed</span><code>npm test</code> passes.</p>
+      <p><span class="lbl">Result.</span> 30 of 30 tests passed at the end of this sprint. They cover: a strike removes the expected volume within 5%; a protected shape is never cut; the mesh of a block with one corner chiselled is watertight across chunk seams; a sawn-off corner comes back as an offcut with the right volume; a thin bridge left standing is not detached.</p>
+      <p><span class="lbl">Caveat from the plan.</span> The 5% figure holds for 4 cm strikes, which are within 3% of their true volume. 2 cm strikes (5 voxels across) can be 8% off.</p>
+      <p><span class="lbl">Evidence.</span> No screenshot; verified by <code>npm test</code> per the plan.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>In the browser, 200 rapid strikes hold 60 fps on Kyle's Mac.</p>
+      <p><span class="lbl">Result.</span> <code>burst(200)</code> on WebGPU at 120 Hz gave a mean frame time of 8.33 ms, p95 9.0 ms, max 9.4 ms, with no frame over 16 ms. <code>burst(1000)</code> gave the same.</p>
+      <p><span class="lbl">Caveat from the plan.</span> These are vsync-quantised frame intervals. They show that no frames were dropped. They do not show how much main-thread headroom is left.</p>
+      <p><span class="lbl">Evidence.</span> No screenshot; verified by <code>__sculptor.burst(200)</code> and <code>burst(1000)</code> in the page on WebGPU per the plan.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>Screenshot: a block with a sawn corner and visibly different rough and smooth patches.</p>
+      <p><span class="lbl">Result.</span> Captured on both backends. The plan records that the grid hash was the same on WebGPU and WebGL 2; it does not record the hash value.</p>
+      <p><span class="lbl">Evidence.</span> The two demo-stone figures below. The hash comparison itself has no screenshot.</p>
+    </li>
+  </ol>
+
+  <p><b>Kernel timings recorded in the plan</b> (default grid, Node 22): one strike 0.2 ms, one chunk remesh 0.5 ms, island check 3 to 9 ms, full initial mesh 61 ms, a saw through half the block 80 to 160 ms in the worker. No screenshot.</p>
+
+  <h3>Screenshots</h3>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint1_demo_stone_gpu.webp" width="1400" height="875" loading="lazy" alt="A tall off-white block on a black background, WebGPU. The top right corner is sawn off along a diagonal. The lit front face carries three square patches stacked top to bottom: deep irregular pits, even rows of scalloped cuts, and a shallow softened area.">
+      <figcaption><b>Checklist item 3, WebGPU.</b> The fixed demo carve (<code>?demo=1</code>). One corner is sawn off, leaving a flat diagonal face. The front face has three patches: rough point-chisel pits at the top, regular flat-chisel rows in the middle, and a rasped patch at the bottom that is visibly smoother. The face away from the key light is close to black, which the plan lists as a known lighting gap for Sprint 4.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint1_demo_stone_gl.webp" width="1400" height="875" loading="lazy" alt="The same demo block rendered on WebGL 2: sawn corner and the same three carved patches, visually indistinguishable from the WebGPU frame.">
+      <figcaption><b>Checklist item 3, WebGL 2 fallback.</b> The same demo carve from the headless software backend. The frame matches the WebGPU one to the eye, which is consistent with the plan's note that both backends produced the same grid hash. It is not evidence for the look.</figcaption>
+    </figure>
+  </div>
+
+  <div class="even">
+    <figure>
+      <img src="screenshots/sprint1_renderer_proof_gpu.webp" width="1400" height="875" loading="lazy" alt="A plain lit cube on a black background, WebGPU: one beige face, a lighter top and a dark blue-grey side.">
+      <figcaption><b>Task 1.1, renderer path on WebGPU.</b> A lit cube drawn through <code>WebGPURenderer</code> and a one-node <code>RenderPipeline</code>. This is the day-one proof that the WebGPU path renders at all. It is not a checklist item.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint1_renderer_proof_gl.webp" width="1400" height="875" loading="lazy" alt="The same plain lit cube rendered on WebGL 2, visually indistinguishable from the WebGPU frame.">
+      <figcaption><b>Task 1.1, renderer path on WebGL 2.</b> The same cube from <code>npm run shoot -- --gl</code>, showing the fallback backend renders without a blank capture.</figcaption>
+    </figure>
+  </div>
+
+  <figure>
+    <img src="screenshots/sprint1_hands_palette_gpu.webp" width="1400" height="875" loading="lazy" alt="The demo block with a four-button tool palette in the top left corner reading Saw, Point, Flat and Rasp, with Point selected, and a one-line hint underneath about pressing or dragging on the stone to strike.">
+    <figcaption><b>Task 1.6, hand-carving mode.</b> With <code>?hands=1</code> the tool palette appears top left (Saw, Point, Flat, Rasp, with Point selected) over the demo stone, with a hint that pressing or dragging on the stone strikes it and dragging empty space orbits. The frame shows the palette is present; it does not show a strike being made by hand.</figcaption>
+  </figure>
+
+  <h3>Deviations and known rough edges</h3>
+  <ul>
+    <li><b><code>form</code> log entry added.</b> Protected cuts depend on declared forms, which were not in the strike log, so a replay could not reproduce them. The log gained a <code>form</code> entry that must come before any strike that names it.</li>
+    <li><b>Edge-contact cleanup.</b> After every edit, stone that touches other stone only along a voxel edge has its shallower sample turned to air. Without it the mesher produced edges shared by four triangles.</li>
+    <li><b>Small strikes are less exact than 5%.</b> See the caveat on checklist item 1.</li>
+    <li>The base is closed. Detached pieces under 0.5 cm³ are counted as removed but produce no offcut. The kernel uses its own polynomial sin and cos so logs replay across JS engines.</li>
+    <li>three is 0.187.0 and the post class is <code>RenderPipeline</code>. The palette is <code>UFieldGroup</code> because Nuxt UI 4 has no <code>UButtonGroup</code>. Finish is widened to Float32 on the main thread because WebGPU has no one-byte vertex format.</li>
+    <li>Offcuts tip out and fall under plain gravity, then are removed. Real physics is Sprint 4.</li>
+    <li>Remeshing is not time-sliced: a saw remeshes about 30 chunks in one flush. The plan says this is fine today and should be revisited in Sprint 4 if a slab fall drops a frame.</li>
+    <li>Finish-driven sheen only shows near the mirror angle because there is no environment light yet. Rough versus smooth currently reads from geometry and shadow, and the face away from the key light is very dark. Both are Sprint 4 lighting work.</li>
+    <li><code>shoot.mjs</code> gained <code>--eval</code>, hides <code>[data-hud]</code> for its blank-canvas check, and fails on page errors or the wrong backend. The <code>bench:sculpt</code> script arrived in Sprint 2 with the bench.</li>
+  </ul>
+</section>
+
+<!-- ============================== SPRINT 2 ============================== -->
+<section id="sprint2">
+  <h2>Sprint 2: The sculptor, and the gate</h2>
+  <p class="goal"><b>Goal.</b> Know whether models can carve recognisable things, with which tools, and whether a reference image helps, before building the theatre.</p>
+  <p class="meta">Status: complete, gate passed November 9, 2026. Local commit <code>ef1329e</code>. Full study report: <a href="../study/report.html">../study/report.html</a>.</p>
+
+  <h3>Verification checklist</h3>
+  <ol class="checks">
+    <li>
+      <p class="what"><span class="tag done">Passed</span><code>npm run bench:sculpt -- --subject pawn --model opus</code> completes and writes a contact sheet.</p>
+      <p><span class="lbl">Result.</span> First real run: Opus 5.5, formed tools, no reference, 11 turns, $0.33. The judge picked "chess pawn" at 0.97. The strike log replays to the same hash. The plan does not record the hash value.</p>
+      <p><span class="lbl">Evidence.</span> The smoke-run figure below. The replay-to-same-hash check has no screenshot; it is recorded in the plan.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span><code>report.html</code> exists and covers all three rounds.</p>
+      <p><span class="lbl">Result.</span> 16 runs, $17.88 of the $100 cap. The table below has 15 rows; the sixteenth run is the smoke run from item 1. The rows plus the smoke run add up to $17.72. The report's own header accounts for the difference as a $0.16 allowance for turns that timed out and were asked again.</p>
+      <p><span class="lbl">Evidence.</span> No screenshot; the report file itself is the evidence: <a href="../study/report.html">../study/report.html</a>.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>The report answers the reference question plainly: per subject, with and without, the judge's pick, the measured agreement, and the cost difference.</p>
+      <p><span class="lbl">Result.</span> The plan's summary: the reference turned the cat from a wrong pose into the right one and made the bust fuller, for $0.25 to $0.35 more per run. Its cost is that sculptors copy whatever the sheet draws, including a pedestal that eats half the height.</p>
+      <p><span class="lbl">Evidence.</span> No screenshot; see the section on the reference sheet in <a href="../study/report.html">the report</a>, and the Round A and Round B rows below.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>The gate.</p>
+      <p><span class="lbl">Result.</span> Gate passed November 9, 2026. See "Gate decision" below.</p>
+      <p><span class="lbl">Evidence.</span> The study table and the report. The human half of the gate (does the bust read as a head and shoulders to a person) was Kyle's call.</p>
+    </li>
+  </ol>
+
+  <h3>Study results (November 9, 2026)</h3>
+  <p>Every run was capped at 60 turns and $8. The judge is a model that sees each final contact sheet, never the reference or the commission, and picks from twelve fixed labels. "Person's read" is an independent reviewer's score from 1 to 5.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr><th>Round</th><th>Subject</th><th>Model</th><th>Tools</th><th>Ref</th><th>Turns</th><th>Cost</th><th>Judge</th><th>Person's read</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>A</td><td>pawn</td><td>Opus 5.5</td><td>direct</td><td>off</td><td class="n">22</td><td class="n">$2.07</td><td><span class="yes">pawn, correct</span> 0.90</td><td>3: pawn silhouette under spiky texture</td></tr>
+        <tr><td>A</td><td>pawn</td><td>Opus 5.5</td><td>formed</td><td>off</td><td class="n">12</td><td class="n">$0.37</td><td><span class="yes">pawn, correct</span> 0.97</td><td>5: clean pawn</td></tr>
+        <tr><td>A</td><td>cat</td><td>Opus 5.5</td><td>direct</td><td>off</td><td class="n">45</td><td class="n">$2.26</td><td><span class="no">owl, wrong</span></td><td>1: barely touched block</td></tr>
+        <tr><td>A</td><td>cat</td><td>Opus 5.5</td><td>formed</td><td>off</td><td class="n">9</td><td class="n">$0.37</td><td><span class="no">rabbit, wrong</span></td><td>2: sitting snowman-cat, not a loaf</td></tr>
+        <tr><td>A</td><td>bust</td><td>Opus 5.5</td><td>direct</td><td>off</td><td class="n">54</td><td class="n">$2.01</td><td><span class="no">bottle, wrong</span></td><td>1: square decanter</td></tr>
+        <tr><td>A</td><td>bust</td><td>Opus 5.5</td><td>formed</td><td>off</td><td class="n">19</td><td class="n">$0.82</td><td><span class="yes">bust, correct</span> 0.80</td><td>2: egg on a box, no neck</td></tr>
+        <tr><td>B</td><td>pawn</td><td>Opus 5.5</td><td>formed</td><td>on</td><td class="n">14</td><td class="n">$0.72</td><td><span class="yes">pawn, correct</span> 0.97</td><td>5: best pawn, waist and stepped base</td></tr>
+        <tr><td>B</td><td>cat</td><td>Opus 5.5</td><td>formed</td><td>on</td><td class="n">15</td><td class="n">$0.69</td><td><span class="yes">cat, correct</span> 0.70</td><td>3: correct loaf on a tall pedestal, ears shattered</td></tr>
+        <tr><td>B</td><td>bust</td><td>Opus 5.5</td><td>formed</td><td>on</td><td class="n">35</td><td class="n">$1.07</td><td><span class="yes">bust, correct</span> 0.93</td><td>3: head with ears on a bulb body, face cratered</td></tr>
+        <tr><td>C</td><td>cat</td><td>Fable 5.1</td><td>formed</td><td>on</td><td class="n">34</td><td class="n">$2.05</td><td><span class="yes">cat, correct</span> 0.60</td><td>2: loaf body, head gouged hollow</td></tr>
+        <tr><td>C</td><td>bust</td><td>Fable 5.1</td><td>formed</td><td>on</td><td class="n">16</td><td class="n">$1.95</td><td><span class="yes">bust, correct</span> 0.80</td><td>3: skull-faced head on a mound</td></tr>
+        <tr><td>C</td><td>cat</td><td>GPT-6 Sol</td><td>formed</td><td>on</td><td class="n">58</td><td class="n">$0.58</td><td><span class="yes">cat, correct</span> 0.60</td><td>3: best-made, but round bear ears</td></tr>
+        <tr><td>C</td><td>bust</td><td>GPT-6 Sol</td><td>formed</td><td>on</td><td class="n">59</td><td class="n">$0.54</td><td><span class="yes">bust, correct</span> 0.96</td><td>4: mannequin head, neck, shoulders, plinth</td></tr>
+        <tr><td>C</td><td>cat</td><td>Gemini 3.1 Pro</td><td>formed</td><td>on</td><td class="n">15</td><td class="n">$0.73</td><td><span class="yes">cat, correct</span> 0.80</td><td>4: unmistakable cartoon cat, pitted</td></tr>
+        <tr><td>C</td><td>bust</td><td>Gemini 3.1 Pro</td><td>formed</td><td>on</td><td class="n">31</td><td class="n">$1.16</td><td><span class="no">pawn, wrong</span></td><td>1: pitted totem on a pedestal</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p><b>What the study says.</b></p>
+  <ul>
+    <li><b>Tool set: formed.</b> Stroke-only carving never got past roughing on the cat or the bust and cost two to five times as much.</li>
+    <li><b>Reference: on.</b> It fixed the cat's pose and made the bust fuller for $0.25 to $0.35 more per run. Sculptors also copy the sheet's mistakes, such as a tall pedestal.</li>
+    <li><b>Model.</b> GPT-6 Sol made the best bust and the best-made cat at the lowest cost by using nearly all 60 turns, and is the slowest to watch (14 to 21 minutes). Opus 5.5 is the fastest (3 to 5 minutes) and good at masses, but wrecked faces and ears with fine chiselling. Fable 5.1 cost about $2 a run without doing better. Gemini 3.1 Pro made the most recognisable cat and the worst bust. Native tool calling worked on all four; the JSON-lines fallback was never needed.</li>
+    <li><b>Automatic gate criteria.</b> They pass for Opus, Fable and Sol with formed tools and a reference: the judge was correct on both cat and bust, and every run cost under $2.10. The best bust (Sol) reads as a head and shoulders. It is a crude mannequin, not a portrait.</li>
+  </ul>
+
+  <p><b>Gate decision (Kyle, November 9, 2026).</b> Full (formed) tool set, reference on by default, Opus 5.5 as the default model, with Fable 5.1, GPT-6 Sol and Gemini 3.1 Pro in the picker. GPT-6 Sol made the best pieces in the study; Opus was chosen for its 3 to 5 minute pace. Its two weaknesses, stopping early and wrecking faces with fine chiselling, were given one bounded prompt-tuning pass at the start of Sprint 3 (result under Sprint 3). The original pass criteria were: for at least one configuration the judge picks correctly for both the cat and the bust, the bust reads as a head and shoulders to a person, and that run cost under $8.</p>
+
+  <p>The full report, with every run's contact sheets, costs and pass record: <a href="../study/report.html">../study/report.html</a>.</p>
+
+  <h3>Screenshots</h3>
+
+  <figure>
+    <img src="screenshots/sprint2_smoke_pawn_opus.webp" width="942" height="1374" loading="lazy" alt="A sheet of four grey clay-style renders of a carved chess pawn seen from the front left, front right, back left and back right. Each shows a round ball head on a thin collar, a tapering body and a stepped disc base, with fine vertical tool ridges on the surface.">
+    <figcaption><b>Checklist item 1.</b> The three-quarter contact sheet from the first real run (Opus 5.5, formed tools, no reference, 11 turns, $0.33). All four views show a recognisable pawn: ball head, collar, tapering body, stepped base. The vertical comb ridges on the body are the surface defect the plan lists across nearly every run.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint2_look_grid.webp" width="1234" height="1273" loading="lazy" alt="A six-view look sheet of a test block: front, back, right, left and top views with centimetre rulers and a 5 cm grid, plus a front-right three-quarter render. The block has a sawn corner, two drilled pits, and three short chiselled grooves.">
+    <figcaption><b>Task 2.1, the observer. Not a checklist item.</b> A look as the model receives it: five axis views with rulers in block centimetres and a grid every 5 cm, plus one three-quarter view. The test stone has a sawn corner, two pits and three chiselled lines, and each appears in the right place in every view it should. The sheet is 1234 by 1273 px, the size the plan records for a six-view sheet.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint2_look_form.webp" width="1234" height="1293" loading="lazy" alt="The same six-view sheet with a form overlay. A cyan ellipse outline is drawn in every view. The stone is tinted red where it stands far outside the ellipse, shading through orange to yellow nearer to it, with blue patches where the ellipse extends past the stone. A legend at the bottom explains the colours.">
+    <figcaption><b>Look overlays (Sprint 2 results). Not a checklist item.</b> The same stone with a declared ellipsoid form. The form outline is cyan, stone standing proud of the form is tinted yellow through red by how far, and blue marks where the form has no stone. The legend at the bottom states the same key in words. This matches the overlay behaviour the plan records.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint2_look_reference.webp" width="1298" height="1564" loading="lazy" alt="A look sheet that pairs stone views with reference tiles. Front, back, right and left stone views are tinted orange outside a cyan bust-shaped outline. Beside them are tiles titled REF FRONT, REF BACK and REF LEFT showing a grey bust silhouette inside a yellow stone outline, and a REF RIGHT tile showing a plain grey ellipse with no rulers. Top and front-right views of the stone sit below.">
+    <figcaption><b>Task 2.5, the reference sheet in a look. Not a checklist item.</b> Stone views sit beside the matching reference tiles. Stone outside the reference outline is tinted orange, the outline is cyan, and the stone's own outline is drawn in yellow on each reference tile. One thing to note: the REF RIGHT tile shows a plain ellipse with no rulers, unlike the other three reference tiles. The plan does not say why, and this page does not claim it is correct.</figcaption>
+  </figure>
+
+  <h3>Deviations and known rough edges</h3>
+  <ul>
+    <li>Code complete at 120 tests. Runs land in <code>.data/study/&lt;run-id&gt;/</code> (gitignored).</li>
+    <li><b>Gateway key.</b> <code>sculptor-100</code> has a $100 hard cap and a 30-day expiry. The bench also keeps its own study-wide ledger and refuses to start a run that could pass $100.</li>
+    <li><b>Kernel version 2.</b> Added the claw, a per-strike margin on protected cuts, and silhouette forms logged as a <code>form</code> entry so replays stay exact.</li>
+    <li><b>A full rough-out</b> of the default block is about 15 saw cuts plus 1,400 chisel strikes, computed in about 2 s, leaving stone a mean 0.5 to 0.7 cm proud of the margin. No protected voxel was removed in any test.</li>
+    <li><code>rough_out</code> refuses a target that floats or has a part not joined to the rest.</li>
+    <li><b>The rasp was rewritten.</b> The first version could not smooth point-chisel pits. Five passes now take a real rough-out from 0.23 cm to 0.05 cm RMS roughness.</li>
+    <li><b>Reference sheets</b> scale each view to the same height in block cm. Back and right outlines are the mirrored front and left ones.</li>
+    <li><b>Loop additions beyond the plan:</b> a run ends as stalled after three turns with no tool call; budget warnings at 75% and 90% and a final-turn notice; invalid arguments come back to the model as an error result; the 90 s deadline and single retry live in the loop.</li>
+    <li><b>Cost accounting</b> charges the larger of the price table and the gateway's own figure. <code>--max-usd</code> includes the reference and judge calls.</li>
+    <li><b>Problems that showed up across runs:</b> fine chisel work destroys faces more often than it makes them; every run ended by the model's own choice, often very early (Opus stopped a cat at 9 of 60 turns); necks go missing and shoulders come out as bulbs; vertical comb ridges on nearly every surface; pieces left at half the block's height; the sculptor's finish statements describe features the stone does not have.</li>
+    <li><b>The automated judge is lenient.</b> It gave 0.93 to a bust with a cratered face. Its pick is a floor, not a verdict on quality.</li>
+    <li><b>Stale line in the plan.</b> The Sprint 2 notes still say native tool calling on GPT-6 Sol and Gemini 3.1 Pro was "not yet exercised with real calls". The study results, written after Round C, say it worked on all four models. The JSON-lines fallback was never needed, so that path has still not been exercised with real calls.</li>
+  </ul>
+</section>
+
+<!-- ============================== SPRINT 3 ============================== -->
+<section id="sprint3">
+  <h2>Sprint 3: The live studio</h2>
+  <p class="goal"><b>Goal.</b> Type a commission in the browser and watch it carved live with the storyboard's HUD, on Sprint 1's plain render.</p>
+  <p class="meta">Status: complete. Local commit <code>9a693d4</code>, November 9, 2026. The scene is still the plain render; nothing in this section is evidence for the film look.</p>
+
+  <h3>Verification checklist</h3>
+  <ol class="checks">
+    <li>
+      <p class="what"><span class="tag done">Passed</span>A full commission runs start to finish in the browser with no manual steps.</p>
+      <p><span class="lbl">Result.</span> "A chess pawn", Opus 5.5, speed 8, WebGPU: 20 turns, $1.09, 293 s, titled "Pawn". The true and shown stone hashes were equal, and the saved log replays in Node to the same hash. The screen ran at most 20.5 s behind the model and finished 24 s after it.</p>
+      <p><span class="lbl">Evidence.</span> The five live wide frames below. The finished frame shows turn 20 of 60, $1.09 and the title "Pawn", which match the plan. The hash equality, the Node replay, the 293 s and the lag figures have no screenshot; they are recorded in the plan, which does not record the hash value or name the command used. The plan also does not say that all five frames come from that one run.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>Screenshots of the HUD for storyboard frames 1 to 4.</p>
+      <p><span class="lbl">Result.</span> Captured twice: live on WebGPU (<code>sprint3_live_*</code>) and on the mock preview at <code>/hud</code> (<code>sprint3_hud_frame*</code>), each at a wide and a narrow width.</p>
+      <p><span class="lbl">Evidence.</span> Figures below. One gap: the notebook panel is shown open only in the mock preview. There is no live screenshot of it.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>Reloading mid-commission restores the stone exactly and the sculptor carries on.</p>
+      <p><span class="lbl">Result.</span> "A sleeping cat curled in a loaf" was killed during turn 7, restored from <code>?session=</code> to the saved hash, and finished as "Loaf" at turn 49 ($1.58). Replaying a 10,218-strike log takes 5.8 s; a 13,547-entry new-format log takes 9.1 s.</p>
+      <p><span class="lbl">Evidence.</span> Three narrow live frames below show the session after the restore: at turn 7, carrying on at turn 12, and finished at turn 49 as "Loaf". The match to the saved hash and the replay timings have no screenshot; they are recorded in the plan. The finished frame's stats bar reads $1.57, one cent less than the plan's $1.58.</p>
+    </li>
+    <li>
+      <p class="what"><span class="tag done">Passed</span>The stats bar's cost equals the sum of the server's per-turn cost plus the reference, and the server's priced cost equalled the gateway's own figure on every verified turn.</p>
+      <p><span class="lbl">Result.</span> Recorded as passed in the plan.</p>
+      <p><span class="lbl">Evidence.</span> No screenshot, and the plan does not name the test or command used or list the per-turn figures. The only record is the plan's statement. The stats bar values visible in the frames below ($1.09 for the pawn) agree with the plan's totals but do not show the reconciliation.</p>
+    </li>
+  </ol>
+
+  <h3>Screenshots: a live commission, wide (WebGPU)</h3>
+  <p>These follow storyboard frames 1 to 4 and the finish, on "a chess pawn" with Opus 5.5 at speed 8.</p>
+
+  <figure>
+    <img src="screenshots/sprint3_live_commission_gpu.webp" width="1400" height="875" loading="lazy" alt="The uncarved off-white block fills the frame. A commission card sits over its lower part with a text field reading What should I carve?, four example chips, a stone picker set to Carrara marble, a model picker set to Opus 5.5 and a Begin button. A Sculptor label is top left and a Replays button top right.">
+    <figcaption><b>Storyboard frame 1, the commission (checklist item 2).</b> The empty state: untouched block, prompt field, four example chips, stone picker on "Carrara marble", model picker on "Opus 5.5", and Begin. The Replays button is top right. At this size the card covers the lower part of the block and the block's bottom corner shows beneath the card.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint3_live_sketching_gpu.webp" width="1400" height="875" loading="lazy" alt="The block with a charcoal outline of a chess pawn drawn on its front face. A stage list at top left shows Rough out, Block in, Model, Refine and Polish. A stats bar at top right shows Opus 5.5, 1 strike, 0 kg removed, turn 2 of 60, 19 cents of 8 dollars and 0:13. Two small pinned sketches labelled front and left sit below it. A subtitle and a transport bar with Pause, a speed slider at 8 times, Camera: Director, Notebook and Sculptor's eye are at the bottom.">
+    <figcaption><b>Storyboard frame 2, sketching on the block (checklist items 1 and 2).</b> The pawn's profile is drawn in charcoal on the front face and pinned as "front" and "left" sketches top right. Stats bar: turn 2 of 60, $0.19 of $8, 0 kg removed. The subtitle says what the sculptor is doing, and the transport shows Pause, speed 8×, camera mode, Notebook and Sculptor's eye. The stage list has no "Sketch" stage and already marks "Rough out", which the plan lists as a departure from the storyboard. The small tool badge above the subtitle sits on the stone and is hard to read in this frame.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint3_live_roughing_out_gpu.webp" width="1400" height="875" loading="lazy" alt="The block part way through roughing out: the top is cut into flat sawn facets and a band around the middle is deeply pitted. A faint charcoal outline hangs in the air to the left of the stone. Stats bar shows 311 strikes, 304 kg removed, 671 left, turn 3 of 60, 22 cents and 2:51. A badge reads point chisel, roughing out above a subtitle.">
+    <figcaption><b>Storyboard frame 3, roughing out (checklist items 1 and 2).</b> Sawn facets at the top and a pitted point-chisel band across the middle. Stats bar: 311 strikes, 304 kg removed and 671 left, turn 3 of 60, $0.22, with the screen 0:14 behind the model. The badge reads "Point chisel · roughing out". Part of the charcoal outline is still visible in the air to the left of the stone where the stone it was drawn on has been cut away; see the note on charcoal under rough edges.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint3_live_staged_look_eye_gpu.webp" width="1400" height="875" loading="lazy" alt="A roughly carved pawn on the left with charcoal lines still crossing it, a Looking badge and a subtitle about stepping back to look. On the right a panel titled What the sculptor sees shows a contact sheet of four orange-tinted views of the pawn with cyan outlines, then the numbers 429 kg remaining, 56.1 percent of the block gone, 5.8 cm proud of form max and 3.24 cm proud of form mean, a paragraph explaining the overlay colours, and the top of a reference sheet showing two grey pawns.">
+    <figcaption><b>Storyboard frame 4, stepping back to look (checklist items 1 and 2).</b> The hand has stopped (badge "Looking") and the Sculptor's eye panel shows the contact sheet the model was sent, with the form overlay, and the numbers that went with it: 429 kg remaining, 56.1% of the block gone, 5.8 cm proud of the form at most, 3.24 cm on average, with "All 18 numbers the sculptor was given" available to expand. The panel is labelled turn 2 while the stats bar is on turn 4, because the screen is 0:17 behind the model. The reference sheet is shown at the bottom of the panel, which the plan says happens only with <code>?ref=1</code>. Charcoal lines are still drawn across the carved stone.</figcaption>
+  </figure>
+
+  <figure>
+    <img src="screenshots/sprint3_live_finished_gpu.webp" width="1400" height="875" loading="lazy" alt="A finished carved chess pawn centred on black: ball head, collar, tapering stem, stepped rings and a bell-shaped base. A plaque below reads Pawn, Opus 5.5, Carrara marble, 9 November 2026, followed by a short statement. Stats bar shows 12,408 strikes, 725 kg removed, 250 left, turn 20 of 60, 1 dollar 9 of 8 dollars and 57:37. A pass stepper on the left reads 86/86. Buttons for Notebook, Sculptor's eye and New commission are at the bottom.">
+    <figcaption><b>The finished commission (checklist item 1).</b> A recognisable pawn with the title plaque "Pawn", model, stone, date and the sculptor's statement. Stats bar: 12,408 strikes, 725 kg removed and 250 left, turn 20 of 60, $1.09 of $8. The turn count, cost and title match the plan's record of the verified run. The clock reads 57:37, which is the virtual clock (how long the hand has been at work), not the 293 s of wall time. The stepper at the left edge (86/86) steps back through passes. There is no scrubber or export; those are Sprint 5.</figcaption>
+  </figure>
+
+  <h3>Screenshots: live at a narrow width, and resume after a reload (WebGPU)</h3>
+  <p>These are 400 px wide. The last three are from the "a sleeping cat curled in a loaf" session that was killed and restored (checklist item 3).</p>
+
+  <div class="shots">
+    <figure>
+      <img src="screenshots/sprint3_live_narrow_commission_gpu.webp" width="400" height="800" loading="lazy" alt="Narrow view of the empty state: the uncarved block above a commission card with the prompt field, four example chips wrapped onto two rows, the stone and model pickers side by side and a Begin button.">
+      <figcaption><b>Frame 1 at 400 px.</b> The commission card fits under the block without covering it. Chips wrap to two rows, and both pickers and Begin stay on screen.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_live_narrow_resumed_look_gpu.webp" width="400" height="800" loading="lazy" alt="Narrow view of a restored session. A roughly carved upright cat with ears sits at the top. Stats read 2,936 strikes, 491 kg, turn 7 of 60 and 29 cents. Below the transport bar, a panel titled What the sculptor sees is headed The studio's own look, turn 6, and shows a six-view contact sheet of the cat with a centimetre grid.">
+      <figcaption><b>Checklist item 3, just after the restore.</b> The cat session back on the stone at turn 7 of 60 with 2,936 strikes and $0.29 spent. The eye panel is headed "The studio's own look · turn 6": this is the look the loop takes for itself when it rebuilds a session, not one the model asked for. The frame shows the stone restored and the loop running again. It does not show the hash comparison.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_live_narrow_carving_gpu.webp" width="400" height="800" loading="lazy" alt="Narrow view of the same cat being carved. The surface is covered in fine vertical claw-chisel ridges and the cat sits on a square slab. Stats read 2,947 strikes, 491 kg, turn 12 of 60 and 46 cents. A badge reads claw chisel, roughing out above a subtitle.">
+      <figcaption><b>Checklist item 3, carrying on.</b> The same session at turn 12 of 60, $0.46, with the claw chisel at work. This is the evidence that the sculptor continued after the reload. On a narrow screen the stats collapse to icons and the stage list to five dots with the current stage named.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_live_narrow_finished_gpu.webp" width="400" height="800" loading="lazy" alt="Narrow view of the finished cat: an upright, pear-shaped cat with closed eyes and two small ears on a low square slab. Stats read 11,752 strikes, 562 kg, turn 49 of 60, 1 dollar 57 and 51:33. A plaque reads Loaf, Opus 5.5, Carrara marble, 9 November 2026 with a statement that runs off the bottom of the card behind the toolbar. A pass stepper reads 55/55.">
+      <figcaption><b>Checklist item 3, finished.</b> The resumed session ends as "Loaf" at turn 49 of 60 with 11,752 strikes. The stats bar reads $1.57; the plan records $1.58. The piece is an upright sitting cat, not a loaf. At this width the last lines of the statement are cut off behind the toolbar.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Screenshots: the HUD on the mock preview (<code>/hud</code>)</h3>
+  <p>The mock preview draws the HUD from fixed view states so each storyboard frame can be checked without a model call. The commission is "A bust of a Roman senator". The stone behind the HUD is a flat placeholder drawing. Each frame is shown wide (1440 px) and narrow (390 px). These are evidence for checklist item 2 and for layout at narrow widths only.</p>
+
+  <div class="duo">
+    <figure>
+      <img src="screenshots/sprint3_hud_frame1_wide.webp" width="1440" height="900" loading="lazy" alt="Mock preview, wide. A drawn white block on a wooden banker in a beam of light, with the commission card below it: prompt field, four example chips, Carrara marble and Opus 5.5 pickers and a Begin button.">
+      <figcaption><b>Mock frame 1, the commission.</b> The same commission card as the live frame: prompt, example chips, stone and model pickers, Begin.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_hud_frame1_narrow.webp" width="780" height="1688" loading="lazy" alt="Mock preview, narrow. The same commission card stacked at the bottom of a tall narrow screen with chips on two rows.">
+      <figcaption>Narrow: the card moves to the bottom and nothing is clipped.</figcaption>
+    </figure>
+  </div>
+
+  <div class="duo">
+    <figure>
+      <img src="screenshots/sprint3_hud_frame2_wide.webp" width="1440" height="900" loading="lazy" alt="Mock preview, wide, sketching. A stage list top left with no stage lit, a stats bar top right showing 2 strikes, 0 kg removed, turn 2 of 60, 5 cents of 8 dollars and 0:41, two pinned bust sketches labelled front and left, a Sketch badge, a subtitle about the profile, and the transport bar.">
+      <figcaption><b>Mock frame 2, sketching.</b> Stage list with nothing lit yet, stats bar (turn 2 of 60, $0.05 of $8), pinned front and left sketches, a "Sketch" badge over the subtitle, and the transport at speed 4×. The mock does not draw charcoal on the block itself.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_hud_frame2_narrow.webp" width="780" height="1688" loading="lazy" alt="Mock preview, narrow, sketching. Stats as icons, five empty stage dots labelled Setting out, the two pinned sketches, the Sketch badge and subtitle, and an icon-only transport bar.">
+      <figcaption>Narrow: stats become icons, the stage list becomes five dots reading "Setting out", and the transport drops its labels.</figcaption>
+    </figure>
+  </div>
+
+  <div class="duo">
+    <figure>
+      <img src="screenshots/sprint3_hud_frame3_wide.webp" width="1440" height="900" loading="lazy" alt="Mock preview, wide, roughing out. Rough out is lit in the stage list. Stats show 1,284 strikes, 212 kg removed, 763 left, turn 4 of 60, 10 cents and 6:12, with 0:48 behind. A badge reads point chisel, roughing out above a subtitle. The drawn block has two corners cut off.">
+      <figcaption><b>Mock frame 3, roughing out.</b> The main watching state: "Rough out" lit, stats bar with strikes, mass, turn, cost, clock and how far the screen is behind (0:48), tool badge, subtitle, and transport.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_hud_frame3_narrow.webp" width="780" height="1688" loading="lazy" alt="Mock preview, narrow, roughing out. The same state with icon stats, one lit stage dot labelled Rough out, pinned sketches, badge, subtitle and icon transport.">
+      <figcaption>Narrow: the same state fits without overlap.</figcaption>
+    </figure>
+  </div>
+
+  <div class="duo">
+    <figure>
+      <img src="screenshots/sprint3_hud_frame3_notebook_wide.webp" width="1440" height="900" loading="lazy" alt="Mock preview, wide, with the Sculptor's notebook panel open on the right. It lists Turn 1 with Thought and Looking, Turn 2 with two Sketch entries and their sentences, Turn 3 with Rewrote the plan, a Saw entry of 2 strikes and 137 kg, and a Point chisel roughing out entry with a spinner, and Turn 4 with a sentence of text. The scene and HUD shift left to make room.">
+      <figcaption><b>Mock frame 3 with the notebook open.</b> The notebook lists each turn's thoughts and tool calls: a look, two sketches, a plan rewrite, a saw pass (2 strikes, 137 kg) and a point-chisel pass still in progress. The scene and the rest of the HUD move left to make room. This panel has no live screenshot.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_hud_frame3_notebook_narrow.webp" width="780" height="1688" loading="lazy" alt="Mock preview, narrow, with the notebook open as a sheet over the lower half of the screen and the stone view shrunk into the top half above the transport bar.">
+      <figcaption>Narrow: the notebook opens as a bottom sheet and the stone stays visible above it.</figcaption>
+    </figure>
+  </div>
+
+  <div class="duo">
+    <figure>
+      <img src="screenshots/sprint3_hud_frame4_wide.webp" width="1440" height="900" loading="lazy" alt="Mock preview, wide, stepping back to look. Rough out is marked done and Block in is lit. A Looking badge sits over the subtitle. The right panel, What the sculptor sees, shows a four-tile sheet of a blocky bust with cyan form outlines, then 293 kg remaining, 70 percent of the block gone, 3.3 cm proud of form max, 1.94 cm proud of form mean, 3.4 cm cut below form max and 81 percent front outline match.">
+      <figcaption><b>Mock frame 4, stepping back to look.</b> The Sculptor's eye panel for turn 5: which views were taken, a "Form outline" badge for the overlay, a placeholder sheet, and six headline numbers with "All 17 numbers the sculptor was given" to expand. The stage list shows "Rough out" done and "Block in" active.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_hud_frame4_narrow.webp" width="780" height="1688" loading="lazy" alt="Mock preview, narrow, with the eye panel open as a bottom sheet showing the view chips, the Form outline badge and the top of the four-tile sheet; two stage dots are filled and the label reads Block in.">
+      <figcaption>Narrow: the eye panel opens as a bottom sheet. The numbers are below the fold in this frame.</figcaption>
+    </figure>
+  </div>
+
+  <div class="duo">
+    <figure>
+      <img src="screenshots/sprint3_hud_frame6_wide.webp" width="1440" height="900" loading="lazy" alt="Mock preview, wide, finished. A drawn blocky bust on the banker with a plaque reading Portrait Head, Opus 5.5, Carrara marble, 9 November 2026 and a statement. Stats show 10,218 strikes, 763 kg removed, 213 left, turn 35 of 60, 1 dollar 7 and 57:41. Buttons for Notebook, Sculptor's eye and New commission.">
+      <figcaption><b>Mock frame 6, the finished state only.</b> Title plaque, statement, final stats and "New commission". This is not the storyboard's full frame 6: the scrubber and film export wait for Sprint 5. Frame 5 (macro shot) belongs to Sprint 4 and has no mock.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/sprint3_hud_frame6_narrow.webp" width="780" height="1688" loading="lazy" alt="Mock preview, narrow, finished: icon stats, the drawn bust, the Portrait Head plaque with its full statement, and an icon toolbar with New commission.">
+      <figcaption>Narrow: the plaque and its full statement fit above the toolbar.</figcaption>
+    </figure>
+  </div>
+
+  <h3>Screenshots: replaying a finished study run (WebGPU)</h3>
+  <p>The replay player was built in this sprint on the same timeline as a live commission. It is not a checklist item on its own; it supports item 3 (replay timings) and gives Sprint 4 fixed stones to tune against. The picker in these frames describes itself as listing finished study runs only; the plan says it also lists saved sessions, which is not shown here.</p>
+
+  <div class="shots">
+    <figure>
+      <img src="screenshots/replay_picker_gpu.webp" width="360" height="800" loading="lazy" alt="A Replays panel listing finished study runs. Each row shows the subject, badges for model, tool set and reference, a tick or cross with what the judge saw, strike and turn counts, and the cost. Twelve rows are visible, starting with Bust gemini formed reference at 1 dollar 16, judged chess pawn with a cross.">
+      <figcaption><b>The replay picker (<code>/?replay</code>).</b> Twelve study runs are visible, each with model, tool set, reference badge, the judge's pick with a tick or cross, strikes, turns and cost. The turns, costs and judge picks on screen match the study table above for every visible row.</figcaption>
+    </figure>
+    <figure>
+      <img src="screenshots/replay_narrow_playing_gpu.webp" width="360" height="800" loading="lazy" alt="Narrow view of a replay in progress: a rough, pitted bust shape with a head and blocky shoulders. A rough out badge and a subtitle sit above a transport with restart, pause and skip buttons, a speed menu at 120 times, Pass 4 of 50 and Strike 2,332 of 10,218.">
+      <figcaption><b>A replay playing.</b> The Round B Opus bust (bust · opus · formed · reference) at 120×, on pass 4 of 50 and strike 2,332 of 10,218, with the pass's badge and subtitle. The transport has restart, pause, skip-to-end and a speed menu.</figcaption>
+    </figure>
+  </div>
+
+  <figure>
+    <img src="screenshots/replay_bust_end_gpu.webp" width="1400" height="875" loading="lazy" alt="The finished replay of the bust: a head with a hollowed, rough face above a rounded bulb-shaped body on a square plinth. A plaque at lower left reads Portrait Head with a statement. The transport shows 30 times speed, Pass 50 of 50 and Strike 10,218 of 10,218.">
+    <figcaption><b>The same replay at its end.</b> Pass 50 of 50, strike 10,218 of 10,218: the 10,218-strike log the plan times at 5.8 s to replay. The stone is a head on a bulb-shaped body on a square plinth with a broken-up face, which matches the reviewer's read in the study table ("head with ears on a bulb body, face cratered"). The statement on the plaque speaks of a "steady forward gaze" that the stone does not have, an example of the finish-statement problem listed under Sprint 2.</figcaption>
+  </figure>
+
+  <h3>Deviations and known rough edges</h3>
+  <ul>
+    <li><b>Opus prompt tuning (one bounded pass, $3.68).</b> Features are declared as small shapes in the form and roughed to at a fine margin; chisel strokes are for hollows only; a pacing rule and finish checklist were added. Result on the bust: full height, a real neck, square shoulders, and a face with brow, nose, eyes, mouth and intact ears (34 turns, $1.29, judge 0.96). The plan calls it still a caricature. Early stopping is improved, not fixed: the cat stopped at 24 turns and 59 cm. There is no screenshot of the tuned bust on this page.</li>
+    <li><b>Tools added:</b> <code>drill</code>, <code>chisel</code> with <code>roundel</code> and a required <code>protect</code> argument, <code>polish</code>, <code>slice</code>, <code>sketch</code>, and, beyond the plan, <code>closeup</code>. All 16 study logs still replay to their recorded hashes and the kernel version stays 2. No screenshot.</li>
+    <li><b>Hanging stone.</b> Kyle noticed pieces floating in mid-air because the island check only ran at the end of a pass. New passes log a check after every saw cut and every 2 s of carving; the longest hang went from 580 to 911 strikes down to 4 to 5. For older logs the browser meshes a display copy in which a hanging piece has already fallen. No screenshot.</li>
+    <li><b>Two kernel workers, one per stone, and a third worker for <code>/api/brain</code>.</b> In one worker the hand froze playback for up to 2.7 s per rough-out, and posting the growing context from the page cost a 67 to 358 ms frame per turn.</li>
+    <li><b>Pacing rule:</b> playback rate is backlog divided by drain time, clamped between a floor and 8× the chosen speed and eased over 0.5 s. The loop is held at its next tool call while paused or more than 60 s behind.</li>
+    <li><b>Sessions</b> are files under <code>.data/sessions/&lt;id&gt;/</code> with an append-only <code>strikes.ndjson</code>. Request bodies to <code>/api/brain</code> are capped at 24 MB; a Vercel deploy will need WebP looks to fit its 4.5 MB function limit (Sprint 5).</li>
+    <li><b>HUD departures from the storyboard:</b> no "Sketch" stage, speed stops 1/4/8/20/60 on a slider, the overlay in the eye panel is a badge, and the scrubber and export wait for Sprint 5.</li>
+    <li><b>About 27 s of dead air before the first cut.</b> The opening look was lengthened afterwards and this was not re-measured.</li>
+    <li>A turn in flight at reload is paid for but lost.</li>
+    <li><b>Charcoal.</b> The plan says sketches are wiped at the next cutting pass rather than faded where carved. In the live roughing-out and staged-look frames above, charcoal lines are still on screen after cutting has started, some hanging in the air. Either those frames predate the wipe or the wipe does not cover this case; it has not been re-checked.</li>
+    <li>Restored sessions show past looks without images.</li>
+    <li>Each of a new log's frequent checks costs a full island check on the shown stone.</li>
+    <li>The plan says the model picker shows the short key ("opus"). The commission card in the frames above shows "Opus 5.5" when closed; the open list is not captured. The Nuxt DevTools pill overlaps the transport in dev.</li>
+    <li>Visible in the frames above and not in the plan: the tool badge is hard to read where it sits over the stone (wide live frames), the commission card covers the lower part of the block at 1400 px wide, and the finished plaque's statement is cut off behind the toolbar at 400 px wide.</li>
+  </ul>
+</section>
+
+<!-- SPRINT4:START -->
+<section id="sprint4">
+  <h2>Sprint 4: Cinema</h2>
+  <div class="placeholder">
+    <p><span class="tag wip">In progress</span> <b>Not yet built. Nothing in this section has been verified.</b></p>
+    <p><b>Goal.</b> The same commission looks and sounds like a film.</p>
+    <p>The plan's checklist for this sprint, all still open:</p>
+    <ul>
+      <li>Storyboard frame 5 reproduced: a macro shot with raw, rasped and polished stone in one frame and light through a thin edge.</li>
+      <li>A slab fall captured as a five-frame sequence: cut, fall, impact, break, settle.</li>
+      <li>60 fps during normal carving and no frame over 33 ms during a slab fall on Kyle's Mac; the WebGL 2 fallback renders without errors.</li>
+      <li>Kyle watches one full commission and signs off on the look.</li>
+    </ul>
+  </div>
+</section>
+<!-- SPRINT4:END -->
+
+<!-- SPRINT5:START -->
+<section id="sprint5">
+  <h2>Sprint 5: Reveal and share</h2>
+  <div class="placeholder">
+    <p><span class="tag todo">Not started</span> <b>Not yet built. Nothing in this section has been verified.</b></p>
+    <p><b>Goal.</b> Every commission ends well and leaves something to show people.</p>
+    <p>The plan's checklist for this sprint, all still open:</p>
+    <ul>
+      <li>Storyboard frame 6 reproduced; scrubbing to any stage shows the stone as it was.</li>
+      <li>An exported 60-second film plays in QuickTime with no dropped frames.</li>
+      <li>A replay page loads and plays with the network tab showing zero model calls.</li>
+    </ul>
+  </div>
+</section>
+<!-- SPRINT5:END -->
+
+<!-- E2E:START -->
+<section id="e2e">
+  <h2>End-to-end run-through</h2>
+  <div class="placeholder">
+    <p><span class="tag todo">Not started</span> <b>Not yet built.</b> This section will hold the golden-path screenshots in order (commission, sketch, carving, looks, reveal, replay, export) once Sprints 4 and 5 are done. Until then, the closest thing to an end-to-end record is the live pawn commission under Sprint 3, which runs from the commission card to a titled piece on the plain render.</p>
+  </div>
+</section>
+<!-- E2E:END -->
+
+<footer>
+  <p>Sources: <a href="../implementation_plan.md">implementation_plan.md</a> (verification checklists, results and deviations for Sprints 1 to 3, and the study table), <a href="../study/report.html">study/report.html</a>, and the 33 files in <code>screenshots/</code>. Page written November 9, 2026, covering Sprints 1 to 3 only.</p>
+</footer>
+
+</main>
+</body>
+</html>
