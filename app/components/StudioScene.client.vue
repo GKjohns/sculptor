@@ -42,6 +42,10 @@ const hostEl = useTemplateRef<HTMLDivElement>('host')
 const route = useRoute()
 const toast = useToast()
 const failure = ref('')
+// The loading screen over the studio while it starts (StudioLoading.vue), and what it says.
+const booting = ref(true)
+const boot = ref({ caption: 'Opening the studio', progress: 0.05 })
+const step = (caption: string, progress: number) => boot.value = { caption, progress }
 const handsOn = route.query.hands === '1'
 const tool = ref<HandTool>('point')
 const sawLine = ref<ScreenLine | null>(null)
@@ -216,6 +220,7 @@ onMounted(async () => {
   // Nuxt's client-only wrapper renders a placeholder on the first pass, so the host div lands a tick later.
   await nextTick()
   if (!hostEl.value) return
+  step('Lighting the room', 0.15)
   // ?fx=-dof,-godrays (or none, all) drops or adds post effects; ?dpr=1 caps the pixel ratio. Both are for measuring.
   const s = new StudioRenderer(hostEl.value, { forceWebGL: route.query.gl === '1', effects: effectsFromQuery(route.query.fx), maxPixelRatio: Number(route.query.dpr) || undefined })
   const k = new KernelClient()
@@ -247,7 +252,10 @@ onMounted(async () => {
     st = (await Promise.all([built, s.init()]))[0]
   } catch (e) {
     // Torn down mid-start (a hot reload, a navigation) is not a failure to report.
-    if (studio === s) failure.value = e instanceof Error ? e.message : String(e)
+    if (studio === s) {
+      failure.value = e instanceof Error ? e.message : String(e)
+      booting.value = false
+    }
     return
   }
   // Unmounted while the backend or the worker was starting.
@@ -325,7 +333,9 @@ onMounted(async () => {
   w.__sculptor = handle
 
   // Ready means the whole stone has been meshed and frames with it in them have reached the canvas.
+  step('Dressing the block', 0.4)
   await st.whenShown(0)
+  step(replayId.value ? 'Setting out the run' : sessionId.value ? 'Putting the stone back' : 'Laying out the tools', 0.6)
   if (route.query.demo === '1') await handle.demo()
   charcoal = new Charcoal(s)
   stage = { studio: s, kernel: k, stone: st, camera: rig, charcoal, cinema: film ?? undefined, setStone }
@@ -342,9 +352,13 @@ onMounted(async () => {
   }
   // Every material's pipelines, whatever the camera has seen so far: the first slab fall swings it
   // round the room. ?prewarm=0 leaves it out, to measure what it saves.
+  step('Warming the lights', 0.85)
   if (route.query.prewarm !== '0') await s.prewarm()
   await s.rendered(3)
-  if (studio === s) w.__sceneReady = true
+  if (studio !== s) return
+  w.__sceneReady = true
+  step('Ready', 1)
+  booting.value = false
 })
 
 onBeforeUnmount(() => {
@@ -528,6 +542,11 @@ onBeforeUnmount(() => {
         />
       </UCard>
     </div>
+    <StudioLoading
+      :loading="booting"
+      :caption="boot.caption"
+      :progress="boot.progress"
+    />
     <ReplayPicker
       v-model:open="picking"
       :runs="runs"

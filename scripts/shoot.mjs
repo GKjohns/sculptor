@@ -200,6 +200,8 @@ async function open(href) {
   } catch {
     await fail('window.__sceneReady never became true', browser)
   }
+  // The loading screen fades for most of a second after ready; the pictures are of what it uncovers.
+  await page.waitForFunction(() => !document.querySelector('[data-loading]'), null, { timeout: 5000 }).catch(() => {})
   await page.evaluate(() => document.querySelectorAll('#nuxt-devtools-container, nuxt-devtools-anchor, [id^="nuxt-devtools"]').forEach(e => e.remove()))
 }
 

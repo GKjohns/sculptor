@@ -1,0 +1,27 @@
+<!-- What the page shows before any script has run: the studio's dark, the name, a line that moves.
+     StudioLoading.vue takes over in the same place once the app mounts. CSS only, so it keeps moving
+     while the main thread is busy. -->
+<style>
+  html, body { background: #0b0a09; margin: 0; }
+  .sculptor-boot {
+    position: fixed; inset: 0; display: grid; place-items: center; background: #0b0a09;
+    font-family: Geist, ui-sans-serif, system-ui, sans-serif; color: #e7e5e4;
+  }
+  .sculptor-boot div { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .sculptor-boot b { font-size: 13px; font-weight: 600; letter-spacing: 0.32em; text-transform: uppercase; padding-left: 0.32em; }
+  .sculptor-boot i { position: relative; display: block; width: 160px; height: 1px; overflow: hidden; background: rgb(255 255 255 / 0.1); }
+  .sculptor-boot i::after {
+    content: ''; position: absolute; inset: 0; width: 40%; background: #fbbf24;
+    animation: sculptor-boot 1.4s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  .sculptor-boot span { font-size: 12px; color: #a8a29e; }
+  @keyframes sculptor-boot { from { transform: translateX(-100%) } to { transform: translateX(250%) } }
+  @media (prefers-reduced-motion: reduce) { .sculptor-boot i::after { animation: none; width: 100%; opacity: 0.4 } }
+</style>
+<div class="sculptor-boot" data-hud>
+  <div>
+    <b>Sculptor</b>
+    <i></i>
+    <span>Opening the studio</span>
+  </div>
+</div>
