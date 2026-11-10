@@ -257,6 +257,48 @@ function faceCuts(k: HeadKnobs): PartCut[] {
 export interface Expanded {
   shapes: Shape[]
   cuts: RoughCut[]
+  // What the canon changed in what was declared (a bust's proportions), for the result.
+  notes?: string[]
+}
+
+// The proportions of a bust, from its head (skull box): shoulders at least 2.2 head widths,
+// the chest at least 0.8 of the head's depth, the trunk at least as tall as the head, and its
+// top (the shoulders) between a third of a head under the chin and the chin, so the head is
+// about two fifths of the bust and never sits on a post. The torso is changed to fit and the
+// changes are reported. Exported for the tests.
+export function bustProportions(torso: Omit<DeclaredShape, 'kind'>, head: Omit<DeclaredShape, 'kind'>): { torso: Omit<DeclaredShape, 'kind'>, notes: string[] } {
+  const notes: string[] = []
+  const hw = Math.abs(head.size[0])
+  const hh = Math.abs(head.size[1])
+  const hd = Math.abs(head.size[2])
+  const size: Vec3 = [Math.abs(torso.size[0]), Math.abs(torso.size[1]), Math.abs(torso.size[2])]
+  const center: Vec3 = [torso.center[0], torso.center[1], torso.center[2]]
+  const r = (v: number) => Math.round(v * 10) / 10
+  if (size[0] < 2.2 * hw) {
+    notes.push(`shoulders widened from ${r(size[0])} to ${r(2.2 * hw)} cm (2.2 head widths)`)
+    size[0] = r3(2.2 * hw)
+  }
+  if (size[2] < 0.8 * hd) {
+    notes.push(`chest deepened from ${r(size[2])} to ${r(0.8 * hd)} cm`)
+    size[2] = r3(0.8 * hd)
+  }
+  const chin = head.center[1] - hh / 2
+  let top = center[1] + size[1] / 2
+  if (top < chin - hh / 3 || top > chin + 0.05 * hh) {
+    const was = top
+    top = Math.min(chin + 0.05 * hh, Math.max(chin - hh / 3, top))
+    notes.push(`shoulders moved from ${r(was)} to ${r(top)} cm high, under the chin`)
+  }
+  let tall = size[1]
+  if (tall < hh) {
+    notes.push(`trunk lengthened from ${r(tall)} to ${r(hh)} cm (as tall as the head)`)
+    tall = hh
+  }
+  // Never below the base: the socle needs a little room.
+  tall = Math.min(tall, top - 4)
+  size[1] = r3(tall)
+  center[1] = r3(top - tall / 2)
+  return { torso: { ...torso, center, size }, notes }
 }
 
 // A list of canon parts placed in a frame. y in a part is from the canon's chin when `chin` is
@@ -325,7 +367,13 @@ export function expandCanon(shapes: DeclaredShape[]): Expanded {
     } else if (s.kind === 'torso') {
       // The nearest head above it is the one its neck carries.
       const head = heads.filter(h => h.center[1] > s.center[1]).sort((a, b) => length(sub(a.center, s.center)) - length(sub(b.center, s.center)))[0]
-      const e = torsoParts(s, head ? { frame: headFrame(head), knobs: headKnobs(head.style) } : null)
+      let torso = s
+      if (head) {
+        const fit = bustProportions(s, head)
+        torso = { ...s, ...fit.torso }
+        if (fit.notes.length) (out.notes ??= []).push(...fit.notes)
+      }
+      const e = torsoParts(torso, head ? { frame: headFrame(head), knobs: headKnobs(head.style) } : null)
       out.shapes.push(...e.shapes)
       out.cuts.push(...e.cuts)
     } else {
