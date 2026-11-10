@@ -2,7 +2,7 @@
 // read out. The bench runs it in-process and the browser worker runs the same code, so nothing
 // here touches the DOM or Node; PNG encoding is handed in.
 
-import { DENSITY, stoneMassKg } from '../sculpt/grid.ts'
+import { DENSITY, cloneGrid, stoneMassKg } from '../sculpt/grid.ts'
 import { chisel, drill, incise, polish, rasp, roughOut, saw, silhouetteForm, sketch } from '../sculpt/hand.ts'
 import type { PassResult, RulerPoint } from '../sculpt/hand.ts'
 import { SLICE_VIEW, measureAll, measureSlice, surfaceFinish } from '../sculpt/measure.ts'
@@ -72,6 +72,9 @@ export interface KernelStudio extends Studio {
 export interface Focus { view: AxisView, center: ViewPoint, span: number }
 
 const r1 = (v: number) => Math.round(v * 10) / 10
+
+// The sever guard's threshold: about a kilo of a declared form in one falling piece.
+export const SEVER_CM3 = 370
 const pt = (p: ViewPoint): RulerPoint => [p.h, p.v]
 
 export function figureSpec(f: FigureArgs): FigureSpec {
@@ -208,6 +211,50 @@ export function createStudio(opts: StudioOptions): KernelStudio {
   const render = (views: ViewId[], overlay: Overlay = 'grid'): Image => renderContactSheet(grid, views, lookOptions(overlay))
 
   // Closes a pass: refusals throw (nothing was cut), everything else is logged and described.
+  // ---------- the sever guard ----------
+  // No pass may cut the piece free of its base. A pass that can (rough_out, detail, saw) is
+  // carried out on a copy of the stone first; if a piece it drops holds more than about a kilo
+  // of a declared form (the bust that fell when a detail from the top shaved through its stem),
+  // the pass is refused and the stone is left as it was. Waste never counts: what is inside a
+  // piece is told by stepping a centimetre in from its surface and asking the forms.
+  const severed = (pass: PassResult, on: Grid): { cm3: number, at: Vec3, form: string } | null => {
+    const forms = declared.map(n => [n, on.forms.get(n)] as const).filter((f): f is readonly [string, NonNullable<typeof f[1]>] => f[1] !== undefined)
+    if (forms.length === 0) return null
+    for (const o of pass.offcuts) {
+      if (o.cm3 < SEVER_CM3) continue
+      const verts = o.positions.length / 3
+      const step = Math.max(1, Math.floor(verts / 400))
+      let tested = 0
+      const inside = new Map<string, number>()
+      for (let v = 0; v < verts; v += step) {
+        const p: Vec3 = [o.positions[3 * v]! - o.normals[3 * v]!, o.positions[3 * v + 1]! - o.normals[3 * v + 1]!, o.positions[3 * v + 2]! - o.normals[3 * v + 2]!]
+        tested++
+        for (const [n, f] of forms) if (formDistance(f, p[0], p[1], p[2]) < -0.2) inside.set(n, (inside.get(n) ?? 0) + 1)
+      }
+      for (const [n, count] of inside) {
+        const cm3 = count / tested * o.cm3
+        if (cm3 >= SEVER_CM3) return { cm3, at: o.centroid, form: n }
+      }
+    }
+    return null
+  }
+  const guardedPass = (tool: string, run: (on: Grid) => PassResult): PassResult => {
+    const copy = cloneGrid(grid)
+    const pass = run(copy)
+    if (pass.error) return pass
+    const cut = severed(pass, copy)
+    if (cut) {
+      const kg = (cut.cm3 * DENSITY / 1000).toFixed(cut.cm3 < 3000 ? 1 : 0)
+      throw new Error(`this ${tool} would cut the piece free of its base: about ${kg} kg of "${cut.form}" around (${r1(cut.at[0])}, ${r1(cut.at[1])}, ${r1(cut.at[2])}) would fall, because nothing left would join it to the stone below. Nothing was cut. Leave more stone where it joins the base (a larger margin, a window that stops short of the join, a ${tool === 'saw' ? 'cut that does not cross the piece' : 'thicker join in the form'})`)
+    }
+    grid.dist.set(copy.dist)
+    grid.finish.set(copy.finish)
+    for (let i = 0; i < grid.dirty.length; i++) grid.dirty[i] = grid.dirty[i]! | copy.dirty[i]!
+    grid.solidUnits = copy.solidUnits
+    for (const [n, f] of copy.forms) grid.forms.set(n, f)
+    return pass
+  }
+
   const settle = (pass: PassResult, extra: Record<string, number> = {}): StudioResult => {
     if (pass.error) throw new Error(pass.error)
     for (const s of pass.strikes) strikes.push(s)
@@ -344,7 +391,8 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     const canon = a.shapes.filter(s => s.kind === 'head' || s.kind === 'torso').map(s => s.kind)
     const expanded = expandCanon(a.shapes.map(declaredShape))
     const what = `${a.shapes.length} shape${a.shapes.length === 1 ? '' : 's'}${canon.length > 0 ? `, the ${canon.join(' and ')} expanded to ${expanded.shapes.length} solids in all` : ''}`
-    return lay(a.name, expanded.shapes, expanded.cuts, a.blend_cm, what)
+    const fitted = expanded.notes?.length ? ` The bust canon kept its proportions to the head: ${expanded.notes.join('; ')}.` : ''
+    return lay(a.name, expanded.shapes, expanded.cuts, a.blend_cm, what, () => fitted)
   }
 
   // Posed figures, animals and the model's own solids as one form (sculpt/figure.ts).
@@ -393,11 +441,11 @@ export function createStudio(opts: StudioOptions): KernelStudio {
         declareForm(grid, REFERENCE_TARGET, silhouetteForm(outlines.front!, outlines.left!, { width: grid.size[0], height: grid.size[1], depth: grid.size[2] }))
         referenceDeclared = true
       }
-      pass = roughOut(grid, { to: REFERENCE_TARGET, margin_cm: a.margin_cm, tool: a.tool, ...limit })
+      pass = guardedPass('rough_out', on => roughOut(on, { to: REFERENCE_TARGET, margin_cm: a.margin_cm, tool: a.tool, ...limit }))
     } else {
       if (!declared.includes(a.to)) throw new Error(`no form named "${a.to}" has been declared${declared.length ? `; your forms: ${declared.map(n => `"${n}"`).join(', ')}` : '; declare one with declare_form first'}`)
       sameFigure('rough_out', a.to)
-      pass = roughOut(grid, { to: a.to, margin_cm: a.margin_cm, tool: a.tool, ...limit })
+      pass = guardedPass('rough_out', on => roughOut(on, { to: a.to, margin_cm: a.margin_cm, tool: a.tool, ...limit }))
       if (!pass.error) guarded = a.to
     }
     return settle(pass, pass.stats ? { outside_margin_max_cm: r1(pass.stats.proudMaxCm), outside_margin_mean_cm: Math.round(pass.stats.proudMeanCm * 100) / 100, saw_cuts: pass.stats.saws, chisel_strikes: pass.stats.chiselStrikes } : {})
@@ -419,12 +467,13 @@ export function createStudio(opts: StudioOptions): KernelStudio {
     hi[def.v!] = a.center.v + half
     const facing: Vec3 = [-def.look[0], -def.look[1], -def.look[2]]
     const box = { x0: lo[0], y0: lo[1], z0: lo[2], x1: hi[0], y1: hi[1], z1: hi[2] }
-    let pass = roughOut(grid, { to: a.to, margin_cm: 0.1, tool: 'flat', window: { box, facing } })
-    if (!pass.error) {
-      guarded = a.to
+    const pass = guardedPass('detail', (on) => {
+      let p = roughOut(on, { to: a.to, margin_cm: 0.1, tool: 'flat', window: { box, facing } })
       const cuts = cutsOf.get(a.to) ?? []
-      if (cuts.length > 0) pass = joined(pass, incise(grid, { cuts, box, facing }))
-    }
+      if (!p.error && cuts.length > 0) p = joined(p, incise(on, { cuts, box, facing }))
+      return p
+    })
+    if (!pass.error) guarded = a.to
     return settle(pass, pass.stats ? { window_proud_max_cm: r1(pass.stats.proudMaxCm), window_proud_mean_cm: Math.round(pass.stats.proudMeanCm * 100) / 100, chisel_strikes: pass.stats.chiselStrikes } : {})
   }
 
@@ -484,7 +533,7 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       case 'saw': {
         const a: SawArgs = call.args
         wholeStone('saw')
-        return settle(saw(grid, { view: a.view, from: pt(a.from), to: pt(a.to), discard: a.discard }))
+        return settle(guardedPass('saw', on => saw(on, { view: a.view, from: pt(a.from), to: pt(a.to), discard: a.discard })))
       }
       case 'chisel': {
         const a: ChiselArgs = call.args

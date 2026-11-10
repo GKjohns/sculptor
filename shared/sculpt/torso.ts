@@ -276,8 +276,9 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     cut('band', 'roundel', 0.8, 0.8, onSurface(ells, [[0, 20], [0, 11.5]], 1.4))
   }
 
-  // The socle: a turned stem under the truncation, a moulding at each end and a square plinth,
-  // upright and square to the block whatever the pose of the bust above it.
+  // The socle: a plinth, a short turned stem at least 11 cm across (a third of the shoulders)
+  // with a flared foot, and a collar under the truncation; the stem runs well up into the chest,
+  // so the bust stands on a thick neck of stone that no finishing pass can shave through.
   if (s.socle) {
     const lowest = Math.min(...shapes.map(sh => sh.center[1] - Math.max(...sh.size) / 2))
     const bottom = Math.max(lowest, toWorld(f, [0, -23, 0])[1])
@@ -287,13 +288,12 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     const D2 = t.size[2]
     const plinth = Math.min(5, Math.max(2.5, bottom * 0.25))
     shapes.push(rounded({ kind: 'box', center: [cx, plinth / 2, cz], size: [0.56 * W2, plinth, Math.min(0.56 * W2, 1.2 * D2)], rotation: [0, 0, 0] }))
-    if (bottom - plinth > 3) {
-      // A cone whose point is buried in the chest: wide at the plinth, narrowing up the stem.
-      const tall = 2.4 * (bottom - plinth)
-      shapes.push(rounded({ kind: 'cone', center: [cx, plinth + tall / 2, cz], size: [0.4 * W2, tall, 0.4 * W2], rotation: [0, 0, 0] }))
-      shapes.push(rounded({ kind: 'ellipsoid', center: [cx, plinth + 1.2, cz], size: [0.46 * W2, 2.6, 0.46 * W2], rotation: [0, 0, 0] }))
-    }
-    shapes.push(rounded({ kind: 'ellipsoid', center: [cx, bottom + 0.4, cz], size: [0.36 * W2, 2.6, 0.36 * W2], rotation: [0, 0, 0] }))
+    const stem = Math.max(11, 0.34 * W2)
+    const top = bottom + 0.3 * stem
+    shapes.push(rounded({ kind: 'capsule', center: [cx, (plinth - 1 + top) / 2, cz], size: [stem, top - plinth + 1 + stem, Math.min(stem, 0.9 * D2)], rotation: [0, 0, 0] }))
+    // The flared foot on the plinth, and the collar where the stem meets the cut.
+    shapes.push(rounded({ kind: 'ellipsoid', center: [cx, plinth + 1.2, cz], size: [stem * 1.45, 3.2, Math.min(stem * 1.45, 1.1 * D2)], rotation: [0, 0, 0] }))
+    shapes.push(rounded({ kind: 'ellipsoid', center: [cx, bottom + 0.6, cz], size: [stem * 1.3, 3.0, Math.min(stem * 1.3, D2)], rotation: [0, 0, 0] }))
   }
   return { shapes, cuts }
 }

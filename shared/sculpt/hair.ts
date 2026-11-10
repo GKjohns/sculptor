@@ -237,24 +237,27 @@ function onMass(m: Ell3[], p: Vec3): { p: Vec3, n: Vec3 } {
   return { p: at, n: normalize([q[0] / which.r[0] ** 2, q[1] / which.r[1] ** 2, q[2] / which.r[2] ** 2]) }
 }
 
-// One lock along a path of canon points, laid on the mass (the first `laid` points; the rest,
-// a fringe's tip, stand where they are), in tapering capsules of their own soft blend.
+// One lock along a path of canon points: a flat ribbon lying on the mass (the first `laid`
+// points; the rest, a fringe's tip, stand where they are), in overlapping flat ellipsoids that
+// blend into the mass with the form's own blend, so the hair is one shape with shallow valleys
+// between its locks.
 function lock(path: Vec3[], width: number, thick: number, laid = path.length): { parts: Part[], line: Vec3[] } {
   const parts: Part[] = []
   const line: Vec3[] = []
+  const flat = 0.55 * thick
   const pts = path.map((p, i) => {
     if (i >= laid) return { p, n: normalize(sub(p, ORIGIN)) }
     const s = onMass(MASS, p)
-    return { p: add(s.p, scale(s.n, 0.12 * thick)), n: s.n }
+    return { p: add(s.p, scale(s.n, 0.05 * flat)), n: s.n }
   })
   for (let i = 0; i + 1 < pts.length; i++) {
     const a = pts[i]!
     const b = pts[i + 1]!
-    const w = width * (1 - 0.14 * i)
+    const w = 1.3 * width * (1 - 0.12 * i)
     const l = Math.sqrt(sub(b.p, a.p).reduce((t, v) => t + v * v, 0))
-    parts.push({ kind: 'capsule', c: scale(add(a.p, b.p), 0.5), s: [w, l + w, thick * (1 - 0.1 * i)], r: eulerFromY(sub(b.p, a.p), normalize(add(a.n, b.n))), k: 0.6 })
+    parts.push({ kind: 'ellipsoid', c: scale(add(a.p, b.p), 0.5), s: [w, 1.45 * l, flat * (1 - 0.1 * i)], r: eulerFromY(sub(b.p, a.p), normalize(add(a.n, b.n))) })
   }
-  for (const q of pts) line.push(add(q.p, scale(q.n, 0.5 * thick)))
+  for (const q of pts) line.push(add(q.p, scale(q.n, 0.5 * flat)))
   return { parts, line }
 }
 
@@ -273,13 +276,13 @@ function sweptMass(long: boolean, coarse: boolean): Hair {
     [x + side * (2.2 + 1.0 * i), 18.6 - 1.4 * i, -8.6]
   ]
   const temple = (side: number): Vec3[] => [[side * 7.3, 19.2, 4.6], [side * 8.7, 18.4, 0.2], [side * 8.9, 15.8, -4.4], [side * 8.0, 12.8, -7.6]]
-  const groups: { paths: Vec3[][], w: number[], t: number[], laid?: number }[] = [
+  const groups: { paths: Vec3[][], w: number[], t: number[], laid?: number, nape?: boolean }[] = [
     // The major side of the parting: four locks of different widths and depths, and the temple.
     { paths: [P + 1.2, P + 3.6, P + 6.2, P + 8.4].map((x, i) => swept(x, i, 1)).concat([temple(1)]), w: [4.8, 4.0, 5.2, 4.2, 4.6], t: [2.6, 2.0, 2.8, 2.2, 2.4] },
     // The minor side: two locks and the temple.
     { paths: [P - 1.2, P - 3.6].map((x, i) => swept(x, i, -1)).concat([temple(-1)]), w: [4.4, 5.0, 4.4], t: [2.2, 2.6, 2.2] },
     // Down the back to the nape (or the shoulders).
-    { paths: [-4.4, 0.2, 4.6].map(x => [[x * 0.5, 22.6, -7.0], [x * 0.8, 18.5, -10.4], [x, 13.5, -10.8], [x * 1.1, long ? 3 : 8.6, long ? -10.5 : -9.2]] as Vec3[]), w: [4.6, 5.2, 4.4], t: [2.0, 2.4, 1.8] },
+    { paths: [-4.4, 0.2, 4.6].map(x => [[x * 0.5, 22.6, -7.0], [x * 0.8, 18.5, -10.4], [x, 13.5, -10.8], [x * 1.1, long ? 3 : 8.6, long ? -10.5 : -9.2]] as Vec3[]), w: [4.6, 5.2, 4.4], t: [2.0, 2.4, 1.8], nape: true, ...(long ? { laid: 2 } : {}) },
     // The fringe: two locks breaking the hairline, turning down over the brow, the tips free.
     { paths: [[[0.4, 22.6, 6.2], [1.8, 21.2, 9.0], [3.3, 19.6, 9.8]], [[3.8, 22.0, 5.4], [5.4, 20.3, 8.0], [6.6, 18.8, 8.4]]] as Vec3[][], w: [3.6, 3.2], t: [2.0, 1.8], laid: 1 }
   ]
@@ -292,12 +295,14 @@ function sweptMass(long: boolean, coarse: boolean): Hair {
       parts.push(...l.parts)
       lines.push(l.line)
     })
-    // A deep separation between neighbouring locks, along the valley between them.
+    // A deeper separation only at the nape, where the locks part; at the front the fringe and
+    // the undercuts under it do that work (grooves cut there read as vents at 0.4 cm).
     for (let i = 0; i + 1 < lines.length && !coarse; i++) {
+      if (g.laid !== undefined) continue
       const a = lines[i]!
       const b = lines[i + 1]!
-      if (g.laid !== undefined) continue
-      cuts.push({ label: 'lock', tool: 'roundel', size: 1.6, depth: 0.8, points: a.map((p, j) => scale(add(p, b[j] ?? p), 0.5)).slice(0, 3), dir: null })
+      const mid = a.map((p, j) => scale(add(p, b[j] ?? p), 0.5))
+      if (g.nape) cuts.push({ label: 'lock', tool: 'roundel', size: 2.0, depth: 0.8, points: mid.slice(2), dir: null })
     }
   }
   if (!coarse) {
@@ -318,8 +323,8 @@ export function hairParts(k: HeadKnobs, coarse = false): Hair {
   switch (k.hair) {
     case 'curls': {
       // Short cropped curls on a close mass: many small hooks, every third drilled.
-      const h = hooks(Math.round(60 * c), 2.8 * w, 1.6 * w, 1.6 * w, 1.8 * w, 110, !coarse, 0, coarse, 0.45, 3)
-      hair = { parts: [...cap(0.6), ...h.parts], cuts: h.cuts }
+      const h = hooks(Math.round(60 * c), 3.4 * w, 1.1 * w, 0.9 * w, 1.8 * w, 110, !coarse, 0, coarse, 0.9, 4)
+      hair = { parts: [...cap(0.7), ...h.parts], cuts: h.cuts }
       break
     }
     case 'long': {

@@ -30,7 +30,7 @@ import { createStudio, replayLog } from '../shared/agent/studio.ts'
 import type { StrikeLog } from '../shared/agent/studio.ts'
 import { DEFAULT_CONFIG } from '../shared/agent/types.ts'
 import type { LoopEvent, ReferenceMode, RunResult, RunState, ToolSetId, Usage } from '../shared/agent/types.ts'
-import { createGrid, hashGrid, stoneMassKg } from '../shared/sculpt/grid.ts'
+import { DENSITY, createGrid, hashGrid, stoneMassKg } from '../shared/sculpt/grid.ts'
 import { KERNEL_VERSION } from '../shared/sculpt/version.ts'
 import type { ViewId } from '../shared/sculpt/views.ts'
 import { parseArgs } from './args.ts'
@@ -139,8 +139,18 @@ export interface RunFile {
   // The loop's state after the last finished turn; --resume carries on from it.
   state: RunState | null
   final: null | { numbers: Record<string, number>, hash: string, sheets: string[], strikesFile: string }
+  // The piece fell or was cut away: under LOST_SHARE of the block's stone is left. The judge's
+  // pick on such a run (it may still read a scratched base) is not trusted.
+  lost?: boolean
   judge: null | (Verdict & { correct: boolean })
   replay: null | { ok: boolean, hash: string, replayHash: string, strikes: number, ms: number, error?: string }
+}
+
+// A run is lost when less than this share of the block's stone remains at the end.
+export const LOST_SHARE = 0.05
+
+export function isLost(massKg: number, block: { width: number, height: number, depth: number }): boolean {
+  return massKg < LOST_SHARE * block.width * block.height * block.depth * DENSITY / 1000
 }
 
 const stamp = () => new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
@@ -501,6 +511,8 @@ async function main(): Promise<number> {
   writeAtomic(join(dir, 'final.png'), finalPng)
   writeAtomic(join(dir, 'final_round.png'), roundPng)
   run.final = { numbers: studio.measure(reference === 'outlines' ? 'reference' : 'grid'), hash, sheets: ['final.png', 'final_round.png'], strikesFile }
+  run.lost = isLost(stoneMassKg(grid), DEFAULT_CONFIG.block)
+  if (run.lost) say(`LOST: ${stoneMassKg(grid).toFixed(1)} kg of stone is left, under ${LOST_SHARE * 100}% of the block; the judge's pick will not count`)
   save()
 
   // ---------- the judge ----------
@@ -511,7 +523,7 @@ async function main(): Promise<number> {
       ? dryJudge(id, config.subjectLabel, config.subject === 'pawn', judgeLabels(config.subject))
       : await judge({ sheets: [finalPng, roundPng], runId: id, labels: judgeLabels(config.subject), log: say })
     if (verdict.cost) lines.push(verdict.cost)
-    run.judge = { ...verdict, correct: !verdict.error && verdict.pick === config.subjectLabel }
+    run.judge = { ...verdict, correct: !run.lost && !verdict.error && verdict.pick === config.subjectLabel }
     say(verdict.error
       ? `the judge failed: ${verdict.error}`
       : `judge: "${verdict.pick}" (${run.judge.correct ? 'correct' : `wrong, it is a ${config.subjectLabel}`}), confidence ${verdict.confidence.toFixed(2)}`)

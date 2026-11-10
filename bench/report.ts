@@ -15,7 +15,8 @@ import { silhouetteAgreement } from '../shared/sculpt/measure.ts'
 import { KERNEL_VERSION } from '../shared/sculpt/version.ts'
 import { parseArgs } from './args.ts'
 import { decodePng } from './png.ts'
-import { readStrikeLog } from './sculpt.ts'
+import { isLost, readStrikeLog } from './sculpt.ts'
+import { DEFAULT_CONFIG } from '../shared/agent/types.ts'
 import type { RunFile } from './sculpt.ts'
 import { SUBJECT_IDS, tidySentence } from './subjects.ts'
 import type { SubjectId } from './subjects.ts'
@@ -129,9 +130,19 @@ const ownAgreement = (r: RunFile): Agreement | null => {
 
 // ---------- pieces of the page ----------
 
+// Lost: recorded by the bench since the pose pass, or worked out from the last turn's mass for
+// runs saved before it.
+function lostRun(r: RunFile): boolean {
+  if (r.lost !== undefined) return r.lost
+  const last = r.turns[r.turns.length - 1]
+  return last !== undefined && isLost(last.massKg, DEFAULT_CONFIG.block)
+}
+
 function verdictCell(r: RunFile | undefined): string {
   if (!r) return '<span class="dim">not run</span>'
   if (r.status !== 'done') return '<span class="dim">running</span>'
+  // A lost run's stone fell or was cut away; whatever the judge read in the remains is not counted.
+  if (lostRun(r)) return '<span class="bad">✗ lost: the piece fell</span>'
   const j = r.judge
   if (!j) return '<span class="dim">not judged</span>'
   if (j.error) return '<span class="bad">judge failed</span>'

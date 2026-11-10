@@ -138,7 +138,7 @@ test('style tokens change the face: a snub nose is shorter than an aquiline one,
   assert.ok(cuts(['bald']).some(c => c.label === 'iris') && cuts(['bald']).some(c => c.label === 'pupil'), 'the iris is ringed and the pupil drilled')
 })
 
-test('hair stands off the skull in separate crisp locks, curls are drilled, and a beard hangs below the chin', () => {
+test('hair stands off the skull as a mass: curls drilled every so often, the swept mass of flat locks with a few separations, a beard below the chin', () => {
   const bald = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34])).shapes, blend: 1.3 })
   const curls = expandHead(head([0, 77, 0], [27, 40, 34], [0, 0, 0], ['curls']))
   const form = compileForm({ shapes: curls.shapes, blend: 1.3 })
@@ -153,7 +153,9 @@ test('hair stands off the skull in separate crisp locks, curls are drilled, and 
   const side = (f: typeof form) => 40 - surface(f, [40, 85, -4], [-1, 0, 0])
   assert.ok(side(sform) > side(bald) + 2, `mass ${side(sform)} skull ${side(bald)}`)
   const seps = swept.cuts.filter(c => c.label === 'lock').length
-  assert.ok(seps >= 3 && seps <= 8, `${seps} separations`)
+  assert.ok(seps >= 1 && seps <= 4, `${seps} separations, at the nape only`)
+  // Locks are flat ribbons blended into the mass, not tubes: no capsule above the ears.
+  assert.equal(swept.shapes.filter(s => s.kind === 'capsule' && s.center[1] > 92).length, 0)
   assert.ok(swept.cuts.filter(c => c.label === 'undercut').length <= 5)
   // Long hair comes down below the chin at the back.
   const long = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34], [0, 0, 0], ['long_hair'])).shapes, blend: 1.3 })
