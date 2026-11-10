@@ -135,7 +135,15 @@ function turnsFor(subject: SubjectId, toolSet: ToolSetId, reference: ReferenceMo
         { name: 'note', args: { stage: 'refine', text: 'Roughed to 1.5 cm, corners sawn, front of the head rasped. Nothing left to do in this script.' } },
         { name: 'finish', args: { title: `Dry ${subject}`, statement: 'A scripted run through every tool in the studio. It proves the bench, not the sculptor.' } }
       ]
-    }
+    },
+    // A figure's finish is refused twice before the turn floor (the finish guard): look, try again.
+    ...[1, 2].map(n => ({
+      say: `Looking once more before finishing (${n}).`,
+      calls: [
+        { name: 'look', args: { views: ['front', 'left', 'front_left'], overlay: 'form' } },
+        { name: 'finish', args: { title: `Dry ${subject}`, statement: 'A scripted run through every tool in the studio. It proves the bench, not the sculptor.' } }
+      ]
+    }))
   ]
 }
 

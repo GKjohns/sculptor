@@ -38,7 +38,7 @@ const shape = (kind: Kind, c: [number, number, number], s: [number, number, numb
 export const PRESETS: Record<string, { shapes: ShapeArgs[], blend: number, head: [number, number] }> = {
   bust: {
     shapes: [
-      shape('head', [0, 80, 1.5], [24, 35, 29.5], [6, 16, 3], ['male', 'mature', 'curls', 'lips_parted', 'gaze_left', 'aquiline_nose']),
+      shape('head', [0, 80, 1.5], [24, 35, 29.5], [6, 16, 3], ['male', 'mature', 'waves', 'lips_parted', 'gaze_left', 'aquiline_nose']),
       shape('torso', [0, 36, -1], [60, 46, 30], [0, -8, -3], ['mantle', 'socle'])
     ],
     blend: 1.2,
@@ -54,11 +54,19 @@ export const PRESETS: Record<string, { shapes: ShapeArgs[], blend: number, head:
   },
   plain: {
     shapes: [
-      shape('head', [0, 83, 1], [22, 32, 27], [0, 0, 0], ['male', 'mature', 'short_hair']),
+      shape('head', [0, 83, 1], [22, 32, 27], [0, 0, 0], ['male', 'young', 'curls']),
       shape('torso', [0, 36, -1], [60, 46, 30], [0, 0, 0], ['bare', 'socle'])
     ],
     blend: 1.2,
     head: [0, 80]
+  },
+  long: {
+    shapes: [
+      shape('head', [0, 80, 1], [22, 33, 27], [6, -18, -3], ['female', 'young', 'long_hair', 'calm', 'gaze_down', 'straight_nose']),
+      shape('torso', [0, 36, -1], [56, 46, 28], [0, 8, 2], ['mantle', 'socle'])
+    ],
+    blend: 1.2,
+    head: [0, 77]
   },
   old: {
     shapes: [

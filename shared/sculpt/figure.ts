@@ -24,7 +24,7 @@ export const FIGURE_BODIES = ['man', 'woman', 'youth', 'child'] as const
 export const FIGURE_BUILDS = ['slender', 'athletic', 'heavy'] as const
 export const LEG_ACTIONS = ['stand', 'stride', 'lunge', 'kneel', 'sit', 'recline', 'crouch', 'ride'] as const
 export const WEIGHT_SIDES = ['left', 'right', 'both'] as const
-export const ARM_GESTURES = ['down', 'akimbo', 'across', 'forward', 'raised', 'overhead', 'back', 'out', 'to_head'] as const
+export const ARM_GESTURES = ['down', 'akimbo', 'across', 'forward', 'raised', 'overhead', 'back', 'out', 'to_head', 'sling', 'reach_up', 'embrace'] as const
 export const DRAPERIES = ['none', 'loincloth', 'collar', 'mantle', 'cloak', 'robe'] as const
 export const SUPPORTS = ['none', 'stump', 'rock'] as const
 export const SPECIES = ['horse', 'bull', 'lion', 'dog', 'cat'] as const
@@ -396,7 +396,7 @@ function legPlan(f: FigureSpec, b: BodyDef, side: number): LegPlan {
 // Where a hand goes for each gesture. Directions are in the frame that has the torso's turn
 // but not its lean ("world-ish": a hanging arm hangs); akimbo, across and to_head are placed on
 // the body itself.
-interface Gesture { dir?: V, k?: number, pole: V, body?: 'hip' | 'chest' | 'head' }
+interface Gesture { dir?: V, k?: number, pole: V, body?: 'hip' | 'chest' | 'head' | 'pouch' | 'embrace' | 'behind' }
 function gesture(g: ArmGesture, s: number): Gesture {
   switch (g) {
     case 'down': return { dir: [s * 0.12, -0.985, 0.08], k: 0.975, pole: [0, 0, -1] }
@@ -408,6 +408,12 @@ function gesture(g: ArmGesture, s: number): Gesture {
     case 'akimbo': return { body: 'hip', pole: [s, 0, -0.35] }
     case 'across': return { body: 'chest', pole: [s * 0.7, -1, -0.1] }
     case 'to_head': return { body: 'head', pole: [s, -0.5, 0.25] }
+    // The throwing arm of a sling drawn back and up behind the head, the elbow high.
+    case 'sling': return { body: 'behind', pole: [s * 0.75, 0.6, -0.25] }
+    // Reaching up and forward, nearly straight: Daphne's arms becoming branches.
+    case 'reach_up': return { dir: [s * 0.22, 0.8, 0.56], k: 0.985, pole: [s, -0.2, -0.3] }
+    // Round another body in front: the hand comes to the far side, the elbow out.
+    case 'embrace': return { body: 'embrace', pole: [s, -0.3, 0.2] }
   }
 }
 
@@ -496,11 +502,15 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
   const W = add(P, ap(pelvisTurn, [0, v.waist - v.hip, 0]))
   const chestTilt = -1.7 * lp.tilt
   const lean = f.lean + lp.lean - (riding ? 0.3 * seat.pitch : 0)
-  const chestTurn = mm(pelvisTurn, rotY(f.twist), rotZ(chestTilt), rotX(lean))
+  // A sling winds the torso: the shoulders turn so the drawn arm goes back, and the other arm
+  // (if it hangs or crosses) holds the pouch at the far hip.
+  const slingSide = f.leftArm === 'sling' ? 1 : f.rightArm === 'sling' ? -1 : 0
+  const twist = clamp(f.twist + slingSide * 28, -70, 70)
+  const chestTurn = mm(pelvisTurn, rotY(twist), rotZ(chestTilt), rotX(lean))
   const atChest = (p: V): V => add(W, ap(chestTurn, p))
   const atPelvis = (p: V): V => add(P, ap(pelvisTurn, p))
   // The turn of the torso without its lean or tilt: hanging arms hang.
-  const yawOnly = rotY(f.twist)
+  const yawOnly = rotY(twist)
   parts.push(part('ellipsoid', atPelvis([0, 0.01, -0.005]), [b.pelvis * g, 0.13, 0.12 * g], pelvisTurn))
   for (const s of [1, -1]) parts.push(part('ellipsoid', atPelvis([s * 0.04, -0.03, -0.03]), [0.085 * g, 0.095, 0.075 * g], pelvisTurn))
   // The abdomen and flanks, long enough to run from the ribs into the pelvis.
@@ -533,7 +543,9 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
   const hands: V[] = []
   for (const s of [1, -1]) {
     const shoulder = atChest([s * b.shoulder, shY, -0.01])
-    const gs = gesture(s > 0 ? f.leftArm : f.rightArm, s)
+    const own = s > 0 ? f.leftArm : f.rightArm
+    const pouch = slingSide === -s && (own === 'down' || own === 'across')
+    const gs: Gesture = pouch ? { body: 'pouch', pole: [s, -0.6, 0.3] } : gesture(own, s)
     let target: V
     let pole = ap(chestTurn, gs.pole)
     if (lp.prop === s && !riding) {
@@ -544,6 +556,15 @@ export function expandFigure(f: FigureSpec, seat?: Seat): { shapes: Shape[], cut
       target = atPelvis([s * (b.pelvis * g / 2 + 0.012), 0.065, 0.015])
     } else if (gs.body === 'chest') {
       target = atChest([-s * 0.05, chestC - 0.03, b.chestDepth * g / 2 + 0.045])
+    } else if (gs.body === 'pouch') {
+      // Across the body to the far hip, where the sling's pouch hangs.
+      target = atPelvis([-s * (b.pelvis * g / 2 - 0.01), 0.02, 0.07 * g])
+    } else if (gs.body === 'behind') {
+      // The hand behind and above the head, the elbow high and out.
+      target = add(headC, ap(yawOnly, [s * 0.1, 0.03, -0.12]))
+      pole = ap(yawOnly, gs.pole)
+    } else if (gs.body === 'embrace') {
+      target = atChest([-s * 0.08, chestC + 0.01, b.chestDepth * g / 2 + 0.17])
     } else if (gs.body === 'head') {
       target = add(headC, ap(headTurn, [s * 0.42 * headH, 0.05 * headH, 0.22 * headH]))
     } else {
@@ -1043,6 +1064,52 @@ export function expandAnimal(a: AnimalSpec): { shapes: Shape[], marks: Landmarks
     },
     seat: { at: world(saddle), turn: turnM, halfWidth: 0.5 * bs[0] * B, pitch: gait.pitch }
   }
+}
+
+// ---------- what a subject stands on ----------
+// A rock or ground under a subject stands at most this share of the block's height: models put
+// bulls on rocks a quarter to a third of the block high, a pedestal that makes the subject small.
+export const GROUND_CAP_SHARE = 0.2
+
+// How far a shape reaches below and above its centre.
+function yExtent(kind: string, size: V, rotation: V): number {
+  const m = matrixOf(rotation)
+  const h: V = [size[0] / 2, size[1] / 2, size[2] / 2]
+  if (kind === 'ellipsoid') return Math.sqrt((m[3] * h[0]) ** 2 + (m[4] * h[1]) ** 2 + (m[5] * h[2]) ** 2)
+  return Math.abs(m[3]) * h[0] + Math.abs(m[4]) * h[1] + Math.abs(m[5]) * h[2]
+}
+
+// Lowers grounds above the cap to it, and squashes the plain shapes under the subjects (the rocks
+// and mounds they stand on) so that none reaches above it. Changes what it is given; returns what
+// it lowered, for the result. Heads, torsos and anything clear of the ground are left alone.
+export function capGround(subjects: { ground: Vec3, riding?: boolean }[], shapes: { kind: string, center: Vec3, size: Vec3, rotation: Vec3 }[], cap: number): string[] {
+  const notes: string[] = []
+  const standing = subjects.filter(s => !s.riding)
+  if (standing.length === 0) return notes
+  const highest = Math.max(...standing.map(s => s.ground[1]))
+  for (const s of standing) {
+    if (s.ground[1] > cap + 0.5) {
+      notes.push(`a ground at ${Math.round(s.ground[1] * 10) / 10} cm lowered to ${cap}`)
+      s.ground[1] = cap
+    }
+  }
+  for (const sh of shapes) {
+    if (!['ellipsoid', 'box', 'capsule', 'cone'].includes(sh.kind)) continue
+    const e = yExtent(sh.kind, sh.size, sh.rotation)
+    const top = sh.center[1] + e
+    const bottom = sh.center[1] - e
+    if (top <= cap + 0.5 || bottom >= cap || sh.center[1] > highest + 1) continue
+    const f = (cap - Math.max(0, bottom)) / (top - Math.max(0, bottom))
+    // Squash it along whichever of its own axes runs most nearly upright.
+    const m = matrixOf(sh.rotation)
+    let axis = 0
+    for (let i = 1; i < 3; i++) if (Math.abs(m[3 + i]!) * sh.size[i]! > Math.abs(m[3 + axis]!) * sh.size[axis]!) axis = i
+    sh.size[axis] = Math.round(sh.size[axis]! * f * 1000) / 1000
+    const e2 = yExtent(sh.kind, sh.size, sh.rotation)
+    sh.center[1] = Math.round((cap - e2) * 1000) / 1000
+    notes.push(`a ${sh.kind} ${Math.round(top * 10) / 10} cm tall lowered to ${cap}`)
+  }
+  return notes
 }
 
 // One form's subjects, in order: animals first, so riders can sit on them. A figure that

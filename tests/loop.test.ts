@@ -647,3 +647,21 @@ test('toBase64 matches Node for every tail length', () => {
   const big = Uint8Array.from({ length: 50_001 }, (_, i) => (i * 31) & 255)
   assert.equal(toBase64(big), Buffer.from(big).toString('base64'))
 })
+
+test('the finish guard: a figure or bust is not accepted as finished early, twice at most, and the refusal quotes the commission', async () => {
+  const head = { kind: 'head', center_x: 0, center_y: 77, center_z: 0, size_x: 27, size_y: 40, size_z: 34, rot_x: 0, rot_y: 15, rot_z: 0, style: ['male'] }
+  const bust = { name: 'declare_form', args: { name: 'bust', shapes: [head], blend_cm: 1.3, why: 'The head.' } }
+  const { done, events } = run((turn) => {
+    if (turn === 1) return { calls: [bust] }
+    return { calls: [look, { name: 'finish', args: FINISH }] }
+  })
+  const r = await done
+  assert.equal(r.ended, 'finish')
+  assert.equal(r.turns, 4)
+  const refusals = events.filter(e => e.type === 'tool_result' && e.call.name === 'finish' && !e.ok)
+  assert.equal(refusals.length, 2)
+  assert.match((refusals[0] as { summary: string }).summary, /Not finished yet: this is turn 2 of 60[\s\S]*"A cat, loafing\."/)
+  // A plain commission (no figure, no head) finishes at once, as the study's did.
+  const plain = run(turn => turn === 1 ? { calls: [chisel] } : { calls: [{ name: 'finish', args: FINISH }] })
+  assert.equal((await plain.done).turns, 2)
+})

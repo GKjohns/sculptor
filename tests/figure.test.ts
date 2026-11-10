@@ -162,3 +162,34 @@ test('declare_figure declares one form of kernel solids and says where each subj
   const crowd = parseCall(defs, { id: 'c3', name: 'declare_figure', args: { ...args, figures: [args.figures[0], args.figures[0], args.figures[0]] } })
   assert.ok(!crowd.ok && /at most 3/.test(crowd.error))
 })
+
+test('a sling winds the torso, draws the hand behind the head and puts the other at the far hip; reach_up and embrace', () => {
+  const sling = expandFigure(figure({ legs: 'lunge', weightOn: 'left', leftArm: 'across', rightArm: 'sling' })).marks.points
+  assert.ok(sling.right_hand![1] > sling.head![1] - 6 && sling.right_hand![2] < sling.head![2] - 3, `hand behind the head ${sling.right_hand}`)
+  assert.ok(sling.left_hand![0] < sling.pelvis![0] - 4 && sling.left_hand![1] < sling.pelvis![1] + 12, `pouch at the far hip ${sling.left_hand}`)
+  const up = expandFigure(figure({ leftArm: 'reach_up', rightArm: 'embrace' })).marks.points
+  assert.ok(up.left_hand![1] > up.head![1] + 3 && up.left_hand![2] > up.head![2], 'reaching up and forward')
+  assert.ok(up.right_hand![2] > up.pelvis![2] + 12, 'an embrace reaches forward round a body in front')
+})
+
+test('declare_figure lowers a rock or ground above a fifth of the block, and says so', async () => {
+  const grid = createGrid({ voxel: 1 })
+  const studio = createStudio({ grid, encodeImage: () => new Uint8Array() })
+  const box = (cy: number, h: number) => ({ kind: 'box', center_x: 0, center_y: cy, center_z: 0, size_x: 40, size_y: h, size_z: 40, rot_x: 0, rot_y: 45, rot_z: 0, style: [] })
+  const args = {
+    name: 'bull',
+    figures: [],
+    animals: [{ species: 'bull', pose: 'charge', ground_x: 0, ground_y: 33, ground_z: 0, length_cm: 44, facing_deg: 45, head_turn_deg: 0, head_raise_deg: -20, tail: 'raised', lead: 'left' }],
+    shapes: [box(3, 6), box(19.5, 27)],
+    blend_cm: 1.3,
+    why: 'On a high rock.'
+  }
+  const r = await studio.run({ id: 'c1', name: 'declare_figure', args } as never)
+  assert.match(r.summary, /Lowered to the ground cap \(20 cm/)
+  const entry = studio.log().strikes.find(s => s.kind === 'form')!
+  if (entry.kind !== 'form') throw new Error('no form')
+  // The rock's top is at the cap; the base is untouched.
+  const tops = entry.shapes.filter(s => s.kind === 'box').map(s => s.center[1] + s.size[1] / 2)
+  assert.ok(tops.some(t => Math.abs(t - 6) < 0.01) && tops.some(t => Math.abs(t - 20) < 0.6), `tops ${tops}`)
+  assert.ok(r.numbers!.form_y_min_cm! < 1)
+})

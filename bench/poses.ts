@@ -69,7 +69,7 @@ export const POSES: Record<string, Preset> = {
     title: 'David a moment before the throw',
     blend: 1.3,
     scene: {
-      figures: [figure({ legs: 'lunge', weightOn: 'left', twist: -38, lean: 8, headTurn: 34, headTilt: -4, leftArm: 'across', rightArm: 'back', support: 'rock', facing: -20, ground: [2, BASE_TOP, 3], style: ['curls', 'frown'] })],
+      figures: [figure({ legs: 'lunge', weightOn: 'left', twist: -12, lean: 10, headTurn: 34, headTilt: -4, leftArm: 'across', rightArm: 'sling', support: 'rock', facing: -20, ground: [2, BASE_TOP, 3], style: ['curls', 'frown'] })],
       animals: [],
       shapes: [base()]
     }
@@ -88,7 +88,7 @@ export const POSES: Record<string, Preset> = {
     blend: 1.3,
     scene: {
       figures: [
-        figure({ body: 'woman', legs: 'stride', weightOn: 'left', twist: 20, headTurn: -60, headTilt: -14, leftArm: 'overhead', rightArm: 'raised', height: 84, ground: [6, BASE_TOP, 12], facing: 10, drapery: 'none', support: 'stump', style: ['long_hair', 'lips_parted'] }),
+        figure({ body: 'woman', legs: 'stride', weightOn: 'left', twist: 20, headTurn: -60, headTilt: -14, leftArm: 'reach_up', rightArm: 'reach_up', height: 84, ground: [6, BASE_TOP, 12], facing: 10, drapery: 'none', support: 'stump', style: ['long_hair', 'lips_parted'] }),
         figure({ legs: 'stride', weightOn: 'right', twist: -10, lean: 10, headTurn: 0, leftArm: 'forward', rightArm: 'back', height: 86, ground: [-8, BASE_TOP, -6], facing: 22, drapery: 'cloak', style: ['curls'] })
       ],
       animals: [],

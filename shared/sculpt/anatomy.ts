@@ -90,7 +90,7 @@ export interface HeadKnobs {
 
 export function headKnobs(style: readonly string[] = []): HeadKnobs {
   const has = (t: StyleToken) => style.includes(t)
-  const hair = has('bald') ? 'bald' : has('bun') ? 'bun' : has('long_hair') ? 'long' : has('waves') ? 'waves' : has('curls') ? 'curls' : has('short_hair') ? 'short' : 'curls'
+  const hair = has('bald') ? 'bald' : has('bun') ? 'bun' : has('long_hair') ? 'long' : has('waves') ? 'waves' : has('curls') ? 'curls' : has('short_hair') ? 'short' : 'waves'
   return {
     female: has('female'),
     age: has('young') ? 0 : has('old') ? 2 : 1,
@@ -162,11 +162,11 @@ function faceParts(k: HeadKnobs, coarse = false): Part[] {
     M('ellipsoid', [5.1 * jawW, 4.8 - 0.3 * old, -1.6], [2.2 + 0.4 * k.jaw, 3.6, 3.8]),
     // Ears: a flat shell with a rim round its top and back, a lobe and the knob before the hole.
     // The ear lies close to the head, its shell thick enough not to read as a plate.
-    K(0.6, M('ellipsoid', [7.05, 10.4, -1.9], [1.3, 5.4 + 0.4 * old, 3.2], [-14, 0, 0])),
-    K(0.3, M('capsule', [7.45, 12.2, -1.9], [0.75, 2.6, 0.75], [-14, 0, 0])),
-    K(0.3, M('capsule', [7.5, 12.1, -3.15], [0.75, 4.2, 0.75], [-14, 0, 0])),
-    K(0.3, M('ellipsoid', [7.25, 7.85 - 0.3 * old, -2.3], [0.9, 1.6 + 0.3 * old, 1.4])),
-    K(0.25, M('ellipsoid', [7.3, 9.9, -0.45], [0.6, 0.9, 0.6]))
+    K(0.6, M('ellipsoid', [6.9, 10.6, -1.9], [1.2, 4.6 + 0.4 * old, 3.0], [-14, 0, 0])),
+    K(0.4, M('capsule', [7.2, 12.0, -2.0], [0.7, 2.2, 0.7], [-14, 0, 0])),
+    K(0.4, M('capsule', [7.25, 11.6, -3.0], [0.7, 3.4, 0.7], [-14, 0, 0])),
+    K(0.4, M('ellipsoid', [7.05, 8.5 - 0.3 * old, -2.2], [0.9, 1.4 + 0.3 * old, 1.3])),
+    K(0.3, M('ellipsoid', [7.1, 10.0, -0.5], [0.6, 0.9, 0.6]))
   ]
   // A small head keeps the ear's shell and drops its rim, lobe and knob, which are under a cell.
   if (coarse) parts.splice(parts.length - 4, 4)

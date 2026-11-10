@@ -15,7 +15,7 @@ import { KERNEL_VERSION } from '../sculpt/version.ts'
 import type { AxisView, ViewId } from '../sculpt/views.ts'
 import { expandCanon, settleCuts } from '../sculpt/anatomy.ts'
 import type { DeclaredShape, RoughCut } from '../sculpt/anatomy.ts'
-import { expandScene } from '../sculpt/figure.ts'
+import { GROUND_CAP_SHARE, capGround, expandScene } from '../sculpt/figure.ts'
 import type { AnimalSpec, FigureSpec } from '../sculpt/figure.ts'
 import { VIEWS } from '../sculpt/views.ts'
 import type { CanonCut, Form, FormStrike, Grid, Shape, SketchStrike, Strike, Vec3 } from '../sculpt/types.ts'
@@ -349,8 +349,14 @@ export function createStudio(opts: StudioOptions): KernelStudio {
 
   // Posed figures, animals and the model's own solids as one form (sculpt/figure.ts).
   const declareFigure = (a: DeclareFigureArgs): StudioResult => {
-    const scene = expandScene({ figures: a.figures.map(figureSpec), animals: a.animals.map(animalSpec), shapes: [] })
-    const own = expandCanon(a.shapes.map(declaredShape))
+    const figures = a.figures.map(figureSpec)
+    const animals = a.animals.map(animalSpec)
+    const declaredShapes = a.shapes.map(declaredShape)
+    // Rocks and ground under the subjects stand at most a fifth of the block.
+    const cap = Math.round(GROUND_CAP_SHARE * grid.size[1])
+    const lowered = capGround([...figures.map(f => ({ ground: f.ground, riding: f.legs === 'ride' })), ...animals], declaredShapes, cap)
+    const scene = expandScene({ figures, animals, shapes: [] })
+    const own = expandCanon(declaredShapes)
     // Big masses first, so formDistance can pass over the many small parts far from a point.
     const volume = (s: Shape) => s.size[0] * s.size[1] * s.size[2]
     const shapes = [...scene.shapes].sort((x, y) => volume(y) - volume(x))
@@ -363,7 +369,8 @@ export function createStudio(opts: StudioOptions): KernelStudio {
       const outside = s.min[0] < -grid.size[0] / 2 - 0.5 || s.max[0] > grid.size[0] / 2 + 0.5 || s.min[2] < -grid.size[2] / 2 - 0.5 || s.max[2] > grid.size[2] / 2 + 0.5 || s.max[1] > grid.size[1] + 0.5
       return `Subject ${i + 1}, ${s.label}: X ${r1(s.min[0])} to ${r1(s.max[0])}, Y ${r1(s.min[1])} to ${r1(s.max[1])}, Z ${r1(s.min[2])} to ${r1(s.max[2])}${outside ? ' (part of it lies outside the block)' : ''}; ${where}.`
     }).join(' ')
-    return lay(a.name, shapes, [...scene.cuts, ...own.cuts], a.blend_cm, what, said)
+    const capped = lowered.length ? ` Lowered to the ground cap (${cap} cm, a fifth of the block, so the subject stays the largest thing in the stone): ${lowered.join('; ')}.` : ''
+    return lay(a.name, shapes, [...scene.cuts, ...own.cuts], a.blend_cm, what, () => capped + said())
   }
 
   // A pass protects one form. Cutting to a second form while the figure is another would take

@@ -105,7 +105,7 @@ function cap(proud: number): Part[] {
 // `length` for the first piece (the tip is six tenths of it). With `drill`, the eye of each curl
 // is drilled, as Roman and Baroque carvers drilled theirs. `below` lets the locks come further
 // down than the hairline (long hair).
-function hooks(count: number, width: number, thick: number, proud: number, length: number, hook: number, drill: boolean, below = 0, single = false): Hair {
+function hooks(count: number, width: number, thick: number, proud: number, length: number, hook: number, drill: boolean, below = 0, single = false, k = LOCK_K, every = 1): Hair {
   const parts: Part[] = []
   const cuts: PartCut[] = []
   let n = 0
@@ -118,67 +118,12 @@ function hooks(count: number, width: number, thick: number, proud: number, lengt
     const c1 = add(c0, scale(f, length))
     const tipDir = normalize(add(scale(f, Math.cos(hook * DEG)), scale(side, turn * Math.sin(hook * DEG))))
     const c2 = add(add(c1, scale(tipDir, 0.6 * length)), scale(s.n, -0.25 * thick))
-    parts.push({ kind: 'capsule', c: scale(add(c0, c1), 0.5), s: [width, length + width, thick], r: eulerFromY(sub(c1, c0), s.n), k: LOCK_K })
-    if (!single) parts.push({ kind: 'capsule', c: scale(add(c1, c2), 0.5), s: [0.8 * width, 0.6 * length + 0.8 * width, 0.85 * thick], r: eulerFromY(sub(c2, c1), s.n), k: LOCK_K })
-    if (drill) {
+    parts.push({ kind: 'capsule', c: scale(add(c0, c1), 0.5), s: [width, length + width, thick], r: eulerFromY(sub(c1, c0), s.n), k })
+    if (!single) parts.push({ kind: 'capsule', c: scale(add(c1, c2), 0.5), s: [0.8 * width, 0.6 * length + 0.8 * width, 0.85 * thick], r: eulerFromY(sub(c2, c1), s.n), k })
+    if (drill && n % every === 0) {
       const eye = add(add(c1, scale(side, -turn * 0.45 * width)), scale(s.n, 0.3 * thick))
       cuts.push({ label: 'curl', tool: 'drill', size: 0.32 * width, depth: 0.6 * thick, points: [eye], dir: scale(s.n, -1) })
     }
-  }
-  return { parts, cuts }
-}
-
-// Swept locks, as Bernini carved hair: broad tresses lying in one direction from a parting
-// (on the figure's left of the crown), each in three pieces curving as it falls and ending in a
-// turned tip, blended into one mass (their own blend is soft, so the gaps between them are
-// grooves, not cracks). One groove runs along each lock; every fourth tip is undercut with
-// the drill. `hook`, degrees, is how far the tip turns.
-function swept(count: number, width: number, thick: number, proud: number, length: number, hook: number): Hair {
-  const parts: Part[] = []
-  const cuts: PartCut[] = []
-  const PART = 2.6
-  let n = 0
-  for (const [a, e] of spread(count, (a, e) => e >= hairline(a) + 6)) {
-    const s = skullAt(a, e)
-    const side = s.p[0] >= PART ? 1 : -1
-    // Away from the parting over the top, falling down and back behind.
-    const back = Math.max(0, Math.min(1, (2 - s.p[2]) / 8))
-    const raw: Vec3 = add(scale([side, -0.55, 0.12], 1 - back), scale([0.35 * side, -1, -0.25], back))
-    const along = (n2: Vec3, r: Vec3): Vec3 => normalize(sub(r, scale(n2, r[0] * n2[0] + r[1] * n2[1] + r[2] * n2[2])))
-    // Each step is laid back on the skull, so a lock follows the head's curve instead of
-    // leaving it; it stops at the hairline.
-    const lift = proud - thick / 2
-    let surf = s
-    let at = add(s.p, scale(s.n, lift))
-    let dir = along(s.n, raw)
-    const turn = n % 2 === 0 ? 1 : -1
-    const chain: Vec3[] = [at]
-    for (let i = 0; i < 3; i++) {
-      const l = length * (i === 2 ? 0.7 : 1)
-      const ahead = add(sub(at, scale(surf.n, lift)), scale(dir, l))
-      const d = normalize(sub(ahead, ORIGIN))
-      const az = Math.atan2(d[0], d[2]) / DEG
-      const el = Math.asin(Math.max(-1, Math.min(1, d[1]))) / DEG
-      if (el < hairline(az) - 2) break
-      const nextSurf = skullAt(az, el)
-      const next = add(nextSurf.p, scale(nextSurf.n, lift * (1 - 0.1 * i)))
-      const w = width * (1 - 0.18 * i)
-      parts.push({ kind: 'capsule', c: scale(add(at, next), 0.5), s: [w, length + w, thick * (1 - 0.12 * i)], r: eulerFromY(sub(next, at), nextSurf.n), k: 0.6 })
-      at = next
-      surf = nextSurf
-      chain.push(at)
-      // Each piece turns a little more, and the last turns the tip.
-      const sideways = normalize(cross(surf.n, dir))
-      const t = (i === 1 ? hook : 18) * DEG * turn
-      dir = along(surf.n, add(scale(dir, Math.cos(t)), scale(sideways, Math.sin(t))))
-    }
-    if (chain.length < 3) {
-      n++
-      continue
-    }
-    cuts.push({ label: 'lock', tool: 'roundel', size: 0.7, depth: 0.45, points: chain.slice(0, 3).map(p => add(p, scale(normalize(sub(p, ORIGIN)), thick / 2))), dir: null })
-    if (n % 4 === 0) cuts.push({ label: 'curl', tool: 'drill', size: 0.9, depth: 1.0, points: [add(chain[2]!, scale(s.n, 0.2))], dir: scale(s.n, -1) })
-    n++
   }
   return { parts, cuts }
 }
@@ -259,6 +204,111 @@ function beard(k: HeadKnobs): Hair {
 }
 
 // The hair the style asks for, and the beard.
+// ---------- the hair mass ----------
+// Hair as a sculptor carves it: first a mass with its own silhouette (wider than the skull at the
+// temples and the back, full at the nape), then a few big locks laid on it, of different widths
+// and depths, sweeping from an off-centre parting back and to the sides, a fringe breaking the
+// hairline and overhanging the brow; then a few deep separations between locks and a drilled
+// undercut only where a lock lies over another. In the canon frame (y from the chin).
+
+interface Ell3 { c: Vec3, r: Vec3 }
+
+const MASS: Ell3[] = [
+  { c: [0, 16.6, -1.8], r: [8.8, 7.8, 10.6] },
+  { c: [6.4, 15.6, 1.4], r: [2.4, 3.8, 3.8] },
+  { c: [-6.4, 15.6, 1.4], r: [2.4, 3.8, 3.8] },
+  { c: [0, 10.2, -8.0], r: [5.8, 4.2, 3.0] }
+]
+
+// Where a ray from the skull's centre toward p leaves the mass, and the outward normal there.
+function onMass(m: Ell3[], p: Vec3): { p: Vec3, n: Vec3 } {
+  const d = normalize(sub(p, ORIGIN))
+  let best = -1
+  let which = m[0]!
+  for (const e of m) {
+    const t = leave(e.c, e.r, d)
+    if (t > best) {
+      best = t
+      which = e
+    }
+  }
+  const at = add(ORIGIN, scale(d, best))
+  const q = sub(at, which.c)
+  return { p: at, n: normalize([q[0] / which.r[0] ** 2, q[1] / which.r[1] ** 2, q[2] / which.r[2] ** 2]) }
+}
+
+// One lock along a path of canon points, laid on the mass (the first `laid` points; the rest,
+// a fringe's tip, stand where they are), in tapering capsules of their own soft blend.
+function lock(path: Vec3[], width: number, thick: number, laid = path.length): { parts: Part[], line: Vec3[] } {
+  const parts: Part[] = []
+  const line: Vec3[] = []
+  const pts = path.map((p, i) => {
+    if (i >= laid) return { p, n: normalize(sub(p, ORIGIN)) }
+    const s = onMass(MASS, p)
+    return { p: add(s.p, scale(s.n, 0.12 * thick)), n: s.n }
+  })
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i]!
+    const b = pts[i + 1]!
+    const w = width * (1 - 0.14 * i)
+    const l = Math.sqrt(sub(b.p, a.p).reduce((t, v) => t + v * v, 0))
+    parts.push({ kind: 'capsule', c: scale(add(a.p, b.p), 0.5), s: [w, l + w, thick * (1 - 0.1 * i)], r: eulerFromY(sub(b.p, a.p), normalize(add(a.n, b.n))), k: 0.6 })
+  }
+  for (const q of pts) line.push(add(q.p, scale(q.n, 0.5 * thick)))
+  return { parts, line }
+}
+
+// The swept mass: `long` lets the locks behind fall to the shoulders; `coarse` keeps every
+// other lock, for a figure's small head.
+function sweptMass(long: boolean, coarse: boolean): Hair {
+  const parts: Part[] = MASS.map(e => ({ kind: 'ellipsoid', c: e.c, s: scale(e.r, 2) }))
+  const cuts: PartCut[] = []
+  const P = -2.6
+  // Locks rise from the forehead and run back over the head, those nearer the parting longer;
+  // those at the temples sweep back over the ear; the back falls to the nape.
+  const swept = (x: number, i: number, side: number): Vec3[] => [
+    [x, 21.4 - 0.25 * i, 8.0 - 0.7 * i],
+    [x + side * (0.8 + 0.4 * i), 23.4 - 0.4 * i, 2.5],
+    [x + side * (1.6 + 0.8 * i), 22.0 - 0.9 * i, -3.5],
+    [x + side * (2.2 + 1.0 * i), 18.6 - 1.4 * i, -8.6]
+  ]
+  const temple = (side: number): Vec3[] => [[side * 7.3, 19.2, 4.6], [side * 8.7, 18.4, 0.2], [side * 8.9, 15.8, -4.4], [side * 8.0, 12.8, -7.6]]
+  const groups: { paths: Vec3[][], w: number[], t: number[], laid?: number }[] = [
+    // The major side of the parting: four locks of different widths and depths, and the temple.
+    { paths: [P + 1.2, P + 3.6, P + 6.2, P + 8.4].map((x, i) => swept(x, i, 1)).concat([temple(1)]), w: [4.8, 4.0, 5.2, 4.2, 4.6], t: [2.6, 2.0, 2.8, 2.2, 2.4] },
+    // The minor side: two locks and the temple.
+    { paths: [P - 1.2, P - 3.6].map((x, i) => swept(x, i, -1)).concat([temple(-1)]), w: [4.4, 5.0, 4.4], t: [2.2, 2.6, 2.2] },
+    // Down the back to the nape (or the shoulders).
+    { paths: [-4.4, 0.2, 4.6].map(x => [[x * 0.5, 22.6, -7.0], [x * 0.8, 18.5, -10.4], [x, 13.5, -10.8], [x * 1.1, long ? 3 : 8.6, long ? -10.5 : -9.2]] as Vec3[]), w: [4.6, 5.2, 4.4], t: [2.0, 2.4, 1.8] },
+    // The fringe: two locks breaking the hairline, turning down over the brow, the tips free.
+    { paths: [[[0.4, 22.6, 6.2], [1.8, 21.2, 9.0], [3.3, 19.6, 9.8]], [[3.8, 22.0, 5.4], [5.4, 20.3, 8.0], [6.6, 18.8, 8.4]]] as Vec3[][], w: [3.6, 3.2], t: [2.0, 1.8], laid: 1 }
+  ]
+  if (long) groups.push({ paths: [1, -1].map(s => [[s * 7.6, 12.5, -4.2], [s * 8.2, 6.5, -6.0], [s * 7.6, 0.5, -6.6], [s * 7.0, -4, -6.2]] as Vec3[]), w: [4.6, 4.6], t: [2.2, 2.2], laid: 1 })
+  for (const g of groups) {
+    const lines: Vec3[][] = []
+    g.paths.forEach((path, i) => {
+      if (coarse && i % 2 === 1) return
+      const l = lock(path, g.w[i]!, g.t[i]!, g.laid ?? path.length)
+      parts.push(...l.parts)
+      lines.push(l.line)
+    })
+    // A deep separation between neighbouring locks, along the valley between them.
+    for (let i = 0; i + 1 < lines.length && !coarse; i++) {
+      const a = lines[i]!
+      const b = lines[i + 1]!
+      if (g.laid !== undefined) continue
+      cuts.push({ label: 'lock', tool: 'roundel', size: 1.6, depth: 0.8, points: a.map((p, j) => scale(add(p, b[j] ?? p), 0.5)).slice(0, 3), dir: null })
+    }
+  }
+  if (!coarse) {
+    // Undercuts where a lock lies over another: under the fringe tips and the ends of the side locks.
+    for (const p of [[3.2, 19.3, 9.5], [6.5, 18.5, 8.1], [8.6, 13.4, -6.6], [-8.6, 13.4, -6.6]] as Vec3[]) {
+      cuts.push({ label: 'undercut', tool: 'drill', size: 0.9, depth: 1.1, points: [p], dir: normalize([0, 0.5, -1]) })
+    }
+  }
+  return { parts, cuts }
+}
+
 // coarse: the head is small (a whole figure's), so fewer, broader locks say the same thing at
 // a third of the solids.
 export function hairParts(k: HeadKnobs, coarse = false): Hair {
@@ -267,24 +317,23 @@ export function hairParts(k: HeadKnobs, coarse = false): Hair {
   let hair: Hair = { parts: [], cuts: [] }
   switch (k.hair) {
     case 'curls': {
-      const h = coarse ? hooks(Math.round(84 * c), 3.0 * w, 1.5 * w, 2.3 * w, 2.5 * w, 90, false, 0, true) : swept(46, 4.2, 1.9, 2.0, 3.2, 70)
-      hair = { parts: [...cap(0.9), ...h.parts], cuts: h.cuts }
+      // Short cropped curls on a close mass: many small hooks, every third drilled.
+      const h = hooks(Math.round(60 * c), 2.8 * w, 1.6 * w, 1.6 * w, 1.8 * w, 110, !coarse, 0, coarse, 0.45, 3)
+      hair = { parts: [...cap(0.6), ...h.parts], cuts: h.cuts }
       break
     }
     case 'long': {
-      const h = hooks(Math.round(70 * c), 3.0 * w, 1.5 * w, 2.2 * w, 3.4 * w, 40, false, 16, coarse)
-      hair = { parts: [...cap(0.9), ...h.parts], cuts: h.cuts }
+      hair = sweptMass(true, coarse)
       break
     }
     case 'short': {
-      const h = hooks(Math.round(110 * c), 2.3 * w, 1.0 * w, 1.7 * w, 1.9 * w, 25, false, 0, coarse)
+      const h = hooks(Math.round(110 * c), 2.3 * w, 1.0 * w, 1.7 * w, 1.9 * w, 25, false, 0, coarse, 0.4)
       hair = { parts: [...cap(0.3), ...h.parts], cuts: h.cuts }
       break
     }
     case 'waves': {
-      // Combed forward and down from the crown, as Roman and Baroque portraits wear it.
-      const v = locks(24 / c, 2.6 * w, 1.9 * w, a => [a, 70], a => [a, hairline(a) + 3], 7)
-      hair = { parts: [...cap(0.8), ...v.parts], cuts: v.cuts }
+      // Swept back from an off-centre parting: the Baroque mass.
+      hair = sweptMass(false, coarse)
       break
     }
     case 'bun': {

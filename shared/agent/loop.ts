@@ -52,6 +52,9 @@ function hasToolCall(messages: Message[], id: string): boolean {
   return messages.some(m => m.role === 'assistant' && Array.isArray(m.content) && m.content.some(p => p.type === 'tool-call' && p.toolCallId === id))
 }
 
+// The share of a figure or bust commission's turns before finish is accepted (see the guard).
+export const FINISH_FLOOR = 0.4
+
 export async function runCommission(opts: RunOptions): Promise<RunResult> {
   const { brain, studio, commission, signal } = opts
   const config: RunConfig = { ...DEFAULT_CONFIG, ...opts.config }
@@ -77,6 +80,14 @@ export async function runCommission(opts: RunOptions): Promise<RunResult> {
   let remindAt = config.lookEvery
   let idle = 0
   let finish: RunResult['finish'] = null
+  // The finish guard. A figure or a bust (declare_figure, or a head or torso canon) is not
+  // accepted as finished before FINISH_FLOOR of the turns, twice at most, while there is money
+  // left: models finished at the canon's first form, a third of the way into their budget.
+  let refusedFinish = 0
+  const figural = (): boolean => state.passes.some(p => p.tool === 'declare_figure'
+    || (p.tool === 'declare_form' && Array.isArray(p.args.shapes) && (p.args.shapes as { kind?: string }[]).some(s => s.kind === 'head' || s.kind === 'torso')))
+  const finishTooSoon = (turn: number): boolean => config.toolSet === 'formed' && refusedFinish < 2
+    && turn < Math.ceil(FINISH_FLOOR * config.maxTurns) && state.costUsd < 0.7 * config.maxUsd && figural()
 
   const levelNow = (): BudgetLevel => {
     const turnsLeft = config.maxTurns - state.turns
@@ -189,6 +200,15 @@ export async function runCommission(opts: RunOptions): Promise<RunResult> {
         results.push({ id: call.id, name: call.name, ok: true, text: summary })
         emit({ type: 'note', turn, notebook: { ...state.notebook } })
         emit({ type: 'tool_result', turn, call: valid, ok: true, summary, strikes: [], strikeCount: 0 })
+        continue
+      }
+
+      if (parsed.name === 'finish' && finishTooSoon(turn)) {
+        // The finish guard: a figure or a bust left as the canon first made it is a mannequin.
+        refusedFinish++
+        const text = `Not finished yet: this is turn ${turn} of ${config.maxTurns}, with $${(config.maxUsd - state.costUsd).toFixed(2)} left. Read the commission again: "${commission.prompt.trim()}". Look from the front, a side and three quarters, close up on the head and the hands, and write in your note what does not yet answer it: the moment and the pose, the face, the hands and feet, the folds of the drapery, the hair, surfaces left raw by the claw. Work on the weakest of those. Call finish again when a look shows nothing left worth a turn.`
+        results.push({ id: call.id, name: call.name, ok: false, text })
+        emit({ type: 'tool_result', turn, call: valid, ok: false, summary: text, strikes: [], strikeCount: 0 })
         continue
       }
 

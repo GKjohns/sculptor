@@ -190,10 +190,13 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     const base = W([0, 21, 0])
     const top = H([0, 7.5, -2.4])
     const forward = normalize(add(dirToWorld(h, [0, 0, 1]), dirToWorld(f, [0, 0, 1])))
-    shapes.push(between('capsule', base, top, 0.64 * hw * thick, 0.7 * hw * thick, forward))
+    shapes.push(between('capsule', base, top, 0.74 * hw * thick, 0.8 * hw * thick, forward))
+    // The nape: muscle from the base of the skull down into the back, so the neck is short and
+    // strong from the side.
+    shapes.push(between('ellipsoid', H([0, 8.2, -6.6]), W([0, 21.5, -6.5]), 0.55 * hw * thick, 0.32 * hw * thick, dirToWorld(f, [0, 0, -1])))
     for (const side of [1, -1]) {
       // Sternomastoid: from behind the ear to the top of the breastbone, the neck's front edge.
-      shapes.push(between('ellipsoid', W([side * 1.6, 19.4, 6.8]), H([side * 4.6, 8.4, -2.0]), 0.2 * hw * thick, 0.12 * hw * thick, forward))
+      shapes.push(between('ellipsoid', W([side * 2.4, 20.0, 7.2]), H([side * 5.0, 8.8, -3.2]), 0.24 * hw * thick, 0.16 * hw * thick, normalize(add(forward, dirToWorld(f, [side, 0, 0])))))
       // Trapezius: from the back of the skull out to the shoulder.
       shapes.push(between('ellipsoid', H([side * 2.4, 7.6, -6.4]), W([side * 11, 23, -4.5]), 0.42 * hw * thick, 0.22 * hw * thick, normalize(sub(W([side * 9, 22, -5.5]), W([0, 22, -1.5])))))
     }
@@ -230,11 +233,20 @@ export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKn
     const gaze: Vec3 = head ? dirToWorld(head.frame, [0, 0, 1]) : [0, 0, 1]
     const side = gaze[0] > 0.02 ? -1 : 1
     const spine: [number, number][] = [[side * 18.5, 16.5], [side * 13, 10], [side * 5, 1], [-side * 4, -7], [-side * 9.5, -13], [-side * 11, -18]]
-    shapes.push(...cloth(f, ells, spine, 19, 3.2, 2.4))
-    // Two broad folds falling from the shoulder with one deep valley between them: fewer and
-    // deeper reads as cloth; many shallow grooves read as claw marks.
-    for (const o of [-4, 4]) shapes.push(...fold(f, ells, offsetPath(spine.slice(1, 6), side * o), 5, 4))
-    // The upper edge of the cloth, undercut so it stands off the chest in shadow.
+    // One cloth mass from the knot on the shoulder across the chest, leaving the neck and the
+    // other shoulder bare (an open collar), and on it four folds hanging from the knot in
+    // widening loops, each of its own depth: Bernini's drapery, not pads or scratches.
+    shapes.push(...cloth(f, ells, spine, 24, 3.2, 2.4))
+    // The folds fan out from the knot, each falling to its own point of the lower edge with a
+    // little sag, of different depths.
+    const ends: [number, number, number, number][] = [[-12, -1, 3.2, 2.2], [-8.5, -9, 4.4, 3.0], [-3, -15.5, 3.4, 2.4], [3.5, -19, 3.8, 2.6]]
+    for (const [ex, ey, proud, thick] of ends) {
+      const a: [number, number] = [side * 15.5, 13.5]
+      const b: [number, number] = [-side * -ex, ey]
+      const mid: [number, number] = [(a[0] + b[0]) / 2 - side * 1.5, (a[1] + b[1]) / 2 - 2.5]
+      const path: [number, number][] = [a, [(a[0] + mid[0]) / 2, (a[1] + mid[1]) / 2 - 0.6], mid, [(mid[0] + b[0]) / 2, (mid[1] + b[1]) / 2 - 0.4], b]
+      shapes.push(...fold(f, ells, path, thick, proud))
+    }
     // Over the shoulder and down the back.
     const backSpine: [number, number][] = [[side * 18.5, 17], [side * 15.5, 8], [side * 11, -3], [side * 7.5, -13]]
     shapes.push(...cloth(f, ells, backSpine, 17, 3.0, 2.2, true))

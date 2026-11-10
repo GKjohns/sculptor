@@ -144,9 +144,20 @@ test('hair stands off the skull in separate crisp locks, curls are drilled, and 
   const form = compileForm({ shapes: curls.shapes, blend: 1.3 })
   const crown = (f: typeof form) => 120 - surface(f, [0, 120, -2], [0, -1, 0])
   assert.ok(crown(form) > crown(bald) + 1.5, `curls ${crown(form)} bald ${crown(bald)}`)
-  assert.ok(curls.cuts.filter(c => c.label === 'curl').length >= 3, 'a few lock tips undercut with the drill')
-  assert.ok(curls.cuts.filter(c => c.label === 'lock').length > 10, 'a groove along each lock')
-  assert.ok(curls.shapes.filter(s => s.kind === 'capsule' && s.blend !== undefined).length > 20, 'locks are capsules with their own blend')
+  assert.ok(curls.cuts.filter(c => c.label === 'curl').length >= 5, 'every third curl drilled')
+  assert.ok(curls.shapes.filter(s => s.kind === 'capsule' && s.blend !== undefined).length > 20, 'curls are capsules with their own blend')
+  // The swept mass (the default): wider than the skull at the sides, a fringe over the brow,
+  // a few deep separations and undercuts, not a groove on every lock.
+  const swept = expandHead(head([0, 77, 0], [27, 40, 34], [0, 0, 0], ['waves']))
+  const sform = compileForm({ shapes: swept.shapes, blend: 1.3 })
+  const side = (f: typeof form) => 40 - surface(f, [40, 85, -4], [-1, 0, 0])
+  assert.ok(side(sform) > side(bald) + 2, `mass ${side(sform)} skull ${side(bald)}`)
+  const seps = swept.cuts.filter(c => c.label === 'lock').length
+  assert.ok(seps >= 3 && seps <= 8, `${seps} separations`)
+  assert.ok(swept.cuts.filter(c => c.label === 'undercut').length <= 5)
+  // Long hair comes down below the chin at the back.
+  const long = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34], [0, 0, 0], ['long_hair'])).shapes, blend: 1.3 })
+  assert.ok(surface(long, [0, 64, -40], [0, 0, 1]) < surface(sform, [0, 64, -40], [0, 0, 1]) - 2, 'long hair falls behind the neck')
   const beard = compileForm({ shapes: expandHead(head([0, 77, 0], [27, 40, 34], [0, 0, 0], ['bald', 'beard'])).shapes, blend: 1.3 })
   const low = (f: typeof form) => surface(f, [0, 30, 6], [0, 1, 0])
   assert.ok(low(beard) < low(bald) - 1, 'the beard comes below the chin')
