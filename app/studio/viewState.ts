@@ -377,7 +377,9 @@ export const DEFAULT_STONES: StoneOption[] = [
   { key: 'nero', label: 'Nero Marquina', detail: 'black marble, white veins', available: true }
 ]
 
-export const EXAMPLE_COMMISSIONS = ['A bust of a Roman senator', 'A sleeping cat', 'A hand holding an apple', 'A chess knight']
+// Turned and architectural pieces: crisp planes and profiles the sculptor carves well. Figures,
+// faces, hands and animals are still open to a typed commission, just not suggested.
+export const EXAMPLE_COMMISSIONS = ['A chess knight', 'An Ionic column capital', 'A classical urn on a pedestal', 'A chess rook']
 
 export const DEFAULT_SPEEDS = [1, 4, 8, 20, 60]
 
