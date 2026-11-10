@@ -39,9 +39,9 @@
 <body>
 <main>
 <h1>Sculpting skill pass 2: figures, poses, faces and busts</h1>
-<p class="dim">November 9, 2026. Branch <code>figure-pass</code>, built offline: no paid model call was made. Every picture on this page is the canon on its own, expanded from a preset pose, set into the 60 x 100 x 60 cm block and either cut straight to the form or roughed out by the real hand (point at 3 cm, then claw at 0.6 cm), rendered with the look's contact-sheet renderer. Previews come from <code>npm run bench:poses</code> and <code>npm run bench:canon</code>.</p>
+<p class="dim">November 9 and 10, 2026. Branch <code>figure-pass</code>. Built offline first; nine paid runs at the end ($5.36 in all, section below). Every picture on this page is the canon on its own, expanded from a preset pose, set into the 60 x 100 x 60 cm block and either cut straight to the form or roughed out by the real hand (point at 3 cm, then claw at 0.6 cm), rendered with the look's contact-sheet renderer. Previews come from <code>npm run bench:poses</code> and <code>npm run bench:canon</code>.</p>
 
-<div class="caveat"><strong>What this page can and cannot show.</strong> These are the canons a model will be handed, posed the way the prompt now asks a model to pose them. Whether a model chooses such poses unprompted, and carves them well, needs the paid runs proposed at the bottom.</div>
+<div class="caveat"><strong>What this page shows.</strong> The previews are the canons a model is handed, posed the way the prompt asks. The paid runs at the bottom show what models did with them unprompted: every figure run used <code>declare_figure</code> and chose an action pose, but they finished early, and Opus never found David's throw.</div>
 
 <h2>The brief</h2>
 <p>Kyle, after the face pass: "Don't be afraid to get more artistic and intricate. Like the kinds of things Bernini would sculpt." Full figures, animals and scenes; a horse rearing or mid-stride, not a standing box; a figure with contrapposto, torsion, gesture, drapery and a narrative moment; a bull charging with its head low. Midway the stopped face pass was folded in: busts, character in faces, lids and irises, hair, texture contrast.</p>
@@ -147,6 +147,35 @@
 </tbody></table></div>
 <p>Big forms cost two to four times a study form: a figure 11 to 16 s for the first pass, a two-figure group about 25 s. The profile shows the union of solids is still most of it; the cull, bins and memo together saved about 20 percent on the bust and David. Limits: three subjects and 24 of the model's own shapes per <code>declare_figure</code>; small heads (under 18 cm) use coarse hair and drop sub-cell ear parts, which took Apollo and Daphne from 258 to 177 solids.</p>
 
+<h2>Paid runs</h2>
+<p>Round S, <code>--name pass2</code>, formed tools, reference on, Opus 5.5 capped at $2.40 a run and Fable 5.2 at $5. Commissions are one line each ("David a moment before the throw.", "A charging bull.", "A rearing horse with a rider.", the study's bust). The first three ran on the prompt as built; after them the prompt was adjusted once (an action shown in its wind-up as the whole body, no pedestal under an animal, figures take most of the budget) and the other six ran on that. The judge sees only the stone and chooses from twelve labels that include the same subject at rest.</p>
+<div class="scroll"><table class="ids">
+<thead><tr><th>Run</th><th>Model</th><th class="num">Turns</th><th class="num">Cost</th><th>Judge</th><th>Pose chosen unprompted</th><th>declare_figure</th><th>Read by eye</th></tr></thead>
+<tbody>
+<tr><td>S-david-opus-formed-ref-pass2-20261109235131-5a9</td><td>Opus 5.5</td><td class="num">15</td><td class="num">$0.64</td><td class="bad">at rest (0.50)</td><td>Yes, but a weak one: a stride, the sling hand to the head, the other arm down, twist 15</td><td>Yes</td><td>A standing youth with a hand at his head on a stump: reads as thought, not a throw.</td></tr>
+<tr><td>S-bull-opus-formed-ref-pass2-20261109235131-a94</td><td>Opus 5.5</td><td class="num">10</td><td class="num">$0.46</td><td class="good">charging bull (0.90)</td><td>Yes: charge, head down 20, tail up, coming down a rock</td><td>Yes</td><td>A charging bull, but small, set on a 33 cm rock block like a pedestal.</td></tr>
+<tr><td>S-rider-opus-formed-ref-pass2-20261109235131-e00</td><td>Opus 5.5</td><td class="num">11</td><td class="num">$0.44</td><td class="good">rearing horse with a rider (0.95)</td><td>Yes: rear, rider leaning in with a fist raised, cloak flying</td><td>Yes (declared three times to fit)</td><td>A rearing horse with a rider and a flying cloak; reads from every side.</td></tr>
+<tr><td>S-david-opus-formed-ref-pass2-20261109235704-32b</td><td>Opus 5.5</td><td class="num">20</td><td class="num">$0.71</td><td class="bad">dancer (0.60)</td><td>Yes: tried a lunge, settled on a stride, hand to head, other arm back, twist -35</td><td>Yes</td><td>More torsion, one arm flung back, but the hand still at the head: a dancer.</td></tr>
+<tr><td>S-david-fable52-formed-ref-pass2-20261109235704-ef6</td><td>Fable 5.2</td><td class="num">7</td><td class="num">$1.04</td><td class="good">about to throw (0.60)</td><td>Yes: lunge on the left leg, twist -35, lean 18, head turned 45, arm across and arm drawn back, rock</td><td>Yes</td><td><strong>The David.</strong> Bernini's wind-up: the lunge, the twist, the sling arm back. Seven turns and finished.</td></tr>
+<tr><td>S-bull-opus-formed-ref-pass2-20261109235704-783</td><td>Opus 5.5</td><td class="num">12</td><td class="num">$0.48</td><td class="good">charging bull (0.88)</td><td>Yes: charge on the diagonal, head down 25</td><td>Yes</td><td>A charging bull on a domed rock still about a quarter of the height.</td></tr>
+<tr><td>S-rider-opus-formed-ref-pass2-20261109235704-5a5</td><td>Opus 5.5</td><td class="num">17</td><td class="num">$0.57</td><td class="good">rearing horse with a rider (0.80)</td><td>Yes: rear, rider leaning forward, both arms forward, mantle</td><td>Yes</td><td>Rearing horse and rider, an egg-shaped rock of its own under the belly.</td></tr>
+<tr><td>S-bust-opus-formed-ref-pass2-20261109235704-6f3</td><td>Opus 5.5</td><td class="num">11</td><td class="num">$0.53</td><td class="good">bust (0.97)</td><td>Turned 15, cocked 2, chest turned -8 against it, frown, gaze right</td><td>n/a (head + torso)</td><td>Swept hair, a face, a bare classical trunk; the ears stand out, the neck is long.</td></tr>
+<tr><td>S-bust-opus-formed-ref-pass2-20261109235704-b41</td><td>Opus 5.5</td><td class="num">13</td><td class="num">$0.49</td><td class="good">bust (0.97)</td><td>The same pose with a calm face</td><td>n/a</td><td>A sibling of the last: Opus chose almost the same eight style tokens both times.</td></tr>
+</tbody></table></div>
+<div class="cards">
+  <div class="card"><span class="label">David, Fable 5.2 (ef6)</span><img src="pose_pass/run-david-fable52-ef6.webp" alt=""></div>
+  <div class="card"><span class="label">David, Opus 5.5 (5a9)</span><img src="pose_pass/run-david-opus-5a9.webp" alt=""></div>
+  <div class="card"><span class="label">David, Opus 5.5 (32b)</span><img src="pose_pass/run-david-opus-32b.webp" alt=""></div>
+  <div class="card"><span class="label">Bull, Opus 5.5 (a94)</span><img src="pose_pass/run-bull-opus-a94.webp" alt=""></div>
+  <div class="card"><span class="label">Bull, Opus 5.5 (783)</span><img src="pose_pass/run-bull-opus-783.webp" alt=""></div>
+  <div class="card"><span class="label">Rider, Opus 5.5 (e00)</span><img src="pose_pass/run-rider-opus-e00.webp" alt=""></div>
+  <div class="card"><span class="label">Rider, Opus 5.5 (5a5)</span><img src="pose_pass/run-rider-opus-5a5.webp" alt=""></div>
+  <div class="card"><span class="label">Bust, Opus 5.5 (6f3)</span><img src="pose_pass/run-bust-opus-6f3.webp" alt=""></div>
+  <div class="card"><span class="label">Bust, Opus 5.5 (b41)</span><img src="pose_pass/run-bust-opus-b41.webp" alt=""></div>
+</div>
+<p><strong>Read.</strong> The tool works: every figure run declared its subject with <code>declare_figure</code> on the first or second turn, read the landmarks, re-declared to fit the block, and carved it without a refusal. Every run chose an action pose without being told: the bulls charge, the horses rear, the riders lean in. The weak point is the wind-up: Opus twice mapped David's sling to <code>to_head</code>, which reads as thought or a dance, even after the prompt named the throw's wind-up; Fable 5.2 found Bernini's pose at once. The bulls go on rocks taller than the prompt now allows. All runs finished early (7 to 20 of 60 turns, $0.44 to $1.04), roughing out and detailing the canon and then stopping, so what comes out is close to the canon's preview: the canon is now most of the quality. Busts repeat themselves across runs. Judges: 7 of 9 correct; both misses are the Opus Davids.</p>
+<p><strong>Not run.</strong> The coordinator allowed the rest of the $25 to go on re-runs after the prompt change (three more Opus Davids, more bulls, a Fable 5.2 rider). The tool permission check blocked that launch as a real-world spend, so it was not run; $19.64 of the cap is unspent.</p>
+
 <h2>Validation</h2>
 <ul>
   <li><code>npm test</code>: 210 tests pass, including the saved-log guarantee (every finished study run under <code>.data/study</code> written by kernel 2 replays to its recorded hash), new figure tests (grounding, contrapposto, lunge and facing, gestures, torsion, animal poses, the rider's seat, rough-out as one mass, <code>declare_figure</code> through the schema and the Studio) and new head, hair and bust landmark tests.</li>
@@ -157,7 +186,7 @@
 
 <h2>Not done, and weak</h2>
 <ul>
-  <li><strong>No paid run.</strong> Nothing here says a model will pick these poses, or carve them; that is the next step.</li>
+  <li><strong>Few paid runs</strong>: nine, one or two per arm. Enough to see the tool used and poses chosen; not enough to rank models.</li>
   <li><strong>Focus is not persisted</strong>: it would need the loop's state and the worker protocol to carry it. Not cheap, left as it was.</li>
   <li>Figure anatomy is a mannequin's: paddle hands, wedge feet, no knees or elbows to speak of, a chest of four masses. A figure under about 70 cm gets a three-solid head.</li>
   <li>Animals: heads small and necks thin; the lion's mane hides its face; the horse's ears read as a horn from some sides; tails are tubes.</li>
@@ -165,17 +194,14 @@
   <li>Busts: faces are still siblings at a distance, the neck long from the side, breasts and shoulders too round.</li>
 </ul>
 
-<h2>Recommended paid runs</h2>
-<div class="scroll"><table>
-<thead><tr><th>Subject</th><th>Model</th><th>Runs</th><th>What it answers</th></tr></thead>
-<tbody>
-<tr><td><code>david</code></td><td>Opus 5.5</td><td class="num">2</td><td>Does the model choose a moment, a lunge and a twist on its own, and use <code>declare_figure</code> and its landmarks (a sling in the hand)?</td></tr>
-<tr><td><code>bull</code></td><td>Opus 5.5</td><td class="num">2</td><td>A long animal in a tall block: diagonal or rock? Head low? The judge's "cow standing" catches a static one.</td></tr>
-<tr><td><code>rider</code></td><td>Opus 5.5</td><td class="num">2</td><td>Two subjects in one form, a rear on hind legs and tail, carved as one mass.</td></tr>
-<tr><td><code>bust</code></td><td>Opus 5.5</td><td class="num">2</td><td>Head, torso, style tokens and canon cuts against the last pass's best face (skill-4).</td></tr>
-<tr><td><code>david</code></td><td>Fable 5.2</td><td class="num">1</td><td>The last pass's best composer, on composition.</td></tr>
-</tbody></table></div>
-<p>Nine runs, about $25 at the last pass's prices (Opus about $1.50 to $2.20 a run, Fable 5.2 about $4.50), formed tools, reference on. Expect longer wall time: figure rough-outs are two to four times slower than a study form's.</p>
+<h2>Next</h2>
+<ul>
+  <li><strong>Make the wind-up a gesture.</strong> Add arm gestures the model can name for an action (<code>sling</code> or <code>wind_up</code>: drawn back and up behind the shoulder; <code>strike</code>) so "about to throw" has a word that is not <code>to_head</code>. Then three more Opus Davids.</li>
+  <li><strong>Keep models working.</strong> Every run stopped at 7 to 20 turns with the canon roughly detailed. A turn floor for figures, or a judge-style self check against the commission before <code>finish</code> is accepted, would spend the budget on the hands, the face and the surfaces.</li>
+  <li><strong>Busts that are not siblings</strong>: Opus picks nearly the same tokens each time. Seed the prompt with who the sitter is (age, character) or ask for a sitter's description first.</li>
+  <li><strong>Animals</strong>: thicker legs, a bull's body less balloon-like; enforce the rock limit in the result ("your rock is a third of the block").</li>
+  <li><strong>Fable 5.2</strong> composed the best figure for $1.04; worth a three-run comparison on figures against Opus.</li>
+</ul>
 </main>
 </body>
 </html>

@@ -518,7 +518,7 @@ Ranking: Opus 5.5, Fable 5.2, Fable 5.1, Sol, Gemini. Fable 5.2 wins only on com
 
 ---
 
-### Sculpting skill pass 2: figures and poses (offline) `[Built, offline]` (November 9, 2026)
+### Sculpting skill pass 2: figures and poses `[Built; 9 paid runs]` (November 9 and 10, 2026)
 **Goal:** Kyle: "Don't be afraid to get more artistic and intricate. Like the kinds of things Bernini would sculpt." Full figures, animals and scenes, artistic poses, never a boring default pose; and, after the parallel face pass was stopped, the faces and busts as well (the last pass's Next list). Built and validated offline at zero model spend; the paid bench runs wait on a budget. Report: `study/pose_pass.html`. Branch `figure-pass`.
 
 **What changed** (all in `shared/` and `bench/`; `KERNEL_VERSION` stays 2 and every saved study log replays to its hash):
@@ -546,9 +546,27 @@ Ranking: Opus 5.5, Fable 5.2, Fable 5.1, Sol, Gemini. Fable 5.2 wins only on com
 
 Point pass at 3 cm, then claw at 0.6 cm, the two passes every commission makes. A form of up to 24 solids (what the study's forms were) takes 6 to 7 s; a figure 11 to 16 s; a two-figure group about 25 s. Limits: `declare_figure` takes at most three subjects and 24 of the model's own shapes (`MAX_SUBJECTS`, `MAX_SHAPES`); the kernel has no limit of its own. Small heads (under 18 cm) use a coarse hair and drop sub-cell ear parts, which took a two-figure group from 258 to 177 solids.
 
-**Not done:** focus is still in-memory only (persisting it needs the loop's RunState and the worker protocol to carry it: not cheap). No paid run has used any of this: the poses, faces and prompt are judged on offline renders only. The figure canon's hands are paddles, feet are short wedges, and a figure under about 70 cm gets a plain three-solid head. Animals' heads are small and their legs thin; the lion's mane swallows the face from the front. The block is fixed at 60 x 100 x 60, so a long animal must go on the diagonal or on a rock.
+**Not done:** focus is still in-memory only (persisting it needs the loop's RunState and the worker protocol to carry it: not cheap). The figure canon's hands are paddles, feet are short wedges, and a figure under about 70 cm gets a plain three-solid head. Animals' heads are small and their legs thin; the lion's mane swallows the face from the front. The block is fixed at 60 x 100 x 60, so a long animal must go on the diagonal or on a rock.
 
-**What the paid runs should test** (recommendation; budget to be set): Opus 5.5 (the default) with the formed tools and the reference on: `david` x2, `bull` x2, `rider` x2, to see whether the model picks a moment and a pose unprompted and whether `declare_figure` survives contact with it; `bust` x2 on the new head, torso and canon cuts against the skill pass's best face; one `david` with Fable 5.2 for composition. About $25 at the last pass's prices, plus wall time: figure rough-outs are two to four times slower.
+**Offline tune after review** (zero spend, same cameras, before/after on the report page): the bull on a low rough slab with a head about a fifth of its body forward and low, horns out then forward and up, a dewlap and a bigger hump; arched two-piece necks with a mane crest and longer heads for the horse (and bigger heads for lion and dog); the rider clear of the back with legs down the flanks; hair as swept locks laid on the skull from a parting, blended into one mass with a groove along each; two broad mantle folds instead of many grooves; ears tucked; a higher trapezius; a thumb and a heel on each figure.
+
+**Paid runs** (round S, `--name pass2`, formed tools, reference on; Opus 5.5 capped at $2.40 a run, Fable 5.2 at $5):
+
+| Run | Model | Turns | Cost | Judge | Pose unprompted | declare_figure | Read |
+|---|---|---|---|---|---|---|---|
+| `S-david-opus-formed-ref-pass2-20261109235131-5a9` | Opus 5.5 | 15 | $0.64 | at rest (miss) | stride, hand to head | yes | a youth thinking, not throwing |
+| `S-bull-opus-formed-ref-pass2-20261109235131-a94` | Opus 5.5 | 10 | $0.46 | charging bull | charge, head down, tail up | yes | small bull on a 33 cm rock pedestal |
+| `S-rider-opus-formed-ref-pass2-20261109235131-e00` | Opus 5.5 | 11 | $0.44 | rider | rear, fist raised, cloak | yes | reads from every side |
+| `S-david-opus-formed-ref-pass2-20261109235704-32b` | Opus 5.5 | 20 | $0.71 | dancer (miss) | stride, hand to head, arm back | yes | more torsion, still not a throw |
+| `S-david-fable52-formed-ref-pass2-20261109235704-ef6` | Fable 5.2 | 7 | $1.04 | about to throw | lunge, twist -35, arm across, arm back | yes | **Bernini's wind-up** |
+| `S-bull-opus-formed-ref-pass2-20261109235704-783` | Opus 5.5 | 12 | $0.48 | charging bull | charge on the diagonal | yes | on a domed rock a quarter of the height |
+| `S-rider-opus-formed-ref-pass2-20261109235704-5a5` | Opus 5.5 | 17 | $0.57 | rider | rear, leaning in, mantle | yes | an extra rock under the belly |
+| `S-bust-opus-formed-ref-pass2-20261109235704-6f3` | Opus 5.5 | 11 | $0.53 | bust | turned 15, chest -8, frown | head + torso | ears stand out, long neck |
+| `S-bust-opus-formed-ref-pass2-20261109235704-b41` | Opus 5.5 | 13 | $0.49 | bust | same, calm | head + torso | a sibling of 6f3 |
+
+The prompt was adjusted once after the first three (an action in its wind-up, no pedestal under an animal, figures take most of the budget). Every figure run used `declare_figure` and chose an action pose unprompted; 7 of 9 judged correct, both misses Opus Davids mapping the sling to `to_head`. All runs stopped early (7 to 20 of 60 turns), so the canon is most of the quality now. **Spend: $5.36** (ledger $41.33 → $46.69). Re-runs on the rest of the $25 were allowed by the coordinator but blocked by the tool permission check as a real-world spend, so not run.
+
+**Next:** an arm gesture for the wind-up (`sling` or `wind_up`) and three more Opus Davids; keep models working past the canon (a turn floor for figures or a check against the commission before `finish`); seed busts with who the sitter is so faces stop repeating; thicker animal legs and a hard rock limit in the result; a three-run Fable 5.2 vs Opus comparison on figures.
 
 ---
 
