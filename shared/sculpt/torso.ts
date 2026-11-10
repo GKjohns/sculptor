@@ -1,0 +1,299 @@
+// The torso of a bust for the canon (anatomy.ts): neck, shoulders, chest and back down to the
+// truncation, the drapery the style asks for, and the socle it stands on. Its frame is the
+// declared box: centre, size (shoulder to shoulder, truncation to shoulder top, chest to back)
+// and pose. With a head in the same form the neck is muscle between the two: the column, the
+// two sternomastoids from behind the ears to the pit of the neck, the trapezius behind, so a
+// turned head turns its neck.
+
+import type { DeclaredShape, Expanded, HeadKnobs, RoughCut } from './anatomy.ts'
+import { CHIN } from './anatomy.ts'
+import { add, between, dirToWorld, frameOf, lerp, meanStretch, normalize, partShape, r3, rounded, scale, sub, toWorld } from './frame.ts'
+import type { Frame } from './frame.ts'
+import { compileForm, formDistance } from './shapes.ts'
+import type { CompiledForm, Shape, ShapeKind, Vec3 } from './types.ts'
+
+// The canon torso, cm: shoulder to shoulder, truncation to the top of the shoulders, chest to back.
+export const TORSO: Vec3 = [60, 46, 30]
+
+interface Ell { c: Vec3, r: Vec3 }
+
+export interface TorsoStyle {
+  female: boolean
+  build: number
+  drape: 'bare' | 'mantle' | 'collar'
+  socle: boolean
+}
+
+export function torsoStyle(style: readonly string[] = [], head: HeadKnobs | null): TorsoStyle {
+  const has = (t: string) => style.includes(t)
+  return {
+    female: has('female') || (!has('male') && !!head?.female),
+    build: has('lean') ? -1 : has('heavy') ? 1 : head?.build ?? 0,
+    drape: has('mantle') ? 'mantle' : has('collar') ? 'collar' : 'bare',
+    socle: !has('no_socle')
+  }
+}
+
+// The masses of the trunk in the canon frame; the drapery is laid on their front. Few and
+// broad: a chest, a yoke across the shoulders whose rounded ends are the shoulders, the arms
+// cut off under them, the slope of the trapezius, and a little anatomy on the front.
+function trunk(s: TorsoStyle): { kind: ShapeKind, e: Ell, r?: Vec3, mirror?: boolean }[] {
+  const b = s.build
+  const f = s.female ? 1 : 0
+  // The classical bust's figure: broad at the shoulders, the chest flat in front, narrowing
+  // to a rounded cut over the socle, the arms cut off under the deltoids.
+  const list: { kind: ShapeKind, e: Ell, r?: Vec3, mirror?: boolean }[] = [
+    { kind: 'ellipsoid', e: { c: [0, 5, -1], r: [19.5 + b - 1.5 * f, 16.5, 12 + 0.5 * b] } },
+    { kind: 'ellipsoid', e: { c: [0, -9.5, 0], r: [14.5 + b - f, 12.5, 10.5 + 0.5 * b] } },
+    { kind: 'ellipsoid', e: { c: [0, 16, -2.5], r: [26.5 - 2 * f, 5.5, 10.5] } },
+    { kind: 'ellipsoid', e: { c: [23 - 2 * f, 7.5, -1.5], r: [6.2, 12, 7.2] }, r: [0, 0, 8], mirror: true },
+    { kind: 'ellipsoid', e: { c: [8.5, 19.5, -4], r: [9, 3, 6] }, r: [0, 0, -16], mirror: true }
+  ]
+  if (f) list.push({ kind: 'ellipsoid', e: { c: [7.5, 3.5, 8.6], r: [6.5, 5.5, 3.8] }, mirror: true })
+  else list.push({ kind: 'ellipsoid', e: { c: [8.5, 9, 9], r: [9.5, 5.5, 2.6 + 0.5 * b] }, r: [0, 0, -10], mirror: true })
+  return list
+}
+
+// The trunk's own surface, for laying cloth on it: its masses as one blended form in the canon
+// frame, compiled once per trunk.
+const trunks = new WeakMap<Ell[], CompiledForm>()
+function trunkForm(masses: Ell[]): CompiledForm {
+  let form = trunks.get(masses)
+  if (!form) {
+    form = compileForm({ shapes: masses.map(m => ({ kind: 'ellipsoid', center: m.c, size: scale(m.r, 2), rotation: [0, 0, 0] })), blend: 2 })
+    trunks.set(masses, form)
+  }
+  return form
+}
+
+function gradient(form: CompiledForm, p: Vec3): Vec3 {
+  const e = 0.05
+  return normalize([
+    formDistance(form, p[0] + e, p[1], p[2]) - formDistance(form, p[0] - e, p[1], p[2]),
+    formDistance(form, p[0], p[1] + e, p[2]) - formDistance(form, p[0], p[1] - e, p[2]),
+    formDistance(form, p[0], p[1], p[2] + e) - formDistance(form, p[0], p[1], p[2] - e)
+  ])
+}
+
+// The front (or back) surface of the trunk at (x, y), canon cm, and its outward normal. Past
+// the trunk's outline the point is brought in toward the middle until it lies on the trunk,
+// so cloth laid along a path always lies on the body.
+function surfaceAt(masses: Ell[], x: number, y: number, back = false): { p: Vec3, n: Vec3 } {
+  const form = trunkForm(masses)
+  const dz = back ? 1 : -1
+  for (let shrink = 0; shrink < 30; shrink++) {
+    const xx = x * (1 - shrink / 30)
+    let z = -dz * 40
+    for (let i = 0; i < 160 && Math.abs(z) <= 40; i++) {
+      const d = formDistance(form, xx, y, z)
+      if (d < 0.02) {
+        const p: Vec3 = [xx, y, z]
+        return { p, n: gradient(form, p) }
+      }
+      z += dz * Math.max(0.05, Math.min(d, 2))
+    }
+  }
+  return { p: [0, y, back ? -10 : 10], n: [0, 0, back ? -1 : 1] }
+}
+
+// A fold: a ridge of cloth along a path of (x, y) on the chest, its crest `proud` off the chest
+// in the middle and sinking toward its ends into the cloth under it, as a chain of flattened
+// tubes, broadest in the middle.
+function fold(f: Frame, masses: Ell[], path: [number, number][], thick: number, proud: number, back = false): Shape[] {
+  const out: Shape[] = []
+  const pts = path.map(([x, y], i) => {
+    const s = surfaceAt(masses, x, y, back)
+    const swell = Math.sin(Math.PI * (i + 0.5) / path.length)
+    return { p: add(s.p, scale(s.n, proud * (0.6 + 0.4 * swell) - thick / 2)), n: s.n, t: thick * (0.75 + 0.25 * swell) }
+  })
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i]!
+    const b = pts[i + 1]!
+    const t = (a.t + b.t) / 2
+    out.push(between('capsule', toWorld(f, a.p), toWorld(f, b.p), t * 1.4 * meanStretch(f), t * meanStretch(f), dirToWorld(f, normalize(add(a.n, b.n)))))
+  }
+  return out
+}
+
+// The body of a length of cloth lying on the chest along a path: overlapping flat masses
+// `wide` across and `thick` through, standing `proud` off the chest.
+function cloth(f: Frame, masses: Ell[], path: [number, number][], wide: number, thick: number, proud: number, back = false): Shape[] {
+  // Narrow strips side by side, each following the body, so a broad cloth wraps the chest
+  // instead of standing off it at its edges.
+  const out: Shape[] = []
+  const strips = Math.max(1, Math.ceil(wide / 6.5))
+  const w = 1.8 * wide / strips
+  for (let k = 0; k < strips; k++) {
+    const off = (k - (strips - 1) / 2) * wide / strips
+    const on = offsetPath(path, off).map(([x, y]) => {
+      const s = surfaceAt(masses, x, y, back)
+      return { p: add(s.p, scale(s.n, proud - thick / 2)), n: s.n }
+    })
+    for (let i = 0; i + 1 < on.length; i++) {
+      const a = on[i]!
+      const b = on[i + 1]!
+      const ext = scale(sub(b.p, a.p), 0.18)
+      out.push(between('ellipsoid', toWorld(f, sub(a.p, ext)), toWorld(f, add(b.p, ext)), w * meanStretch(f), thick * meanStretch(f), dirToWorld(f, normalize(add(a.n, b.n)))))
+    }
+  }
+  return out
+}
+
+// A path of (x, y) on the chest offset sideways from a spine path by `off` cm.
+function offsetPath(spine: [number, number][], off: number): [number, number][] {
+  return spine.map((p, i) => {
+    const a = spine[Math.max(0, i - 1)]!
+    const b = spine[Math.min(spine.length - 1, i + 1)]!
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const l = Math.hypot(dx, dy) || 1
+    return [p[0] - dy / l * off, p[1] + dx / l * off] as [number, number]
+  })
+}
+
+function onSurface(masses: Ell[], path: [number, number][], lift: number, back = false): Vec3[] {
+  return path.map(([x, y]) => {
+    const s = surfaceAt(masses, x, y, back)
+    return add(s.p, scale(s.n, lift))
+  })
+}
+
+export function torsoParts(t: DeclaredShape, head: { frame: Frame, knobs: HeadKnobs } | null): Expanded {
+  const s = torsoStyle(t.style, head?.knobs ?? null)
+  const f = frameOf(t.center, t.size, TORSO, t.rotation)
+  const k = meanStretch(f)
+  const shapes: Shape[] = []
+  const cuts: RoughCut[] = []
+  const masses = trunk(s)
+  const ells: Ell[] = []
+  for (const m of masses) {
+    for (const side of m.mirror ? [1, -1] : [1]) {
+      const r = m.r ?? [0, 0, 0]
+      const c: Vec3 = [side * m.e.c[0], m.e.c[1], m.e.c[2]]
+      shapes.push(partShape(f, m.kind, c, scale(m.e.r, 2), [r[0], side * r[1], side * r[2]]))
+      ells.push({ c, r: m.e.r })
+    }
+  }
+  const cut = (label: string, tool: 'drill' | 'roundel', size: number, depth: number, points: Vec3[], dir: Vec3 | null = null) => {
+    cuts.push({ label, tool, size: r3(size * k), depth: r3(depth * k), points: points.map(p => toWorld(f, p)), dir: dir ? dirToWorld(f, dir) : null })
+  }
+  const W = (p: Vec3) => toWorld(f, p)
+
+  // The neck: from the trunk up into the head it carries, or a stump with no head.
+  const notch: Vec3 = [0, 19.8, 8.4]
+  if (head) {
+    const h = head.frame
+    const hw = 15.5 * h.stretch[0]
+    const H = (p: Vec3) => toWorld(h, [p[0], p[1] + CHIN, p[2]])
+    const thin = head.knobs.female ? 0.86 : 1
+    const thick = (1 + 0.08 * s.build) * thin
+    const base = W([0, 21, 0])
+    const top = H([0, 7.5, -2.4])
+    const forward = normalize(add(dirToWorld(h, [0, 0, 1]), dirToWorld(f, [0, 0, 1])))
+    shapes.push(between('capsule', base, top, 0.74 * hw * thick, 0.8 * hw * thick, forward))
+    // The nape: muscle from the base of the skull down into the back, so the neck is short and
+    // strong from the side.
+    shapes.push(between('ellipsoid', H([0, 8.2, -6.6]), W([0, 21.5, -6.5]), 0.55 * hw * thick, 0.32 * hw * thick, dirToWorld(f, [0, 0, -1])))
+    for (const side of [1, -1]) {
+      // Sternomastoid: from behind the ear to the top of the breastbone, the neck's front edge.
+      shapes.push(between('ellipsoid', W([side * 2.4, 20.0, 7.2]), H([side * 5.0, 8.8, -3.2]), 0.24 * hw * thick, 0.16 * hw * thick, normalize(add(forward, dirToWorld(f, [side, 0, 0])))))
+      // Trapezius: from the back of the skull out to the shoulder.
+      shapes.push(between('ellipsoid', H([side * 2.4, 7.6, -6.4]), W([side * 11, 23, -4.5]), 0.42 * hw * thick, 0.22 * hw * thick, normalize(sub(W([side * 9, 22, -5.5]), W([0, 22, -1.5])))))
+    }
+    if (!head.knobs.female) {
+      const throat = lerp(W(notch), H([0, 1.0, 2.6]), 0.6)
+      shapes.push(rounded({ kind: 'ellipsoid', center: add(throat, scale(forward, -0.05 * hw)), size: [0.13 * hw, 0.16 * hw, 0.12 * hw], rotation: [0, 0, 0] }))
+    }
+  } else {
+    shapes.push(partShape(f, 'capsule', [0, 24, -1], [13, 14, 12]))
+  }
+  // The pit of the neck between the collarbones.
+  if (s.drape !== 'collar') cut('pit of the neck', 'drill', 1.4, 0.7, [notch], [0, -0.3, -1])
+
+  if (s.drape === 'bare' || s.drape === 'mantle') {
+    // Collarbones, standing over the hollows above them.
+    for (const side of [1, -1]) {
+      const a = surfaceAt(ells, side * 2.4, 19.2)
+      const b = surfaceAt(ells, side * 18.5, 19.6)
+      shapes.push(between('capsule', W(add(a.p, scale(a.n, 0.3))), W(add(b.p, scale(b.n, 0.3))), 2.2 * k, 1.8 * k, dirToWorld(f, [0, 0.3, 1])))
+      cut('collarbone', 'roundel', 1.0, 0.45, onSurface(ells, [[side * 4, 21.2], [side * 10, 21.6], [side * 16, 21.6]], 0))
+    }
+    if (!s.female) {
+      cut('breastbone', 'roundel', 1.0, 0.35, onSurface(ells, [[0, 18], [0, 12], [0, 5.5]], 0))
+      for (const side of [1, -1]) cut('pectoral', 'roundel', 1.0, 0.3, onSurface(ells, [[side * 2, 4.2], [side * 8, 3.2], [side * 14, 4.6], [side * 17.5, 8]], 0))
+    }
+  }
+  // The spine down the back.
+  cut('spine', 'roundel', 1.2, 0.35, onSurface(ells, [[0, 19], [0, 8], [0, -6], [0, -16]], 0, true))
+
+  if (s.drape === 'mantle') {
+    // A mantle over one shoulder, knotted there, falling across the chest to the other side of
+    // the truncation and down the back: a thick length of cloth with three broad folds on it and
+    // deep valleys between them. The shoulder is the one the head turns away from.
+    const gaze: Vec3 = head ? dirToWorld(head.frame, [0, 0, 1]) : [0, 0, 1]
+    const side = gaze[0] > 0.02 ? -1 : 1
+    const spine: [number, number][] = [[side * 18.5, 16.5], [side * 13, 10], [side * 5, 1], [-side * 4, -7], [-side * 9.5, -13], [-side * 11, -18]]
+    // One cloth mass from the knot on the shoulder across the chest, leaving the neck and the
+    // other shoulder bare (an open collar), and on it four folds hanging from the knot in
+    // widening loops, each of its own depth: Bernini's drapery, not pads or scratches.
+    shapes.push(...cloth(f, ells, spine, 24, 3.2, 2.4))
+    // The folds fan out from the knot, each falling to its own point of the lower edge with a
+    // little sag, of different depths.
+    const ends: [number, number, number, number][] = [[-12, -1, 3.2, 2.2], [-8.5, -9, 4.4, 3.0], [-3, -15.5, 3.4, 2.4], [3.5, -19, 3.8, 2.6]]
+    for (const [ex, ey, proud, thick] of ends) {
+      const a: [number, number] = [side * 15.5, 13.5]
+      const b: [number, number] = [-side * -ex, ey]
+      const mid: [number, number] = [(a[0] + b[0]) / 2 - side * 1.5, (a[1] + b[1]) / 2 - 2.5]
+      const path: [number, number][] = [a, [(a[0] + mid[0]) / 2, (a[1] + mid[1]) / 2 - 0.6], mid, [(mid[0] + b[0]) / 2, (mid[1] + b[1]) / 2 - 0.4], b]
+      shapes.push(...fold(f, ells, path, thick, proud))
+    }
+    // Over the shoulder and down the back.
+    const backSpine: [number, number][] = [[side * 18.5, 17], [side * 15.5, 8], [side * 11, -3], [side * 7.5, -13]]
+    shapes.push(...cloth(f, ells, backSpine, 17, 3.0, 2.2, true))
+    shapes.push(...fold(f, ells, offsetPath(backSpine, side * 1.5), 4, 3.6, true))
+    cut('fold', 'roundel', 2.2, 1.6, onSurface(ells, offsetPath(backSpine, side * -2.5), 2.4, true))
+    // The knot on the shoulder.
+    const knot = surfaceAt(ells, side * 18, 16.5)
+    shapes.push(partShape(f, 'ellipsoid', add(knot.p, scale(knot.n, 2.6)), [7, 6, 5]))
+    cut('knot', 'roundel', 1.0, 0.9, [add(add(knot.p, scale(knot.n, 5.0)), [-side * 1.8, 1.6, 0]), add(add(knot.p, scale(knot.n, 4.8)), [side * 1.2, -2.0, 0])])
+  } else if (s.drape === 'collar') {
+    // A buttoned coat with a collar round the neck and a falling band over it.
+    for (let y = 14; y >= -16; y -= 5.5) {
+      const b = surfaceAt(ells, 0, y)
+      shapes.push(partShape(f, 'ellipsoid', add(b.p, scale(b.n, 0.4)), [2.4, 2.4, 1.6]))
+    }
+    for (const side of [1, -1]) cut('placket', 'roundel', 0.9, 0.6, onSurface(ells, [[side * 2.2, 17], [side * 2.4, 4], [side * 2.4, -18]], 0))
+    const ring: Vec3[] = []
+    for (let a = 0; a <= 360; a += 45) {
+      const r = a * Math.PI / 180
+      ring.push([Math.sin(r) * 9, 22 + 0.8 * Math.cos(r), -1.5 + Math.cos(r) * 8.5])
+    }
+    for (let i = 0; i + 1 < ring.length; i++) shapes.push(between('capsule', W(ring[i]!), W(ring[i + 1]!), 2.6 * k, 2.6 * k, dirToWorld(f, [0, 1, 0])))
+    for (const side of [1, -1]) {
+      const tab = surfaceAt(ells, side * 3, 15.5)
+      shapes.push(partShape(f, 'box', add(tab.p, scale(tab.n, 0.9)), [5.4, 8, 1.2], [-10, 0, side * 5]))
+    }
+    cut('band', 'roundel', 0.8, 0.8, onSurface(ells, [[0, 20], [0, 11.5]], 1.4))
+  }
+
+  // The socle: a turned stem under the truncation, a moulding at each end and a square plinth,
+  // upright and square to the block whatever the pose of the bust above it.
+  if (s.socle) {
+    const lowest = Math.min(...shapes.map(sh => sh.center[1] - Math.max(...sh.size) / 2))
+    const bottom = Math.max(lowest, toWorld(f, [0, -23, 0])[1])
+    const cx = t.center[0]
+    const cz = t.center[2]
+    const W2 = t.size[0]
+    const D2 = t.size[2]
+    const plinth = Math.min(5, Math.max(2.5, bottom * 0.25))
+    shapes.push(rounded({ kind: 'box', center: [cx, plinth / 2, cz], size: [0.56 * W2, plinth, Math.min(0.56 * W2, 1.2 * D2)], rotation: [0, 0, 0] }))
+    if (bottom - plinth > 3) {
+      // A cone whose point is buried in the chest: wide at the plinth, narrowing up the stem.
+      const tall = 2.4 * (bottom - plinth)
+      shapes.push(rounded({ kind: 'cone', center: [cx, plinth + tall / 2, cz], size: [0.4 * W2, tall, 0.4 * W2], rotation: [0, 0, 0] }))
+      shapes.push(rounded({ kind: 'ellipsoid', center: [cx, plinth + 1.2, cz], size: [0.46 * W2, 2.6, 0.46 * W2], rotation: [0, 0, 0] }))
+    }
+    shapes.push(rounded({ kind: 'ellipsoid', center: [cx, bottom + 0.4, cz], size: [0.36 * W2, 2.6, 0.36 * W2], rotation: [0, 0, 0] }))
+  }
+  return { shapes, cuts }
+}

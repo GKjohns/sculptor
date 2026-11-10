@@ -518,6 +518,60 @@ Ranking: Opus 5.5, Fable 5.2, Fable 5.1, Sol, Gemini. Fable 5.2 wins only on com
 
 ---
 
+### Sculpting skill pass 2: figures and poses `[Built; 9 paid runs]` (November 9 and 10, 2026)
+**Goal:** Kyle: "Don't be afraid to get more artistic and intricate. Like the kinds of things Bernini would sculpt." Full figures, animals and scenes, artistic poses, never a boring default pose; and, after the parallel face pass was stopped, the faces and busts as well (the last pass's Next list). Built and validated offline at zero model spend; the paid bench runs wait on a budget. Report: `study/pose_pass.html`. Branch `figure-pass`.
+
+**What changed** (all in `shared/` and `bench/`; `KERNEL_VERSION` stays 2 and every saved study log replays to its hash):
+- `shared/sculpt/figure.ts`: the canon of the body. `declare_figure` (a new tool) takes one to three posed subjects plus the model's own shapes as one form. A figure is declared by pose: body and build, ground point, standing height, facing, legs (stand, stride, lunge, kneel, sit, recline, crouch, ride), weight_on (contrapposto: that hip up and out, shoulders tilted against it, the free knee bent), twist, lean, head turn and tilt, each arm's gesture (down, akimbo, across, forward, raised, overhead, back, out, to_head), drapery (loincloth, collar, mantle, cloak, robe), support (stump, rock) and head style tokens. Limbs reach from hip and shoulder to a target by a two-bone reach, so any pose stays jointed. A quadruped: horse, bull, lion, dog or cat in stand, walk, trot, gallop, rear, charge, lie or sit, head turned and raised or lowered, tail, lead foreleg; a rearing animal stands on its hind legs and tail. A rider sits on the first animal. Everything expands into kernel primitives before the form is logged. The result tells the model each subject's extent and where its head, hands, feet (or muzzle and back) ended up.
+- Faces and busts, starting from the stopped `bust-pass-2` snapshot (adopted in commit 21998b6; what was kept and dropped is on the report page): style tokens on the head (sex, age, build, jaw, nose, expression, gaze, hair, beard); a `torso` canon (neck, shoulders, chest narrowing to a rounded cut, arm stumps, mantle or buttoned collar, socle); canon cuts (iris rings, drilled pupils, lid lines, nostrils, mouth, curl eyes, fold valleys) carried on the form entry and struck by `detail` in its window; a hair canon. This pass then opened the eyes (a ball between two lids), slimmed the lower face, rebuilt the hair as hooked locks along the fall from the crown whorl on a hair mass, rebuilt the bust's trunk to a classical silhouette, and laid cloth in strips on the real trunk surface.
+- Kernel: a shape may carry its own `blend`, never more than the form's, so lids, lips, nostril wings and locks stay crisp on a softly blended body. Old logs carry none and replay identically.
+- Speed for forms of a hundred and more solids, both exact (the same number to the last bit, checked against every saved log): an inherited bounding-sphere cull, per-cell candidate lists (bins), and a sample memo for strike clipping.
+- `shared/agent/prompt.ts`: a COMPOSITION AND POSE section in both tool sets (choose the moment; name the dominant diagonal, silhouette, torsion, gesture and contrast of surfaces; a frontal, symmetric, static pose is a failure unless commissioned; compose within the block; supports where marble needs them), and with the formed tools the use of `declare_figure`, figure and animal measures for this block, and how to carve a figure. The bust paragraph now uses head + torso + style. `reference.ts`: the brief no longer forbids outstretched limbs or raised tails (only free strands), and asks for the moment and a Baroque pose.
+- Bench: subjects `david` ("David a moment before the throw."), `bull` ("A charging bull."), `rider` ("A rearing horse with a rider.") with their own twelve judge labels, among them the same subject at rest, so a static pose scores as a miss; the study's twelve stay as they were. The `--dry` Brain declares the new subjects with `declare_figure`. `npm run bench:poses`, `bench:canon` and `bench:timing` preview and time the canons offline.
+
+**Rough-out time against solid count** (`npm run bench:timing`, voxel 0.4, Kyle's Mac, one run each):
+
+| Form | Solids | Point at 3 cm | Claw at 0.6 cm |
+|---|---|---|---|
+| 4 plain solids | 4 | 5.7 s (2498 strikes) | 2.1 s (1485 strikes) |
+| 12 plain solids | 12 | 6.0 s (2280 strikes) | 2.7 s (1433 strikes) |
+| 24 plain solids (the study's limit) | 24 | 6.7 s (2137 strikes) | 3.0 s (1335 strikes) |
+| bust: head + torso (mantle, curls) | 199 | 16.5 s (2100 strikes) | 7.6 s (1428 strikes) |
+| David (one figure) | 79 | 11.0 s (2167 strikes) | 4.9 s (1392 strikes) |
+| contrapposto, mantle, stump | 102 | 15.2 s (2347 strikes) | 6.2 s (1326 strikes) |
+| seated figure on a rock | 120 | 11.1 s (1865 strikes) | 5.5 s (1236 strikes) |
+| rearing horse and rider | 85 | 17.3 s (2568 strikes) | 6.9 s (1402 strikes) |
+| charging bull on a rock | 38 | 7.1 s (1860 strikes) | 3.6 s (1290 strikes) |
+| Apollo and Daphne (two figures) | 177 | 24.1 s (2211 strikes) | 12.4 s (1417 strikes) |
+
+Point pass at 3 cm, then claw at 0.6 cm, the two passes every commission makes. A form of up to 24 solids (what the study's forms were) takes 6 to 7 s; a figure 11 to 16 s; a two-figure group about 25 s. Limits: `declare_figure` takes at most three subjects and 24 of the model's own shapes (`MAX_SUBJECTS`, `MAX_SHAPES`); the kernel has no limit of its own. Small heads (under 18 cm) use a coarse hair and drop sub-cell ear parts, which took a two-figure group from 258 to 177 solids.
+
+**Not done:** focus is still in-memory only (persisting it needs the loop's RunState and the worker protocol to carry it: not cheap). The figure canon's hands are paddles, feet are short wedges, and a figure under about 70 cm gets a plain three-solid head. Animals' heads are small and their legs thin; the lion's mane swallows the face from the front. The block is fixed at 60 x 100 x 60, so a long animal must go on the diagonal or on a rock.
+
+**Offline tune after review** (zero spend, same cameras, before/after on the report page): the bull on a low rough slab with a head about a fifth of its body forward and low, horns out then forward and up, a dewlap and a bigger hump; arched two-piece necks with a mane crest and longer heads for the horse (and bigger heads for lion and dog); the rider clear of the back with legs down the flanks; hair as swept locks laid on the skull from a parting, blended into one mass with a groove along each; two broad mantle folds instead of many grooves; ears tucked; a higher trapezius; a thumb and a heel on each figure.
+
+**Paid runs** (round S, `--name pass2`, formed tools, reference on; Opus 5.5 capped at $2.40 a run, Fable 5.2 at $5):
+
+| Run | Model | Turns | Cost | Judge | Pose unprompted | declare_figure | Read |
+|---|---|---|---|---|---|---|---|
+| `S-david-opus-formed-ref-pass2-20261109235131-5a9` | Opus 5.5 | 15 | $0.64 | at rest (miss) | stride, hand to head | yes | a youth thinking, not throwing |
+| `S-bull-opus-formed-ref-pass2-20261109235131-a94` | Opus 5.5 | 10 | $0.46 | charging bull | charge, head down, tail up | yes | small bull on a 33 cm rock pedestal |
+| `S-rider-opus-formed-ref-pass2-20261109235131-e00` | Opus 5.5 | 11 | $0.44 | rider | rear, fist raised, cloak | yes | reads from every side |
+| `S-david-opus-formed-ref-pass2-20261109235704-32b` | Opus 5.5 | 20 | $0.71 | dancer (miss) | stride, hand to head, arm back | yes | more torsion, still not a throw |
+| `S-david-fable52-formed-ref-pass2-20261109235704-ef6` | Fable 5.2 | 7 | $1.04 | about to throw | lunge, twist -35, arm across, arm back | yes | **Bernini's wind-up** |
+| `S-bull-opus-formed-ref-pass2-20261109235704-783` | Opus 5.5 | 12 | $0.48 | charging bull | charge on the diagonal | yes | on a domed rock a quarter of the height |
+| `S-rider-opus-formed-ref-pass2-20261109235704-5a5` | Opus 5.5 | 17 | $0.57 | rider | rear, leaning in, mantle | yes | an extra rock under the belly |
+| `S-bust-opus-formed-ref-pass2-20261109235704-6f3` | Opus 5.5 | 11 | $0.53 | bust | turned 15, chest -8, frown | head + torso | ears stand out, long neck |
+| `S-bust-opus-formed-ref-pass2-20261109235704-b41` | Opus 5.5 | 13 | $0.49 | bust | same, calm | head + torso | a sibling of 6f3 |
+
+The prompt was adjusted once after the first three (an action in its wind-up, no pedestal under an animal, figures take most of the budget). Every figure run used `declare_figure` and chose an action pose unprompted; 7 of 9 judged correct, both misses Opus Davids mapping the sling to `to_head`. All runs stopped early (7 to 20 of 60 turns), so the canon is most of the quality now. **Spend: $5.36** (ledger $41.33 → $46.69). Re-runs on the rest of the $25 were allowed by the coordinator but blocked by the tool permission check as a real-world spend, so not run.
+
+**Second offline tune, after the runs** (zero spend): the bust's hair is a mass with its own silhouette and a few big locks swept back from an off-centre parting, a fringe over the brow, a few deep separations and undercuts (hair modes in the tokens: `waves` the default swept mass, `curls` short cropped, `long_hair` to the shoulders, `short_hair`, `bun`); ears flatter and shorter; a thicker neck with a nape and a diagonal sternomastoid; the mantle one cloth with four folds of different depths fanning from the shoulder knot, the neck and other shoulder bare. New arm gestures `sling` (drawn arm behind and above the head, the torso wound 28 degrees, the other hand at the pouch on the far hip), `reach_up`, `embrace`. A ground cap in `declare_figure`: grounds and rocks under subjects are lowered to a fifth of the block and the result says so (`capGround`; run a94's own declaration re-declared through it on the report page with `bench/rerun-declare.ts`). A finish guard in the loop: a figure or bust commission's `finish` is refused before 40 percent of its turns, twice at most, while under 70 percent of its money, quoting the commission back and asking for a last look and a check (`FINISH_FLOOR`); pawn and cat commissions are unchanged. 213 tests, typecheck and lint pass; every saved study log still replays.
+
+**Next, if more spend is approved:** Opus David x3 (does it use `sling`, does the guard buy finished hands and face), bull x2 and rider x2 (cap and guard), bust x3 (do three busts differ now), one David and one rider on Fable 5.2; about $15 to $20. Then thicker animal legs, a sitter description before the bust's tokens, three runs per model before ranking.
+
+---
+
 ## Risks
 
 | Risk | Why it might happen | What the plan does about it |

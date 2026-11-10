@@ -247,6 +247,7 @@ const TOOL_LABELS: Record<ToolName, string> = {
   unfocus: 'Stepping back',
   sketch: 'Sketch',
   declare_form: 'Declaring the form',
+  declare_figure: 'Posing the figure',
   rough_out: 'Roughing out',
   detail: 'Flat chisel · detailing',
   saw: 'Saw',

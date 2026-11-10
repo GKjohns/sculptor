@@ -23,7 +23,7 @@ function fresh(withReference = false): KernelStudio {
 let ids = 0
 const call = (name: string, args: unknown): ToolCall => ({ id: `t${++ids}`, name, args })
 
-const shape = (kind: string, c: number[], s: number[]) => ({ kind, center_x: c[0], center_y: c[1], center_z: c[2], size_x: s[0], size_y: s[1], size_z: s[2], rot_x: 0, rot_y: 0, rot_z: 0 })
+const shape = (kind: string, c: number[], s: number[]) => ({ kind, center_x: c[0], center_y: c[1], center_z: c[2], size_x: s[0], size_y: s[1], size_z: s[2], rot_x: 0, rot_y: 0, rot_z: 0, style: [] })
 const FIGURE = { name: 'figure', shapes: [shape('box', [0, 5, 0], [40, 10, 40]), shape('ellipsoid', [0, 45, 0], [36, 80, 36])], blend_cm: 2, why: 'Setting out the mass.' }
 
 test('declare_form moves no stone, logs a form entry and says where the form sits', async () => {

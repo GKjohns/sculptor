@@ -27,6 +27,7 @@ const ICONS: Record<string, string> = {
   slice: 'i-lucide-layers-2',
   sketch: 'i-lucide-pencil',
   declare_form: 'i-lucide-shapes',
+  declare_figure: 'i-lucide-person-standing',
   rough_out: 'i-lucide-hammer',
   detail: 'i-lucide-brush',
   saw: 'i-lucide-slice',

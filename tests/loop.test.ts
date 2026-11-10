@@ -312,7 +312,7 @@ test('invalid arguments come back as an error result and nothing is cut', async 
   const second = parts(seen[2]!.at(-1))
   const [unknown, refused] = second.map(x => x.output as { type: string, value: string })
   assert.equal(unknown!.type, 'error-text')
-  assert.match(unknown!.value, /no tool called "glue".*Your tools: look, closeup, slice, focus, unfocus, sketch, declare_form, rough_out, detail, saw, chisel, drill, rasp, polish, note, finish/)
+  assert.match(unknown!.value, /no tool called "glue".*Your tools: look, closeup, slice, focus, unfocus, sketch, declare_form, declare_figure, rough_out, detail, saw, chisel, drill, rasp, polish, note, finish/)
   // The Studio's own refusal reaches the model the same way.
   assert.equal(refused!.type, 'error-text')
   assert.match(refused!.value, /rough_out to "missing".* was refused: no form named "missing"/)
@@ -546,7 +546,7 @@ test('tool schemas are flat: no unions, nothing optional, and the right tools pe
   const direct = jsonTools({ toolSet: 'direct', reference: 'none' })
   const formed = jsonTools({ toolSet: 'formed', reference: 'outlines' })
   assert.deepEqual(direct.map(t => t.name), ['look', 'saw', 'chisel', 'note', 'finish'])
-  assert.deepEqual(formed.map(t => t.name), ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'])
+  assert.deepEqual(formed.map(t => t.name), ['look', 'closeup', 'slice', 'focus', 'unfocus', 'sketch', 'declare_form', 'declare_figure', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish', 'note', 'finish'])
 
   const walk = (node: unknown, at: string) => {
     if (!node || typeof node !== 'object') return
@@ -567,7 +567,7 @@ test('tool schemas are flat: no unions, nothing optional, and the right tools pe
   assert.deepEqual(overlay(jsonTools({ toolSet: 'formed', reference: 'view' })), ['grid', 'form'])
 
   // Every carving tool asks for a why; points are {h, v}; only axis views can be carved from.
-  for (const name of ['sketch', 'declare_form', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish']) {
+  for (const name of ['sketch', 'declare_form', 'declare_figure', 'rough_out', 'detail', 'saw', 'chisel', 'drill', 'rasp', 'polish']) {
     const t = formed.find(x => x.name === name)!
     assert.ok((t.parameters.required as string[]).includes('why'), name)
   }
@@ -591,7 +591,7 @@ test('parseCall rejects a saw line with no such side, a reserved form name, and 
   const same = saw({ to: SAW.from })
   assert.ok(!same.ok && /same point/.test(same.error))
 
-  const shape = { kind: 'ellipsoid', center_x: 0, center_y: 50, center_z: 0, size_x: 30, size_y: 40, size_z: 30, rot_x: 0, rot_y: 0, rot_z: 0 }
+  const shape = { kind: 'ellipsoid', center_x: 0, center_y: 50, center_z: 0, size_x: 30, size_y: 40, size_z: 30, rot_x: 0, rot_y: 0, rot_z: 0, style: [] }
   const form = (name: string) => parseCall(defs, { id: 'x', name: 'declare_form', args: { name, shapes: [shape], blend_cm: 2, why: 'The body.' } })
   assert.ok(form('cat').ok)
   const reserved = form('reference')
@@ -607,10 +607,15 @@ test('the prompt is tight and follows the tool set and the reference', () => {
   const words = (s: string) => s.split(/\s+/).length
   const full = buildInstructions({ ...base, toolSet: 'formed', reference: 'outlines' })
   const direct = buildInstructions({ ...base, toolSet: 'direct', reference: 'none' })
-  // The head canon, `detail` and detail mode added about 450 words in the skill pass.
-  assert.ok(words(full) < 1950, `${words(full)} words`)
-  assert.ok(words(direct) < 1000, `${words(direct)} words`)
-  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 1800)
+  // The head canon, `detail` and detail mode added about 450 words in the skill pass, and
+  // composition and pose (declare_figure, the torso, style tokens, the wind-up of an action) about 530 in the second.
+  assert.ok(words(full) < 2550, `${words(full)} words`)
+  assert.ok(words(direct) < 1400, `${words(direct)} words`)
+  assert.ok(words(buildInstructions({ ...base, toolSet: 'formed', reference: 'none' })) < 2400)
+  // Pose by default, in both tool sets; the figure canon only where it exists.
+  for (const text of [full, direct]) assert.match(text, /COMPOSITION AND POSE[\s\S]*frontal, symmetric, static pose[\s\S]*is a failure/)
+  assert.match(full, /`declare_figure`/)
+  assert.ok(!direct.includes('declare_figure'), 'declare_figure in the stroke-only prompt')
   // The tool set's own tools are named, and only they are.
   for (const tool of ['closeup', 'slice', 'sketch', 'drill', 'polish', 'protect', 'roundel']) {
     assert.ok(full.includes(`\`${tool}\``) || full.includes(tool), tool)
@@ -641,4 +646,22 @@ test('toBase64 matches Node for every tail length', () => {
   }
   const big = Uint8Array.from({ length: 50_001 }, (_, i) => (i * 31) & 255)
   assert.equal(toBase64(big), Buffer.from(big).toString('base64'))
+})
+
+test('the finish guard: a figure or bust is not accepted as finished early, twice at most, and the refusal quotes the commission', async () => {
+  const head = { kind: 'head', center_x: 0, center_y: 77, center_z: 0, size_x: 27, size_y: 40, size_z: 34, rot_x: 0, rot_y: 15, rot_z: 0, style: ['male'] }
+  const bust = { name: 'declare_form', args: { name: 'bust', shapes: [head], blend_cm: 1.3, why: 'The head.' } }
+  const { done, events } = run((turn) => {
+    if (turn === 1) return { calls: [bust] }
+    return { calls: [look, { name: 'finish', args: FINISH }] }
+  })
+  const r = await done
+  assert.equal(r.ended, 'finish')
+  assert.equal(r.turns, 4)
+  const refusals = events.filter(e => e.type === 'tool_result' && e.call.name === 'finish' && !e.ok)
+  assert.equal(refusals.length, 2)
+  assert.match((refusals[0] as { summary: string }).summary, /Not finished yet: this is turn 2 of 60[\s\S]*"A cat, loafing\."/)
+  // A plain commission (no figure, no head) finishes at once, as the study's did.
+  const plain = run(turn => turn === 1 ? { calls: [chisel] } : { calls: [{ name: 'finish', args: FINISH }] })
+  assert.equal((await plain.done).turns, 2)
 })

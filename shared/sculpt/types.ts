@@ -47,6 +47,21 @@ export interface DetachStrike {
 export interface FormStrike extends Form {
   kind: 'form'
   name: string
+  // The canon's hollows on this form (anatomy.ts), carved by `detail`. The kernel ignores them:
+  // they are here so a resumed commission still knows them.
+  cuts?: CanonCut[]
+}
+
+// A hollow the carver cuts once a canon form stands: a row of bites along `points` (one bite for
+// a single point), each going `depth` cm into the stone along its entry in `dirs`. The points
+// lie on the form's surface. Sizes in cm.
+export interface CanonCut {
+  label: string
+  tool: 'drill' | 'roundel'
+  size: number
+  depth: number
+  points: Vec3[]
+  dirs: Vec3[]
 }
 
 // A charcoal line drawn on the stone from an axis view. It is theatre and an aid to the eye:
@@ -159,6 +174,9 @@ export interface Shape {
   center: Vec3
   size: Vec3
   rotation: Vec3
+  // How softly this shape joins the union so far, cm, in place of the form's blend: a canon's
+  // lid, lip or lock stays crisp on a softly blended body. Left out, the form's blend.
+  blend?: number
 }
 
 // A binary image as runs of filled cells: for each row from the top, [start, end) column
@@ -206,13 +224,36 @@ export interface CompiledSilhouette {
   left: OutlineField
 }
 
+// The space round a form of many shapes, in cells: each cell's list of the shapes that can
+// change the union there, built the first time a point in it is measured.
+export interface Bins {
+  x0: number
+  y0: number
+  z0: number
+  nx: number
+  ny: number
+  nz: number
+  lists: (Int32Array | undefined)[]
+}
+
 export interface CompiledForm {
   count: number
   kinds: Uint8Array
-  // 16 numbers per shape: centre, half extents, the world-to-local rotation by rows, one spare.
+  // 16 numbers per shape: centre, half extents, the world-to-local rotation by rows, and the
+  // blend it joins the union with.
   data: Float64Array
   blend: number
   inflate: number
+  // Three numbers per shape, a, c and r0, such that the shape's distance at a point r > r0 cm
+  // from its centre is at least a * r - c: lets formDistance pass over shapes that cannot
+  // change the answer (see there).
+  reach?: Float64Array
+  // Two numbers per shape bounding its distance from above (shapes.ts), and the cells that keep
+  // the shapes that matter near each point (shapes.ts, bins). Filled as points are measured.
+  ceil?: Float64Array
+  bins?: Bins
+  // The union measured at grid samples, by sample index (shapes.ts, formDistanceAt).
+  memo?: { table?: { keys: Int32Array, values: Float64Array, nx: number, ny: number, voxel: number, x0: number, y0: number, z0: number } }
   silhouette?: CompiledSilhouette
   // What it was compiled from, so the hand can declare the same form again with a margin.
   source: Form
